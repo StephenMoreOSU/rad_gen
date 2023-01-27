@@ -1,0 +1,45 @@
+vlsi.core:
+  synthesis_tool_path: [/fs1/eecg/vaughn/morestep/hammer/src/hammer-vlsi/hammer-cadence-plugins/synthesis]
+  synthesis_tool: genus
+  
+  par_tool_path: [/fs1/eecg/vaughn/morestep/hammer/src/hammer-vlsi/hammer-cadence-plugins/par]
+  par_tool: innovus
+
+  #technology
+  technology: asap7
+
+
+# synthesis settings
+synthesis:
+  inputs.input_files: [/fs1/eecg/vaughn/morestep/hammer/input_designs/alu/alu.sv]
+  inputs.top_module: alu
+  clock_gating_mode: "empty"
+# place and route settings
+
+vlsi.inputs:
+  power_spec_mode: "auto"
+  power_spec_type: "cpf"
+  clocks : [
+    {
+      name: "clk",
+      period: "1.666 ns",
+    }
+  ]
+  placement_constraints:
+  - path: "alu"
+    type: toplevel
+    x: 0
+    y: 0
+    width: 115
+    height: 115
+    margins:
+      left: 0
+      right: 0
+      top: 0
+      bottom: 0
+  pin_mode: generated
+  pin.generate_mode: semi_auto
+  pin.assignments: [
+    {pins: "*", layers: ["M5", "M7"], side: "bottom"}
+  ]
+
