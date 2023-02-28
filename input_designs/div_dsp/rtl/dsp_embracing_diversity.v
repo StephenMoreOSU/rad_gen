@@ -4329,3 +4329,39 @@ assign sum = {c3_7[0],c3_6[0],c3_5[0],c3_4[0],c3_3[0],c3_2[0],c3_1[0],c3_0[0]};
 assign carry = {c3_7[1],c3_6[1],c3_5[1],c3_4[1],c3_3[1],c3_2[1],c3_1[1], 1'b0};
 
 endmodule
+
+module arrayBlock_signed_gated (input A, input B, input signed_ctrl, input enable, output mult);
+	assign mult = enable & ((A & B) ^ signed_ctrl);
+endmodule
+
+module arrayBlock_signed (input A, input B, input signed_ctrl, output mult);
+	assign mult = (A & B) ^ signed_ctrl;
+endmodule
+
+module arrayBlock_unsigned_gated (input A, input B, input enable, output mult);
+	assign mult = enable & A & B;
+endmodule
+
+module arrayBlock_unsigned (input A, input B, output mult);
+	assign mult = A & B;
+endmodule
+
+module HA_gated (input X, input Y, input kill, output S, output Cout);
+	assign Cout = kill & X & Y;
+	assign S = X ^ Y;
+endmodule
+
+module HA (input X, input Y, output S, output Cout);
+	assign Cout = X & Y;
+	assign S = X ^ Y;
+endmodule
+
+module FA_gated (input X, input Y, input Cin, input kill, output S, output Cout);
+	assign Cout = kill & ((X & Y) | (X & Cin) | (Y & Cin));
+	assign S = X ^ Y ^ Cin;
+endmodule
+
+module FA (input X, input Y, input Cin, output S, output Cout);
+	assign Cout = (X & Y) | (X & Cin) | (Y & Cin);
+	assign S = X ^ Y ^ Cin;
+endmodule
