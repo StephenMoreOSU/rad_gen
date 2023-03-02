@@ -1,3 +1,8 @@
+
+#import ..hammer.src.hammer_config 
+# The below function parses hammer IR
+# load_config_from_paths([config.yamls])
+
 import argparse
 import sys, os
 import subprocess as sp
@@ -315,7 +320,16 @@ def modify_config_file(args):
 
     design_config["synthesis"]["inputs.input_files"] = design_files
     design_config["synthesis"]["inputs.top_module"] = args["top_level"]
-    design_config["synthesis"]["inputs.hdl_search_paths"] = design_dirs
+    # If the user specified valid search paths we should not override them but just append to them
+    
+    # TODO ADD THE CONDITIONAL TO CHECK BEFORE CONCAT 
+    # if(all( os.path.isdir(dir) for dir in design_config["synthesis"]["inputs.hdl_search_paths"])):
+    design_config["synthesis"]["inputs.hdl_search_paths"] = design_config["synthesis"]["inputs.hdl_search_paths"] + design_dirs
+    # else:
+    #     design_config["synthesis"]["inputs.hdl_search_paths"] = design_dirs
+    
+    # remove duplicates
+    design_config["synthesis"]["inputs.hdl_search_paths"] = list(dict.fromkeys(design_config["synthesis"]["inputs.hdl_search_paths"])) 
     #init top level placement constraints
     design_config["vlsi.inputs"]["placement_constraints"][0]["path"] = args["top_level"]
 
@@ -328,6 +342,7 @@ def modify_config_file(args):
     with open(modified_config_path, 'r') as yml_file:
         design_config = yaml.safe_load(yml_file)
 
+    # sys.exit(1)
     return design_config, modified_config_path
 
 
@@ -353,6 +368,257 @@ def rad_gen_log(log_str,file):
         print(f"{log_str}",file=fd)
     fd.close()
 
+
+def rec_find_fpath(dir,fname):
+    ret_val = 1
+    for root, dirs, files in os.walk(dir):
+        if fname in files:
+            ret_val = os.path.join(root, fname)
+    return ret_val
+
+def c_style_comment_rm(text):
+    """ 
+        This function removes c/c++ style comments from a file
+        WARNING does not work for all cases (such as escaped characters and other edge cases of comments) but should work for most
+    """
+    def replacer(match):
+        s = match.group(0)
+        if s.startswith('/'):
+            return " " # note: a space and not an empty string
+        else:
+            return s
+    pattern = re.compile(
+        r'//.*?$|/\*.*?\*/|\'(?:\\.|[^\\\'])*\'|"(?:\\.|[^\\"])*"',
+        re.DOTALL | re.MULTILINE
+    )
+    return re.sub(pattern, replacer, text)
+
+def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_config_path):
+    """ 
+        Edits the parameters specified in the design config file 
+        Specifically only works for parameters associated with NoC currently TODO
+    """
+
+    # Its expected that the modified parameter files will be generated in the directory above project src files
+    param_sweep_hdr_dir = os.path.join(rtl_dir_path,"..","param_sweep_headers")
+
+    if not os.path.isdir(param_sweep_hdr_dir):
+        os.mkdir(param_sweep_hdr_dir)
+
+    base_param_hdr = c_style_comment_rm(open(base_param_hdr_path).read())
+    
+    mod_parameter_paths = []
+    # p_val is a list of parameter sweep values
+    for p_name,p_vals in rtl_params.items():
+        # TODO FIXME this hacky conditional seperating print params vs edit params
+        if(p_name != "num_message_classes" and len(p_vals) > 0 ):
+            # print(p_name)
+            for p_val in p_vals:
+                """ GENERATING AND WRITING RTL PARAMETER FILES """
+                mod_param_hdr = base_param_hdr
+                # each iteration creates a new parameter file
+                edit_params_re = re.compile(f"parameter\s+{p_name}.*$",re.MULTILINE)
+                new_param_str = f'parameter {p_name} = {p_val};'
+                mod_param_hdr = edit_params_re.sub(string=mod_param_hdr,repl=new_param_str)
+                mod_param_dir_str = os.path.join(param_sweep_hdr_dir,f'{p_name}_{p_val}_{os.path.splitext(os.path.split(base_param_hdr_path)[1])[0]}')
+                if not os.path.isdir(mod_param_dir_str):
+                    os.mkdir(mod_param_dir_str)
+                mod_param_out_fpath = os.path.join(mod_param_dir_str,"parameters.v")
+                # test_re = re.compile(f"^.*{p_name}.*$",re.MULTILINE)
+                # print(test_re.search(mod_param_hdr).group(0))
+                with open(mod_param_out_fpath,"w") as param_out_fd:
+                    param_out_fd.write(mod_param_hdr)
+                mod_parameter_paths.append(mod_param_out_fpath)
+                """ GENERATING AND WRITING RAD GEN CONFIG FILES """
+                with open(base_config_path,"r") as config_fd:
+                    rad_gen_config = yaml.safe_load(config_fd)
+                rad_gen_config["synthesis"]["inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_str))
+                mod_config_path = os.path.splitext(base_config_path)[0]+f'_{p_name}_{p_val}.yaml'
+                with open(mod_config_path,"w") as config_fd:
+                    yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
+
+    return mod_parameter_paths
+
+            # print(mod_param_hdr)
+            
+
+        # only need an edit params re for the NoC params being evaluated
+
+def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param_inc_path=False):
+    wspace_re = re.compile(r"\s+")
+    # Now that we have a mem_params.json and sram_config.yaml file for each design, we can run the flow for each design in parallel (up to user defined amount)
+    find_params_re = re.compile(f"parameter\s+\w+(\s|=)+.*;")
+    find_defines_re = re.compile(f"`define\s+\w+\s+.*")
+    grab_bw_soft_bkt = re.compile(f"\(.*\)")
+    
+    find_localparam_re = re.compile(f"localparam\s+\w+(\s|=)+.*?;",re.MULTILINE|re.DOTALL)
+
+    # Find all parameters which will be used in the design (ie find top level module rtl, parse include files top to bottom and get those values )
+    """ FIND TOP LEVEL MODULE IN RTL FILES """
+    grep_out = sp.run(["grep","-R",top_level_mod,rtl_dir_path],stdout=sp.PIPE)
+    grep_stdout = grep_out.stdout.decode('utf-8')
+    top_level_fpath = grep_stdout.split(":")[0]
+    """ FIND PARAMS IN TOP LEVEL SEQUENTIALLY """
+    rtl_preproc = {
+        "vals": []
+    }
+    top_level_rtl = open(top_level_fpath).read()
+    clean_top_lvl_rtl = c_style_comment_rm(top_level_rtl)
+    # Stores the total idx of lines read in
+    global_line_idx = 0
+    param_define_deps = []
+    for line in clean_top_lvl_rtl.split("\n"):
+        # Look for include statements
+        if "include" in line:
+            # Get the include file path
+            include_fname = line.split(" ")[1].replace('"','')
+            # Look for the include path in the rtl directory, if its not found default back to 'sweep_param_inc_path'
+            # TODO FIX THIS HACKERY
+            if "parameters" not in line:
+                include_fpath = rec_find_fpath(rtl_dir_path,include_fname)
+            else:
+                include_fpath = sweep_param_inc_path
+
+            # if we couldnt find the include in the rtl_dir_path
+            # and include_fname in sweep_param_inc_path
+
+            # if(include_fpath == 1 and os.path.exists(sweep_param_inc_path) and sweep_param_inc_path != False):
+            #     include_fpath = sweep_param_inc_path
+            # elif(include_fpath == 1):
+            #     print("ERROR occured the script could not find an include file in the top level rtl and a backup was not specified")
+            #     sys.exit(1)
+
+            # Look in the include file path and grab all parameters and defines
+            include_rtl = open(include_fpath).read()
+            clean_include_rtl = c_style_comment_rm(include_rtl)
+            for inc_line in clean_include_rtl.split("\n"):
+                
+                # Look for parameters
+                if find_params_re.search(inc_line):
+                    # TODO this parameter re will not work if no whitespace between params
+                    clean_line = " ".join(wspace_re.split(inc_line)[1:]).replace(";","")
+                    # Get the parameter name and value
+                    param_name = clean_line.split("=")[0].replace(" ","")
+                    param_val = clean_line.split("=")[1].replace(" ","").replace("`","")
+
+                    # create dep list for params
+                    for i in range(len(rtl_preproc["vals"])):
+                        if rtl_preproc["vals"][i]["name"] in param_val:
+                            param_define_deps.append(rtl_preproc["vals"][i]["name"])
+
+                    # Add the parameter name and value to the design_params dict
+                    #rtl_preproc["params"][param_name] = str(param_val)
+                    rtl_preproc["vals"].append({"name" : param_name, "value" : str(param_val),"type": "param","line_idx": global_line_idx})
+
+                elif find_defines_re.search(inc_line):
+                    # TODO this define re will not work if no whitespace between params
+                    clean_line = " ".join(wspace_re.split(inc_line)[1:])
+                    # Get the define name and value
+                    define_name = wspace_re.split(clean_line)[0]
+                    if grab_bw_soft_bkt.search(clean_line):
+                        define_val = grab_bw_soft_bkt.search(clean_line).group(0)
+                    else:
+                        define_val = wspace_re.split(clean_line)[1].replace("`","")
+                    # create dep list for defines
+                    for i in range(len(rtl_preproc["vals"])):
+                        if rtl_preproc["vals"][i]["name"] in define_val:
+                            param_define_deps.append(rtl_preproc["vals"][i]["name"])
+                    #rtl_preproc["defines"][define_name] = str(define_val)
+                    rtl_preproc["vals"].append({"name": define_name, "value" : str(define_val),"type": "define" ,"line_idx": global_line_idx})
+                # increment line index keeping track of global (both in top level rtl and in includes of the lines read in)
+                global_line_idx += 1
+
+    param_define_deps = list(dict.fromkeys(param_define_deps))    
+    # Only using parsing technique of looking for semi colon in localparams as these are expected to have larger operations
+    # Not parsing lines as we need multiline capture w regex
+    tmp_top_lvl_rtl = clean_top_lvl_rtl
+    local_param_matches = []
+    # Searching through the text in this way preserves initialization order
+    while find_localparam_re.search(tmp_top_lvl_rtl):
+        local_param = find_localparam_re.search(tmp_top_lvl_rtl).group(0)
+        local_param_matches.append(local_param)
+        tmp_top_lvl_rtl = tmp_top_lvl_rtl.replace(local_param,"")
+    """ EVALUATING BOOLEANS FOR LOCAL PARAMS W PARAMS AND DEFINES """
+    # Write out localparams which need to be evaluated to a temp dir
+    tmp_dir = "/tmp/rad_gen_tmp"
+    if not os.path.exists(tmp_dir):
+        os.mkdir(tmp_dir)
+    # Sort list of preproc vals by line index
+    # val_list = copy.deepcopy(rtl_preproc["vals"])
+    rtl_preproc["vals"] = sorted(rtl_preproc["vals"], key=lambda k: k["line_idx"])
+    # We are going to make .h and .c files which we can use the gcc preproc engine to evaluate the defines and local parameters
+    # Loop through all parameters and find its dependancies on other parameters
+    local_param_deps = []
+    for local_param_str in local_param_matches:
+        """ CREATING LIST OF REQUIRED DEPENDANCIES FOR ALL PARAMS """
+        first_eq_re = re.compile("\s=\s")
+        local_param_name = re.sub("localparam\s+",repl="",string=first_eq_re.split(local_param_str)[0]).replace(" ","").replace("\n","")
+        local_param_val = first_eq_re.split(local_param_str)[1]
+
+        tmp_lparam_list = []
+        for i in range(len(rtl_preproc["vals"])):
+            if rtl_preproc["vals"][i]["name"] in local_param_val:
+                local_param_deps.append(rtl_preproc["vals"][i]["name"])
+                local_param_dict = {"name": local_param_name, "value": local_param_val, "type": "localparam"}
+                tmp_lparam_list.append(local_param_dict)
+        rtl_preproc["vals"] = rtl_preproc["vals"] + tmp_lparam_list
+    
+    local_param_deps = list(dict.fromkeys(local_param_deps))  
+    # TODO this assumes the following rtl structure
+    # 1 -> includes init parameters and defines at the top of a module
+    # 2 -> there are only local params in the top level module
+    # Using above assumptions the below dep list should maintain order without having to build dep tree
+    all_deps = param_define_deps + local_param_deps
+    # Now we have list of all dependancies we need to initialize
+
+    # Now we have a list of dictionaries containing the localparam string and thier dependancies
+    """ CONVERT SV/V LOCALPARAMS TO C DEFINES """
+    rtl_preproc_fname = os.path.join(tmp_dir,"rtl_preproc_vals")
+    header_fd = open(rtl_preproc_fname + ".h","w")
+    main_fd = open(rtl_preproc_fname + ".c","w")
+    # init .c file containing main which will just print out the values of our params/defs/localparams
+    main_lines = [
+        f'#include "{rtl_preproc_fname}.h"',
+        f'#include <stdio.h>',
+        '',
+        '',
+        'int main(int argc, char argv [] ) {',
+        # CODE TO PRINT PARAMS GOES HERE
+    ]
+
+    # Initialize deps in order of local param dep list
+    for dep in all_deps:
+        for val in rtl_preproc["vals"]:
+            # find dependancy value in rtl_preproc dict
+            if(dep == val["name"]):
+                # convert param into something c can understand
+                clean_c_def_val = val["value"].replace("\n","").replace(";","").replace("`","")
+                c_def_str = "#define " + dep + " (" + clean_c_def_val + ")"
+                print(c_def_str,file=header_fd)
+                break
+    for p_name,p_val in rtl_params.items():
+        for val in rtl_preproc["vals"]:
+            if(p_name == val["name"] and p_name not in all_deps):
+                clean_c_def_val = val["value"].replace("\n","").replace(";","").replace("`","")
+                c_def_str = "#define " + p_name + " (" + clean_c_def_val + ")"
+                print(c_def_str,file=header_fd)
+                break
+    header_fd.close()
+    # Look through sweep param list in config file and match them to the ones found in design
+    for p_name, p_val in rtl_params.items():
+        for val in rtl_preproc["vals"]:
+            # If they match, write the c code which will print the parameter and its value
+            if(val["name"] == p_name):
+                main_lines.append("\t" + f'printf("{p_name}: %d \n",{p_name});'.encode('unicode_escape').decode('utf-8'))
+                break
+    for line in main_lines:
+        print(line,file=main_fd)
+    print("}",file=main_fd)
+    main_fd.close()
+    # This runs the c file which prints out evaluated parameter values set in the verilog
+    gcc_out = sp.run(["/usr/bin/gcc",f"{rtl_preproc_fname}.h",f"{rtl_preproc_fname}.c"],stderr=sp.PIPE,stdout=sp.PIPE,stdin=sp.PIPE)#,"-o",f'{os.path.join(tmp_dir,"print_params")}'])
+    sp.run(["a.out"])
+    sp.run(["rm","a.out"])
 
 ########################################## RAD GEN UTILITIES ##########################################
 ##########################################   RAD GEN FLOW   ############################################
@@ -454,6 +720,12 @@ def main():
     
     args = parser.parse_args()
 
+
+    # Use hammer parser to load configs from paths
+    # hammer_config = load_config_from_paths([args.config_path])
+    # print(hammer_config)
+    # sys.exit(1)
+
     if(not args.openram_config_dir == ''):
         rad_gen_log(f"Using OpenRam to generate SRAMs in {args.openram_config_dir}",rad_gen_log_fd)
         sys.exit(0)
@@ -487,10 +759,25 @@ def main():
         rad_gen_log(f"Running design sweep from config file {args.design_sweep_config_file}",rad_gen_log_fd)
         design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
         for design in design_sweep_config["designs"]:
+            """ General flow for all designs in sweep config """
             # Load in the base configuration file for the design
             sanitized_design = sanitize_config(design)
             base_config_dir = os.path.split(sanitized_design["base_config_path"])[0]
             base_config = yaml.safe_load(open(sanitized_design["base_config_path"]))
+            
+            # If there are vlsi parameters to sweep over
+            if "vlsi_params" in design_sweep_config:
+                mod_base_config = copy.deepcopy(base_config)
+                """ MODIFYING HAMMER CONFIG YAML FILES """
+                for param_sweep_key in design_sweep_config["vlsi_params"]:
+                    if "clk" in param_sweep_key:
+                        for period in design_sweep_config["vlsi_params"][param_sweep_key]:
+                            mod_base_config["vlsi.inputs"]["clocks"][0]["period"] = f'{str(period)} ns'
+                            modified_config_path = os.path.splitext(sanitized_design["base_config_path"])[0]+f'_period_{str(period)}.yaml'
+                            with open(modified_config_path, 'w') as fd:
+                                yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
+                            # print(modified_config_path)
+ 
             # TODO This wont work for multiple SRAMs in a single design, simply to evaluate individual SRAMs
             if sanitized_design["type"] == "sram":
                 # load in the mem_params.json file            
@@ -523,17 +810,17 @@ def main():
                         
                         """ MODIFIYING SRAM RTL"""
                         # Get just the filename of the sram sv file and append the new dims to it
-                        mod_rtl_fname = os.path.splitext(sanitized_design["base_sram_rtl_path"].split("/")[-1])[0]+f'_{mod_mem_params[0]["name"]}.sv'
+                        mod_rtl_fname = os.path.splitext(sanitized_design["base_rtl_path"].split("/")[-1])[0]+f'_{mod_mem_params[0]["name"]}.sv'
                         # Modify the parameters for SRAM_ADDR_W and SRAM_DATA_W and create a copy of the base sram 
                         # TODO find a better way to do this rather than just creating a ton of files, the only thing I'm changing are 2 parameters in rtl
-                        with open(sanitized_design["base_sram_rtl_path"], 'r') as fd:
-                            base_sram_rtl = fd.read()
-                        mod_sram_rtl = base_sram_rtl
+                        with open(sanitized_design["base_rtl_path"], 'r') as fd:
+                            base_rtl = fd.read()
+                        mod_sram_rtl = base_rtl
                         # Modify the parameters in rtl and create new dir for the sram
                         # Regex looks for parameters and will replace whole line
                         edit_param_re = re.compile(f"parameter\s+SRAM_ADDR_W.*",re.MULTILINE)
                         # Replace the whole line with the new parameter (log2 of depth fior SRAM_ADDR_W)
-                        mod_sram_rtl = edit_param_re.sub(f"parameter SRAM_ADDR_W = {int(math.log2(depth))};",base_sram_rtl)
+                        mod_sram_rtl = edit_param_re.sub(f"parameter SRAM_ADDR_W = {int(math.log2(depth))};",base_rtl)
                         
                         edit_param_re = re.compile(f"parameter\s+SRAM_DATA_W.*",re.MULTILINE)
                         # Replace the whole line with the new parameter (log2 of depth fior SRAM_ADDR_W)
@@ -548,7 +835,7 @@ def main():
                         # The correct RTL for the sram inst is in the edit_sram_inst string so we now will replace the previous sram inst with the new one
                         mod_sram_rtl = edit_sram_inst_re.sub(edit_sram_inst,mod_sram_rtl)
                         
-                        base_rtl_dir = os.path.split(sanitized_design["base_sram_rtl_path"])[0]
+                        base_rtl_dir = os.path.split(sanitized_design["base_rtl_path"])[0]
                         # Create a new dir for the modified sram
                         mod_rtl_dir = os.path.join(base_rtl_dir,f'{mod_mem_params[0]["name"]}')
                         
@@ -601,11 +888,18 @@ def main():
                     #Run the flow for each config
                     #rad_gen_flow(sw_flow_settings,sw_run_stages,[config])     
                     break       
-        
-
-        # Now that we have a mem_params.json and sram_config.yaml file for each design, we can run the flow for each design in parallel (up to user defined amount)
-        
-        sys.exit(1)
+            # TODO make this more general but for now this is ok
+            # the below case should deal with any asic_param sweep we want to perform
+            elif sanitized_design["type"] == 'rtl_params':
+                mod_param_hdr_paths = edit_rtl_proj_params(sanitized_design["params"], sanitized_design["rtl_dir_path"], sanitized_design["base_param_hdr_path"],sanitized_design["base_config_path"])
+                # read_in_rtl_proj_params(sanitized_design["params"],sanitized_design["top_level_module"],sanitized_design["rtl_dir_path"])
+                for hdr_path in mod_param_hdr_paths:
+                    print("PARAMS FOR PATH %s" % (hdr_path))
+                    read_in_rtl_proj_params(sanitized_design["params"],sanitized_design["top_level_module"],sanitized_design["rtl_dir_path"],hdr_path)
+                """ We shouldn't need to edit the values of params/defines which are operations or values set to other params/defines """
+                """ EDIT PARAMS/DEFINES IN THE SWEEP FILE """
+                # TODO this assumes parameter sweep vars arent kept over multiple files
+                # copy original parameter file containing sweep vars
     else:
         # If the args for top level and rtl path are not set, we will use values from the config file
         if rad_gen_flow_settings["top_level"] == '' or rad_gen_flow_settings["hdl_path"] == '':
