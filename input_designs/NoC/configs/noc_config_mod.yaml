@@ -1,0 +1,170 @@
+vlsi.core:
+  synthesis_tool_path:
+  - /fs1/eecg/vaughn/morestep/hammer/src/hammer-vlsi/hammer-cadence-plugins/synthesis
+  synthesis_tool: genus
+  par_tool_path:
+  - /fs1/eecg/vaughn/morestep/hammer/src/hammer-vlsi/hammer-cadence-plugins/par
+  par_tool: innovus
+  technology: asap7
+synthesis:
+  inputs.input_files:
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_top.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_sw_alloc_sep_of.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/whr_ip_ctrl_mac.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_vc_alloc_sep_of.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/whr_top.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_top.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_ovc_ctrl.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/parameters.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_flow_ctrl_input.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_op_ctrl_mac.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_next_hop_addr.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_sw_alloc_sep_if.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_ip_ctrl_mac.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_route_filter.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/router_wrap.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/router_wrap_bk.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/whr_alloc_mac.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_flow_ctrl_output.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_vc_alloc_sep_if.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_flags_mux.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_ivc_ctrl.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/whr_constants.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_sw_alloc_wf.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/whr_op_ctrl_mac.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_vc_alloc_wf.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_fc_state.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_op_ctrl_mac.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_crossbar_mac.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_channel_input.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_flit_buffer.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_alloc_mac.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_flit_type_check.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_ip_ctrl_mac.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_routing_logic.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_alloc_mac.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/vcr_constants.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_channel_output.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/rtr_constants.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_rr_arbiter.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_shift_reg.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_wf_alloc_sdpa.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_regfile.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_fifo_tracker.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_fbmult.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_interleave.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_matrix_arbiter.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_err_rpt.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_prefix_arbiter_base.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_damq_ctrl.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_prio_sel.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_reduce_bits.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_lfsr.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_one_hot_filter.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_rr_arbiter_base.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_damq_tracker.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_encode.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_constants.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_arbiter.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_fbgen.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_select_mofn.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_crossbar.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_incr.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_wf_alloc_loop.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_wf_alloc_mux.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_align.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_multi_hot_det.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_dff.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_decode.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_samq_ctrl.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_scatter.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_wf_alloc_dpa.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_add_nto1.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_one_hot_therm_conv.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_wf_alloc_rot.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_gather.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_lod.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_diag_op.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_decr.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_clkgate.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_wf_alloc_rep.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_samq_tracker.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_prefix_arbiter.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_prio_enc.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_mat_mult.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_fifo.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_gate_bits.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_rotate.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_wf_alloc.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_select_1ofn.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_prefix_net.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_fifo_ctrl.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_reverse.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_functions.v
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib/c_binary_op.v
+  inputs.top_module: router_wrap
+  inputs.hdl_search_paths:
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/NoC/src/clib
+  clock_gating_mode: empty
+par.innovus.design_flow_effort: standard
+vlsi.inputs:
+  power_spec_mode: auto
+  power_spec_type: cpf
+  clocks:
+  - name: clk
+    period: 0.0 ns
+  placement_constraints:
+  - path: router_wrap
+    type: toplevel
+    x: 100
+    y: 100
+    width: 3500
+    height: 3500
+    margins:
+      left: 0
+      right: 0
+      top: 0
+      bottom: 0
+  - path: router_wrap/genblk2.vcr
+    type: hierarchical
+    x: 100.0
+    y: 100.0
+    width: 340.0
+    height: 340.0
+    master: vcr_top_buffer_size16_num_message_classes2_num_resource_classes1_num_vcs_per_class1_num_routers_per_dim8_num_dimensions2_num_nodes_per_router1_connectivity0_packet_format2_flow_ctrl_type0_flow_ctrl_bypass0_max_payload_length4_min_payload_length0_enable_link_pm1_flit_data_width64_error_capture_mode1_restrict_turns1_routing_type0_dim_order0_fb_regfile_type0_fb_mgmt_type0_fb_fast_peek1_disable_static_reservations0_explicit_pipeline_register1_gate_buffer_write0_elig_mask1_vc_alloc_type0_vc_alloc_arbiter_type0_sw_alloc_type0_sw_alloc_arbiter_type0_sw_alloc_spec_type3_crossbar_type1_reset_type0
+  - path: router_wrap/gen_port_regs[1].channel_in_ff
+    type: hierarchical
+    x: 43.0
+    y: 3300.0
+    width: 25
+    height: 33
+    master: c_dff_width68_reset_type0_3266
+  - path: router_wrap/gen_port_regs[1].channel_out_ff
+    type: hierarchical
+    x: 73.0
+    y: 3300.0
+    width: 25
+    height: 33
+    master: c_dff_width68_reset_type0_3265
+  - path: router_wrap/gen_port_regs[2].channel_in_ff
+    type: hierarchical
+    x: 3307.0
+    y: 41.0
+    width: 29
+    height: 27
+    master: c_dff_width68_reset_type0_3264
+  - path: router_wrap/gen_port_regs[2].channel_out_ff
+    type: hierarchical
+    x: 3307.0
+    y: 73.0
+    width: 29
+    height: 27
+    master: c_dff_width68_reset_type0_3263
+  pin_mode: generated
+  pin.generate_mode: semi_auto
+  pin.assignments:
+  - pins: '*'
+    layers:
+    - M5
+    - M7

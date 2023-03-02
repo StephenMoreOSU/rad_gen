@@ -1,0 +1,40 @@
+vlsi.core:
+  synthesis_tool_path:
+  - /fs1/eecg/vaughn/morestep/hammer/src/hammer-vlsi/hammer-cadence-plugins/synthesis
+  synthesis_tool: genus
+  par_tool_path:
+  - /fs1/eecg/vaughn/morestep/hammer/src/hammer-vlsi/hammer-cadence-plugins/par
+  par_tool: innovus
+  technology: asap7
+  max_threads: 2
+synthesis:
+  inputs.input_files:
+  - /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src/router_wrap_bk.v
+  inputs.top_module: router_wrap_bk
+  inputs.hdl_search_paths:
+  - /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src/clib
+  - /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/param_sweep_headers/buffer_size_65_parameters
+  clock_gating_mode: empty
+par.innovus:
+  floorplan_mode: manual
+  floorplan_script_contents: create_floorplan -core_margins_by die -flip f -die_size_by_io_height
+    max -site asap7sc7p5t -stdcell_density_size {1.0 0.7 10 10 10 10}
+  design_flow_effort: standard
+vlsi.inputs:
+  power_spec_mode: auto
+  power_spec_type: cpf
+  clocks:
+  - name: clk
+    period: 0.571 ns
+  placement_constraints:
+  - path: router_wrap_bk
+    type: toplevel
+    x: 100
+    y: 100
+    width: 3500
+    height: 3500
+    margins:
+      left: 0
+      right: 0
+      top: 0
+      bottom: 0
