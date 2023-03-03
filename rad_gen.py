@@ -393,6 +393,38 @@ def c_style_comment_rm(text):
     )
     return re.sub(pattern, replacer, text)
 
+
+def replace_rtl_param(top_p_name_val, p_names, p_vals, base_config_path, base_param_hdr, base_param_hdr_path, param_sweep_hdr_dir):
+    # p_names and p_vals are lists of parameters which need to be edited_concurrently
+
+    mod_param_dir_str = ""
+    mod_param_hdr = base_param_hdr
+    for p_name, p_val in zip(p_names,p_vals):
+        edit_params_re = re.compile(f"parameter\s+{p_name}.*$",re.MULTILINE)
+        new_param_str = f'parameter {p_name} = {p_val};'
+        mod_param_hdr = edit_params_re.sub(string=mod_param_hdr,repl=new_param_str)
+        if(mod_param_dir_str == ""):
+            mod_param_dir_str = f'{p_name}_{p_val}'
+        else:
+            mod_param_dir_str = f'{mod_param_dir_str}_{p_name}_{p_val}'
+    mod_param_dir_name = f'{mod_param_dir_str}_{top_p_name_val[0]}_{top_p_name_val[1]}'
+    # TODO fix hardcoded fextension
+    mod_param_dir_path = os.path.join(param_sweep_hdr_dir,mod_param_dir_name)
+    if not os.path.isdir(mod_param_dir_path):
+        os.mkdir(mod_param_dir_path)
+    mod_param_out_fpath = os.path.join(mod_param_dir_path,"parameters.v")
+    with open(mod_param_out_fpath,"w") as param_out_fd:
+        param_out_fd.write(mod_param_hdr)
+    """ GENERATING AND WRITING RAD GEN CONFIG FILES """
+    with open(base_config_path,"r") as config_fd:
+        rad_gen_config = yaml.safe_load(config_fd)
+    rad_gen_config["synthesis"]["inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_path))
+    mod_config_path = os.path.splitext(base_config_path)[0]+f'_{mod_param_dir_name}.yaml'
+    with open(mod_config_path,"w") as config_fd:
+        yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
+
+    return mod_param_out_fpath
+
 def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_config_path):
     """ 
         Edits the parameters specified in the design config file 
@@ -411,31 +443,53 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
     # p_val is a list of parameter sweep values
     for p_name,p_vals in rtl_params.items():
         # TODO FIXME this hacky conditional seperating print params vs edit params
-        if(p_name != "num_message_classes" and len(p_vals) > 0 ):
+        if(len(p_vals) > 0 or isinstance(p_vals,dict) ):
             # print(p_name)
-            for p_val in p_vals:
-                """ GENERATING AND WRITING RTL PARAMETER FILES """
-                mod_param_hdr = base_param_hdr
-                # each iteration creates a new parameter file
-                edit_params_re = re.compile(f"parameter\s+{p_name}.*$",re.MULTILINE)
-                new_param_str = f'parameter {p_name} = {p_val};'
-                mod_param_hdr = edit_params_re.sub(string=mod_param_hdr,repl=new_param_str)
-                mod_param_dir_str = os.path.join(param_sweep_hdr_dir,f'{p_name}_{p_val}_{os.path.splitext(os.path.split(base_param_hdr_path)[1])[0]}')
-                if not os.path.isdir(mod_param_dir_str):
-                    os.mkdir(mod_param_dir_str)
-                mod_param_out_fpath = os.path.join(mod_param_dir_str,"parameters.v")
-                # test_re = re.compile(f"^.*{p_name}.*$",re.MULTILINE)
-                # print(test_re.search(mod_param_hdr).group(0))
-                with open(mod_param_out_fpath,"w") as param_out_fd:
-                    param_out_fd.write(mod_param_hdr)
-                mod_parameter_paths.append(mod_param_out_fpath)
-                """ GENERATING AND WRITING RAD GEN CONFIG FILES """
-                with open(base_config_path,"r") as config_fd:
-                    rad_gen_config = yaml.safe_load(config_fd)
-                rad_gen_config["synthesis"]["inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_str))
-                mod_config_path = os.path.splitext(base_config_path)[0]+f'_{p_name}_{p_val}.yaml'
-                with open(mod_config_path,"w") as config_fd:
-                    yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
+            if(isinstance(p_vals,dict)):
+                for i in range(len(p_vals["vals"])):
+                    """ WRITE PARAMETER/CONFIG FILES FOR EACH ITERATION """
+                    # Crate a sweep iter dict which will contain the param values which need to be set for a given iteration
+                    sweep_iter = {}
+                    # print(p_vals)
+                    for k, v in p_vals.items():
+                        sweep_iter[k] = v[i]
+                    p_vals_i = []
+                    p_names_i = []
+                    for p_name_i, p_val_i in sweep_iter.items():
+                        # The vals list will be the value which we want our p_name to be set to and will not be used for editing
+                        # They will be used to make sure that the correct parameter value is generated
+                        if(p_name_i == "vals"):
+                            top_p_val_name = [p_name,p_val_i]
+                            continue
+                        else:
+                            edit_param = p_name_i
+                        p_names_i.append(edit_param)
+                        p_vals_i.append(p_val_i)
+                    mod_param_fpath = replace_rtl_param(top_p_val_name, p_names_i, p_vals_i, base_config_path, base_param_hdr, base_param_hdr_path, param_sweep_hdr_dir)
+                    mod_parameter_paths.append(mod_param_fpath)
+
+            else:
+                for p_val in p_vals:
+                    """ GENERATING AND WRITING RTL PARAMETER FILES """
+                    mod_param_hdr = base_param_hdr
+                    # each iteration creates a new parameter file
+                    edit_params_re = re.compile(f"parameter\s+{p_name}.*$",re.MULTILINE)
+                    new_param_str = f'parameter {p_name} = {p_val};'
+                    mod_param_hdr = edit_params_re.sub(string=mod_param_hdr,repl=new_param_str)
+                    mod_param_dir_str = os.path.join(param_sweep_hdr_dir,f'{p_name}_{p_val}_{os.path.splitext(os.path.split(base_param_hdr_path)[1])[0]}')
+                    if not os.path.isdir(mod_param_dir_str):
+                        os.mkdir(mod_param_dir_str)
+                    mod_param_out_fpath = os.path.join(mod_param_dir_str,"parameters.v")
+                    with open(mod_param_out_fpath,"w") as param_out_fd:
+                        param_out_fd.write(mod_param_hdr)
+                    mod_parameter_paths.append(mod_param_out_fpath)
+                    """ GENERATING AND WRITING RAD GEN CONFIG FILES """
+                    with open(base_config_path,"r") as config_fd:
+                        rad_gen_config = yaml.safe_load(config_fd)
+                    rad_gen_config["synthesis"]["inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_str))
+                    mod_config_path = os.path.splitext(base_config_path)[0]+f'_{p_name}_{p_val}.yaml'
+                    with open(mod_config_path,"w") as config_fd:
+                        yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
 
     return mod_parameter_paths
 
