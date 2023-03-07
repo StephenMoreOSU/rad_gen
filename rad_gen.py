@@ -17,6 +17,9 @@ import time
 import math
 
 import copy
+
+import csv
+import pandas as pd
 #from dataclasses import dataclass
 ########################################## DATA STRUCTURES  ###########################################
 # @dataclass
@@ -674,6 +677,177 @@ def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param
     sp.run(["a.out"])
     sp.run(["rm","a.out"])
 
+
+
+# This class will have info applicable to all tools
+# @dataclass
+# class AsicToolInfo:
+#     pwr_lookup : dict = {
+#             "W": float(1),
+#             "mW": float(1e-3),
+#             "uW": float(1e-6)
+#         }
+
+
+def parse_report_c(top_level_mod,report_path,rep_type,flow_stage, tool_type):
+    
+    pwr_lookup ={
+        "W": float(1),
+        "mW": float(1e-3),
+        "uW": float(1e-6),
+        "nW": float(1e-9),
+        "pW": float(1e-12)
+    }
+    
+    wspace_re = re.compile("\s+", re.MULTILINE)
+    decimal_re = re.compile("\d+\.{0,1}\d*",re.MULTILINE)
+    signed_dec_re = re.compile("\-{0,1}\d+\.{0,1}\d*",re.MULTILINE)
+    if flow_stage == "syn":
+        cadence_hdr_catagories = ["Instance","Module","Cell Count","Cell Area","Net Area","Total Area"]
+        cadence_area_hdr_re = re.compile("^\s+Instance.*Module.*Cell\sCount.*Cell\sArea.*Total\sArea.*", re.MULTILINE|re.DOTALL)
+        cadence_arrival_time_re = re.compile("Data\sPath:-.*$",re.MULTILINE)
+    elif flow_stage == "par":
+        cadence_hdr_catagories = ["Hinst Name","Module Name","Inst Count","Total Area"]
+        cadence_area_hdr_re = re.compile("^\s+Hinst\s+Name\s+Module\sName\s+Inst\sCount\s+Total\sArea.*", re.MULTILINE|re.DOTALL)
+        cadence_arrival_time_re = re.compile("Arrival:=.*$",re.MULTILINE)
+        
+    cadence_timing_grab_re = re.compile("Path(.*?#-+){3}",re.MULTILINE|re.DOTALL)
+    cadence_timing_setup_re = re.compile("Setup:-.*$",re.MULTILINE)
+    
+    unit_re_str = "(" + "|".join([f"({unit})" for unit in pwr_lookup.keys()]) + ")"                  
+    
+    # synopsys_unit_re = re.compile(unit_re_str)
+    grab_val_re_str = f"\d+\.{{0,1}}\d*.*?{unit_re_str}"
+    synopsys_grab_pwr_val_re = re.compile(grab_val_re_str)
+    # print(grab_val_re_str)
+    
+    # synopsys_unit_re_list = [ re.compile(f'{pwr_lookup[unit]}',re.MULTILINE) for unit in pwr_lookup.keys() ]
+    
+
+    # report_dict = {
+    #     "Instance": [],
+    #     "Module": [],
+    #     "Cell Count": [],
+    #     "Cell Area": [],
+    #     "Net Area": [],
+    #     "Total Area": []
+    # }
+    report_list = []
+    # parse synopsys report
+    if(rep_type == "area"):
+        area_rpt_text = open(report_path,"r").read()
+        # removes stuff above the header so we only have info we need
+        area_rpt_text = cadence_area_hdr_re.search(area_rpt_text).group(0)
+        for line in area_rpt_text.split("\n"):
+            report_dict = {}
+            # below conditional finds the header line
+            sep_line = wspace_re.split(line)
+            sep_line = list(filter(lambda x: x != "", sep_line))
+            if(len(sep_line) >= len(cadence_hdr_catagories)-1 and len(sep_line) <= len(cadence_hdr_catagories)):
+                sep_idx = 0
+                for i in range(len(cadence_hdr_catagories)):
+                    if("Module" in cadence_hdr_catagories[i] and top_level_mod in line):
+                        report_dict[cadence_hdr_catagories[i]] = "NA"
+                        sep_idx = sep_idx
+                    else:
+                        report_dict[cadence_hdr_catagories[i]] = sep_line[sep_idx]
+                        sep_idx = sep_idx + 1                       
+                report_list.append(report_dict)
+    elif(rep_type == "timing"):
+        timing_rpt_text = open(report_path,"r").read()
+        if tool_type == "cadence":
+            timing_path_text = timing_rpt_text
+            while cadence_timing_grab_re.search(timing_rpt_text):
+                timing_dict = {}
+                timing_path_text = cadence_timing_grab_re.search(timing_rpt_text).group(0)
+                for line in timing_path_text.split("\n"):
+                    if cadence_timing_setup_re.search(line):
+                        timing_dict["Setup"] = float(decimal_re.findall(line)[0])
+                    elif cadence_arrival_time_re.search(line):
+                        timing_dict["Arrival"] = float(decimal_re.findall(line)[0])
+                    if "Setup" in timing_dict and "Arrival" in timing_dict:
+                        timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
+                report_list.append(timing_dict)
+                timing_rpt_text = timing_rpt_text.replace(timing_path_text,"")
+        elif tool_type == "synopsys":
+            timing_dict = {}
+            for line in timing_rpt_text.split("\n"):
+                if "library setup time" in line:
+                    timing_dict["Setup"] = float(decimal_re.findall(line)[0])
+                elif "data arrival time" in line:
+                    timing_dict["Arrival"] = float(decimal_re.findall(line)[0])
+                elif "slack" in line:
+                    timing_dict["Slack"] = float(signed_dec_re.findall(line)[0])
+                elif "Setup" in timing_dict and "Arrival" in timing_dict:
+                    timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
+                # This indicates taht all lines have been read in and we can append the timing_dict
+            report_list.append(timing_dict)
+    elif(rep_type == "power"):
+        power_rpt_text = open(report_path,"r").read()
+        if tool_type == "synopsys":
+            power_dict = {}
+            for line in power_rpt_text.split("\n"):
+                if "Total Dynamic Power" in line:
+                    for unit in pwr_lookup.keys():
+                        if f" {unit} " in line or f" {unit}" in line:
+                            units = pwr_lookup[unit]
+                            break
+                    power_dict["Dynamic"] = float(decimal_re.findall(line)[0]) * units
+                    # Check to make sure that the total has multiple values associated with it
+                elif "Total" in line and len(decimal_re.findall(line)) > 1:
+                    pwr_totals = []
+                    pwr_vals_line = line
+                    while synopsys_grab_pwr_val_re.search(pwr_vals_line):
+                        pwr_val = synopsys_grab_pwr_val_re.search(pwr_vals_line).group(0)
+                        for unit in pwr_lookup.keys():
+                            # pwr_unti_re_str = r"\s" + unit + r"(\s|\n)"
+                            # pwr_unit_re = re.compile(pwr_unti_re_str)
+                            # print(pwr_val)
+                            if f" {unit} " in pwr_val or f" {unit}" in pwr_val:
+                                # print(f"Found {unit} in {pwr_val}")
+                                units = pwr_lookup[unit]
+                                break
+                        pwr_total = float(wspace_re.split(pwr_val)[0]) * units
+                        pwr_totals.append(pwr_total)
+                        pwr_vals_line = pwr_vals_line.replace(pwr_val,"")
+                    power_dict["Total"] = pwr_totals[-1]
+            report_list.append(power_dict)
+    
+    return report_list
+                
+
+def parse_output(top_level_mod, output_path):
+    syn_dir = "syn-rundir"
+    par_dir = "par-rundir"
+    pt_dir = "pt-rundir"
+    # Loop through the output dir and find the relevant files to each stage of the flow
+    syn_report_path = os.path.join(output_path,syn_dir,"reports")
+    par_report_path = os.path.join(output_path,par_dir)
+    pt_report_path = os.path.join(output_path,pt_dir,"reports")
+    syn_results = {}
+    par_results = {}
+    pt_results = {}
+    if os.path.isdir(syn_report_path):
+        for file in os.listdir(syn_report_path):
+            if("area" in file):
+                syn_results["area"] = parse_report_c(top_level_mod,os.path.join(syn_report_path,file),"area","syn","cadence")
+            elif("time" in file or "timing" in file):
+                syn_results["timing"] = parse_report_c(top_level_mod,os.path.join(syn_report_path,file),"timing","syn","cadence")
+    if os.path.isdir(par_report_path):
+        for file in os.listdir(par_report_path):
+            if(file == "area.rpt"):
+                par_results["area"] = parse_report_c(top_level_mod,os.path.join(par_report_path,file),"area","par","cadence")
+            elif(file == "timing.rpt"):
+                par_results["timing"] = parse_report_c(top_level_mod,os.path.join(par_report_path,file),"timing","par","cadence")
+    if os.path.isdir(pt_report_path):
+        for file in os.listdir(pt_report_path):
+            if("timing" in file):
+                pt_results["timing"] = parse_report_c(top_level_mod,os.path.join(pt_report_path,file),"timing","pt","synopsys")
+            elif ("power" in file):
+                pt_results["power"] = parse_report_c(top_level_mod,os.path.join(pt_report_path,file),"power","pt","synopsys")
+
+    return syn_results, par_results, pt_results
+
 ########################################## RAD GEN UTILITIES ##########################################
 ##########################################   RAD GEN FLOW   ############################################
 def rad_gen_flow(flow_settings,run_stages,config_paths):
@@ -765,7 +939,8 @@ def main():
     parser.add_argument('-l', '--use_latest_obj_dir', help="uses latest obj dir found in rad_gen dir", action='store_true') 
     
     parser.add_argument('-s', '--design_sweep_config_file', help="path to config file containing design sweep parameters",  type=str, default='')
-    
+    parser.add_argument('-c', '--compile_results', help="path to dir", action='store_true') 
+
     parser.add_argument('-syn', '--synthesis', help="path to dir", action='store_true') 
     parser.add_argument('-par', '--place_n_route', help="path to dir", action='store_true') 
     parser.add_argument('-pt', '--primetime', help="path to dir", action='store_true') 
@@ -804,8 +979,120 @@ def main():
     # Convert from cli args into rad_gen_flow_settings for a particular flow run    
     rad_gen_flow_settings = vars(args)
 
+    if args.compile_results and args.top_level != '' and args.design_sweep_config_file != '':
+        # test_dir = os.path.expanduser("~/rad_gen/router_wrap_bk-2023-03-01---23-31-14")
+        report_search_dir = os.path.expanduser("~/rad_gen")
+        reports = []
+        for dir in os.listdir(report_search_dir):
+            if os.path.isdir(dir) and dir.startswith(args.top_level):
+                report_dict = {}
+                print(f"Parsing results for {dir}")
+                syn_rpts, par_rpts, pt_rpts = parse_output(args.top_level,dir)
+                # for k,v in syn_rpts.items():
+                #     print(k,v)
+                # for k,v in par_rpts.items():
+                #     print(k,v)
+                # for k,v in pt_rpts.items():
+                #     print(k,v)
+                report_dict["syn"] = syn_rpts
+                report_dict["par"] = par_rpts
+                report_dict["pt"] = pt_rpts
+                # We need to get parameter values associated with this report dict
+                # Currently using the value in the hdl_search_path to determine the specific parameters TODO fix this in the future
+                # Using the synthesis generated output file to get this value, if this file does not exist, synthesis was not run and will return invalid tag for the directory
+                if(os.path.isfile(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json"))):
+                    syn_out_config = json.load(open(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json")))
+                    design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
+                    # TODO fix the specific config path being looked up (if hammer changes so could this)
+                    for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
+                        # This expects there to only be one path which contains param sweep header 
+                        if "param_sweep_headers" in path:
+                            param_dir_name = os.path.basename(path)
+                            # TODO fix this to not just use the first design in the sweep file
+                            for param in design_sweep_config["designs"][0]["params"].keys():
+                                if param in param_dir_name:
+                                    param_grab_re = re.compile(f"{param}_\d+")
+                                    # This only works if the param name is seperated by a "_"
+                                    param_val = param_grab_re.search(param_dir_name).group(0).split("_")[-1]
+                                    report_dict["rtl_param"] = { param : param_val }
+                                    print({ param : param_val })
+                                    if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
+                                        reports.append(report_dict)
+                                    break
+        
+        """ OUTPUTTING REPORTS FOR THE NOC SWEEP VALUES TODO MAKE LESS DESIGN SPECIFIC """
+        csv_lines = []
+        for report in reports:
+            report_to_csv = {}
+            print(report["rtl_param"])
+            for k,v in report["rtl_param"].items():
+                report_to_csv["param_key"] = k
+                report_to_csv["param_val"] = v
+            # print(report_to_csv)
+            # sys.exit(1)
+
+
+            total_area = float(report["par"]["area"][0]["Total Area"])
+            print(f'Total Area: {total_area}')
+            report_to_csv["Total Area"] = total_area
+            # This is the total area of the module
+            # print(report["par"]["area"][0])
+            # This is the area of each submodule 
+            
+            # input modules
+            if("num_ports" in report["rtl_param"]): 
+                num_ports = int(report["rtl_param"]["num_ports"]) 
+            else:
+                num_ports = 5
+            input_channel_area = float(0)
+            for i in range(num_ports):
+                ipc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == f"genblk1.vcr/ips[{i}].ipc"), None)
+                input_channel_area += float(report["par"]["area"][ipc_alloc_idx]["Total Area"])
+                # print(report["par"]["area"][ipc_alloc_idx])
+            print(f'Input Module Area: {input_channel_area} : {input_channel_area/total_area}')
+            report_to_csv["Input Module Area"] = input_channel_area
+            report_to_csv["Input Module Area Percentage"] = input_channel_area/total_area
+
+            # xbr
+            xbr_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/xbr"), None)
+            xbr_area = float(report["par"]["area"][xbr_idx]["Total Area"])
+            print(f'XBR Area: {xbr_area} : {xbr_area/total_area}')
+            report_to_csv["XBR Area"] = xbr_area
+            report_to_csv["XBR Area Percentage"] = xbr_area/total_area
+            # sw allocator
+            sw_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/alo/genblk2.sw_core_sep_if"), None)
+            sw_alloc_area = float(report["par"]["area"][sw_alloc_idx]["Total Area"])
+            print(f'SW Alloc Area: {sw_alloc_area} : {sw_alloc_area/total_area}')
+            report_to_csv["SW Alloc Area"] = sw_alloc_area
+            report_to_csv["SW Alloc Area Percentage"] = sw_alloc_area/total_area
+            # vc allocator
+            vc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/alo/genblk1.vc_core_sep_if"), None)
+            vc_alloc_area = float(report["par"]["area"][vc_alloc_idx]["Total Area"])
+            print(f'VC Alloc Area: {vc_alloc_area} : {vc_alloc_area/total_area}')
+            report_to_csv["VC Alloc Area"] = vc_alloc_area
+            report_to_csv["VC Alloc Area Percentage"] = vc_alloc_area/total_area
+            # output modules
+            output_channel_area = float(0)
+            for i in range(num_ports):
+                opc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == f"genblk1.vcr/ops[{i}].opc"), None)
+                output_channel_area += float(report["par"]["area"][opc_alloc_idx]["Total Area"])
+            print(f'Output Module Area: {output_channel_area} : {output_channel_area/total_area}')
+
+            report_to_csv["Output Module Area"] = output_channel_area
+            report_to_csv["Output Module Area Percentage"] = output_channel_area/total_area
+            report_to_csv["Slack"] = float(report["pt"]["timing"][0]["Slack"])
+            csv_lines.append(report_to_csv)
+
+        csv_fd = open("area_csv.csv","w")
+        writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
+        writer.writeheader()
+        for line in csv_lines:
+            writer.writerow(line)
+        csv_fd.close()
+        sys.exit(1)
+
     # If a design sweep config file is specified, modify the flow settings for each design in sweep
-    if args.design_sweep_config_file != '':
+    if args.design_sweep_config_file != '' and not args.compile_results:
         # Vars for storing the values initialized in the loops for base configuration params of sweep file
         base_config_dir = ""
         base_rtl_dir = ""
