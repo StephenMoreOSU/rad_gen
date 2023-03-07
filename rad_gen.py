@@ -20,13 +20,11 @@ import copy
 
 import csv
 import pandas as pd
-#from dataclasses import dataclass
+
+import src.sram_compiler as sram_compiler 
+
 ########################################## DATA STRUCTURES  ###########################################
-# @dataclass
-# class asic_flow_params:
-#     # List of all rtl extensions found in design rtl directory
-#     rtl_exts : list
-    
+
 
 
 ########################################## DATA STRUCTURES  ###########################################
@@ -325,11 +323,11 @@ def modify_config_file(args):
     design_config["synthesis"]["inputs.top_module"] = args["top_level"]
     # If the user specified valid search paths we should not override them but just append to them
     
-    # TODO ADD THE CONDITIONAL TO CHECK BEFORE CONCAT 
-    # if(all( os.path.isdir(dir) for dir in design_config["synthesis"]["inputs.hdl_search_paths"])):
-    design_config["synthesis"]["inputs.hdl_search_paths"] = design_config["synthesis"]["inputs.hdl_search_paths"] + design_dirs
-    # else:
-    #     design_config["synthesis"]["inputs.hdl_search_paths"] = design_dirs
+    # TODO ADD THE CONDITIONAL TO CHECK BEFORE CONCAT, this could be cleaner but is ok for now, worst case we have too many serach paths
+    if("inputs.hdl_search_paths" in design_config["synthesis"].keys()):
+        design_config["synthesis"]["inputs.hdl_search_paths"] = design_config["synthesis"]["inputs.hdl_search_paths"] + design_dirs
+    else:
+        design_config["synthesis"]["inputs.hdl_search_paths"] = design_dirs
     
     # remove duplicates
     design_config["synthesis"]["inputs.hdl_search_paths"] = list(dict.fromkeys(design_config["synthesis"]["inputs.hdl_search_paths"])) 
@@ -366,9 +364,19 @@ def find_newest_obj_dir(args):
 
 
 def rad_gen_log(log_str,file):
+    """
+    Prints to a log file and the console depending on level of verbosity
+    log codes:
+    {
+        "info"
+        "debug"
+        "error"
+    }
+    """
     fd = open(file, 'a')
     if(verbosity_lvl == 3):
         print(f"{log_str}",file=fd)
+        print(f"{log_str}")
     fd.close()
 
 
@@ -453,7 +461,6 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
                     """ WRITE PARAMETER/CONFIG FILES FOR EACH ITERATION """
                     # Crate a sweep iter dict which will contain the param values which need to be set for a given iteration
                     sweep_iter = {}
-                    # print(p_vals)
                     for k, v in p_vals.items():
                         sweep_iter[k] = v[i]
                     p_vals_i = []
@@ -470,7 +477,6 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
                         p_vals_i.append(p_val_i)
                     mod_param_fpath = replace_rtl_param(top_p_val_name, p_names_i, p_vals_i, base_config_path, base_param_hdr, base_param_hdr_path, param_sweep_hdr_dir)
                     mod_parameter_paths.append(mod_param_fpath)
-
             else:
                 for p_val in p_vals:
                     """ GENERATING AND WRITING RTL PARAMETER FILES """
@@ -495,11 +501,6 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
                         yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
 
     return mod_parameter_paths
-
-            # print(mod_param_hdr)
-            
-
-        # only need an edit params re for the NoC params being evaluated
 
 def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param_inc_path=False):
     wspace_re = re.compile(r"\s+")
@@ -530,7 +531,7 @@ def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param
             # Get the include file path
             include_fname = line.split(" ")[1].replace('"','')
             # Look for the include path in the rtl directory, if its not found default back to 'sweep_param_inc_path'
-            # TODO FIX THIS HACKERY
+            # TODO FIX THIS HACKERY this is hackery because its only looking for the parameters file and using it to determine when to use the sweep_param_inc_path as the include
             if "parameters" not in line:
                 include_fpath = rec_find_fpath(rtl_dir_path,include_fname)
             else:
@@ -848,6 +849,105 @@ def parse_output(top_level_mod, output_path):
 
     return syn_results, par_results, pt_results
 
+
+def parse_reports(report_search_dir,param_search_list,top_level_mod):
+    reports = []
+    for dir in os.listdir(report_search_dir):
+        if os.path.isdir(dir) and dir.startswith(top_level_mod):
+            report_dict = {}
+            # print(f"Parsing results for {dir}")
+            syn_rpts, par_rpts, pt_rpts = parse_output(top_level_mod,dir)
+            report_dict["syn"] = syn_rpts
+            report_dict["par"] = par_rpts
+            report_dict["pt"] = pt_rpts
+            # We need to get parameter values associated with this report dict
+            # Currently using the value in the hdl_search_path to determine the specific parameters TODO fix this in the future
+            # Using the synthesis generated output file to get this value, if this file does not exist, synthesis was not run and will return invalid tag for the directory
+            if(os.path.isfile(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json"))):
+                syn_out_config = json.load(open(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json")))
+                #design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
+                # TODO fix the specific config path being looked up (if hammer changes so could this)
+                for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
+                    # This expects there to only be one path which contains param sweep header 
+                    if "param_sweep_headers" in path:
+                        param_dir_name = os.path.basename(path)
+                        # TODO fix this to not just use the first design in the sweep file
+                        for param in param_search_list:
+                            if param in param_dir_name:
+                                param_grab_re = re.compile(f"{param}_\d+")
+                                # This only works if the param name is seperated by a "_"
+                                param_val = param_grab_re.search(param_dir_name).group(0).split("_")[-1]
+                                report_dict["rtl_param"] = { param : param_val }
+                                # print({ param : param_val })
+                                if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
+                                    reports.append(report_dict)
+                                break
+    return reports
+
+
+def noc_prse_area_brkdwn(report):
+    report_to_csv = {}
+    print(report["rtl_param"])
+    for k,v in report["rtl_param"].items():
+        report_to_csv["param_key"] = k
+        report_to_csv["param_val"] = v
+
+    total_area = float(report["par"]["area"][0]["Total Area"])
+    print(f'Total Area: {total_area}')
+    report_to_csv["Total Area"] = total_area
+    # input modules
+    if("num_ports" in report["rtl_param"]): 
+        num_ports = int(report["rtl_param"]["num_ports"]) 
+    else:
+        num_ports = 5
+    input_channel_area = float(0)
+    for i in range(num_ports):
+        ipc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == f"genblk1.vcr/ips[{i}].ipc"), None)
+        input_channel_area += float(report["par"]["area"][ipc_alloc_idx]["Total Area"])
+        # print(report["par"]["area"][ipc_alloc_idx])
+    print(f'Input Module Area: {input_channel_area} : {input_channel_area/total_area}')
+    report_to_csv["Input Module Area"] = input_channel_area
+    report_to_csv["Input Module Area Percentage"] = input_channel_area/total_area
+
+    # xbr
+    xbr_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/xbr"), None)
+    xbr_area = float(report["par"]["area"][xbr_idx]["Total Area"])
+    print(f'XBR Area: {xbr_area} : {xbr_area/total_area}')
+    report_to_csv["XBR Area"] = xbr_area
+    report_to_csv["XBR Area Percentage"] = xbr_area/total_area
+    # sw allocator
+    sw_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/alo/genblk2.sw_core_sep_if"), None)
+    sw_alloc_area = float(report["par"]["area"][sw_alloc_idx]["Total Area"])
+    print(f'SW Alloc Area: {sw_alloc_area} : {sw_alloc_area/total_area}')
+    report_to_csv["SW Alloc Area"] = sw_alloc_area
+    report_to_csv["SW Alloc Area Percentage"] = sw_alloc_area/total_area
+    # vc allocator
+    vc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/alo/genblk1.vc_core_sep_if"), None)
+    vc_alloc_area = float(report["par"]["area"][vc_alloc_idx]["Total Area"])
+    print(f'VC Alloc Area: {vc_alloc_area} : {vc_alloc_area/total_area}')
+    report_to_csv["VC Alloc Area"] = vc_alloc_area
+    report_to_csv["VC Alloc Area Percentage"] = vc_alloc_area/total_area
+    # output modules
+    output_channel_area = float(0)
+    for i in range(num_ports):
+        opc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == f"genblk1.vcr/ops[{i}].opc"), None)
+        output_channel_area += float(report["par"]["area"][opc_alloc_idx]["Total Area"])
+    print(f'Output Module Area: {output_channel_area} : {output_channel_area/total_area}')
+
+    report_to_csv["Output Module Area"] = output_channel_area
+    report_to_csv["Output Module Area Percentage"] = output_channel_area/total_area
+    report_to_csv["Slack"] = float(report["pt"]["timing"][0]["Slack"])
+    return report_to_csv
+
+
+def create_bordered_str(text: str = "", border_char: str = "#", total_len: int = 150) -> list:
+    text = f"  {text}  "
+    text_len = len(text)
+    if(text_len > total_len):
+        total_len = text_len + 10 
+    border_size = (total_len - text_len) // 2
+    return [ border_char * total_len, f"{border_char * border_size}{text}{border_char * border_size}", border_char * total_len]
+
 ########################################## RAD GEN UTILITIES ##########################################
 ##########################################   RAD GEN FLOW   ############################################
 def rad_gen_flow(flow_settings,run_stages,config_paths):
@@ -979,108 +1079,19 @@ def main():
     # Convert from cli args into rad_gen_flow_settings for a particular flow run    
     rad_gen_flow_settings = vars(args)
 
-    if args.compile_results and args.top_level != '' and args.design_sweep_config_file != '':
-        # test_dir = os.path.expanduser("~/rad_gen/router_wrap_bk-2023-03-01---23-31-14")
+    if args.compile_results and args.design_sweep_config_file != '':
         report_search_dir = os.path.expanduser("~/rad_gen")
-        reports = []
-        for dir in os.listdir(report_search_dir):
-            if os.path.isdir(dir) and dir.startswith(args.top_level):
-                report_dict = {}
-                print(f"Parsing results for {dir}")
-                syn_rpts, par_rpts, pt_rpts = parse_output(args.top_level,dir)
-                # for k,v in syn_rpts.items():
-                #     print(k,v)
-                # for k,v in par_rpts.items():
-                #     print(k,v)
-                # for k,v in pt_rpts.items():
-                #     print(k,v)
-                report_dict["syn"] = syn_rpts
-                report_dict["par"] = par_rpts
-                report_dict["pt"] = pt_rpts
-                # We need to get parameter values associated with this report dict
-                # Currently using the value in the hdl_search_path to determine the specific parameters TODO fix this in the future
-                # Using the synthesis generated output file to get this value, if this file does not exist, synthesis was not run and will return invalid tag for the directory
-                if(os.path.isfile(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json"))):
-                    syn_out_config = json.load(open(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json")))
-                    design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
-                    # TODO fix the specific config path being looked up (if hammer changes so could this)
-                    for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
-                        # This expects there to only be one path which contains param sweep header 
-                        if "param_sweep_headers" in path:
-                            param_dir_name = os.path.basename(path)
-                            # TODO fix this to not just use the first design in the sweep file
-                            for param in design_sweep_config["designs"][0]["params"].keys():
-                                if param in param_dir_name:
-                                    param_grab_re = re.compile(f"{param}_\d+")
-                                    # This only works if the param name is seperated by a "_"
-                                    param_val = param_grab_re.search(param_dir_name).group(0).split("_")[-1]
-                                    report_dict["rtl_param"] = { param : param_val }
-                                    print({ param : param_val })
-                                    if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
-                                        reports.append(report_dict)
-                                    break
-        
+        rad_gen_log(f"Parsing results of parameter sweep using parameters in {args.design_sweep_config_file}",rad_gen_log_fd)
+        design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
+        for design in design_sweep_config["designs"]:
+            reports = parse_reports(report_search_dir,design["params"].keys(),design["top_level_module"])
+            # TODO fix to support multiple designs through a single param sweep file, below break only allows for one
+            break        
+
         """ OUTPUTTING REPORTS FOR THE NOC SWEEP VALUES TODO MAKE LESS DESIGN SPECIFIC """
         csv_lines = []
         for report in reports:
-            report_to_csv = {}
-            print(report["rtl_param"])
-            for k,v in report["rtl_param"].items():
-                report_to_csv["param_key"] = k
-                report_to_csv["param_val"] = v
-            # print(report_to_csv)
-            # sys.exit(1)
-
-
-            total_area = float(report["par"]["area"][0]["Total Area"])
-            print(f'Total Area: {total_area}')
-            report_to_csv["Total Area"] = total_area
-            # This is the total area of the module
-            # print(report["par"]["area"][0])
-            # This is the area of each submodule 
-            
-            # input modules
-            if("num_ports" in report["rtl_param"]): 
-                num_ports = int(report["rtl_param"]["num_ports"]) 
-            else:
-                num_ports = 5
-            input_channel_area = float(0)
-            for i in range(num_ports):
-                ipc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == f"genblk1.vcr/ips[{i}].ipc"), None)
-                input_channel_area += float(report["par"]["area"][ipc_alloc_idx]["Total Area"])
-                # print(report["par"]["area"][ipc_alloc_idx])
-            print(f'Input Module Area: {input_channel_area} : {input_channel_area/total_area}')
-            report_to_csv["Input Module Area"] = input_channel_area
-            report_to_csv["Input Module Area Percentage"] = input_channel_area/total_area
-
-            # xbr
-            xbr_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/xbr"), None)
-            xbr_area = float(report["par"]["area"][xbr_idx]["Total Area"])
-            print(f'XBR Area: {xbr_area} : {xbr_area/total_area}')
-            report_to_csv["XBR Area"] = xbr_area
-            report_to_csv["XBR Area Percentage"] = xbr_area/total_area
-            # sw allocator
-            sw_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/alo/genblk2.sw_core_sep_if"), None)
-            sw_alloc_area = float(report["par"]["area"][sw_alloc_idx]["Total Area"])
-            print(f'SW Alloc Area: {sw_alloc_area} : {sw_alloc_area/total_area}')
-            report_to_csv["SW Alloc Area"] = sw_alloc_area
-            report_to_csv["SW Alloc Area Percentage"] = sw_alloc_area/total_area
-            # vc allocator
-            vc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/alo/genblk1.vc_core_sep_if"), None)
-            vc_alloc_area = float(report["par"]["area"][vc_alloc_idx]["Total Area"])
-            print(f'VC Alloc Area: {vc_alloc_area} : {vc_alloc_area/total_area}')
-            report_to_csv["VC Alloc Area"] = vc_alloc_area
-            report_to_csv["VC Alloc Area Percentage"] = vc_alloc_area/total_area
-            # output modules
-            output_channel_area = float(0)
-            for i in range(num_ports):
-                opc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == f"genblk1.vcr/ops[{i}].opc"), None)
-                output_channel_area += float(report["par"]["area"][opc_alloc_idx]["Total Area"])
-            print(f'Output Module Area: {output_channel_area} : {output_channel_area/total_area}')
-
-            report_to_csv["Output Module Area"] = output_channel_area
-            report_to_csv["Output Module Area Percentage"] = output_channel_area/total_area
-            report_to_csv["Slack"] = float(report["pt"]["timing"][0]["Slack"])
+            report_to_csv = noc_prse_area_brkdwn(report)            
             csv_lines.append(report_to_csv)
 
         csv_fd = open("area_csv.csv","w")
@@ -1090,9 +1101,8 @@ def main():
             writer.writerow(line)
         csv_fd.close()
         sys.exit(1)
-
     # If a design sweep config file is specified, modify the flow settings for each design in sweep
-    if args.design_sweep_config_file != '' and not args.compile_results:
+    elif args.design_sweep_config_file != '':
         # Vars for storing the values initialized in the loops for base configuration params of sweep file
         base_config_dir = ""
         base_rtl_dir = ""
@@ -1106,6 +1116,7 @@ def main():
             base_config_dir = os.path.split(sanitized_design["base_config_path"])[0]
             base_config = yaml.safe_load(open(sanitized_design["base_config_path"]))
             
+            """ Currently only can sweep either vlsi params or rtl params not both """
             # If there are vlsi parameters to sweep over
             if "vlsi_params" in design_sweep_config:
                 mod_base_config = copy.deepcopy(base_config)
@@ -1118,9 +1129,8 @@ def main():
                             with open(modified_config_path, 'w') as fd:
                                 yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
                             # print(modified_config_path)
- 
             # TODO This wont work for multiple SRAMs in a single design, simply to evaluate individual SRAMs
-            if sanitized_design["type"] == "sram":
+            elif sanitized_design["type"] == "sram":                
                 # load in the mem_params.json file            
                 with open(base_config["vlsi.inputs"]["sram_parameters"], 'r') as fd:
                     mem_params = json.load(fd)
@@ -1145,9 +1155,15 @@ def main():
                         if not any(mod_mem_params[0]["name"] in macro for macro in sram_macros):
                             rad_gen_log(f"WARNING: {mod_mem_params[0]['name']} not found in list of SRAM macros, skipping config generation...",rad_gen_log_fd)
                             continue
+                        
+                        for ret_str in create_bordered_str(f"Generating files required for design: {mod_mem_params[0]['name']}"):
+                            rad_gen_log(ret_str,rad_gen_log_fd)                        
+                        
                         # Modify the mem_params.json file with the parameters specified in the design sweep config file
+                        mem_params_json_fpath = os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0]+f'_{mod_mem_params[0]["name"]}.json'
                         with open(os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0]+f'_{mod_mem_params[0]["name"]}.json', 'w') as fd:
                             json.dump(mod_mem_params, fd, sort_keys=False)
+                        rad_gen_log(f"INFO: Writing memory params to {mem_params_json_fpath}",rad_gen_log_fd)
                         
                         """ MODIFIYING SRAM RTL"""
                         # Get just the filename of the sram sv file and append the new dims to it
@@ -1185,8 +1201,8 @@ def main():
                         modified_sram_rtl_path = os.path.join(sanitized_design["rtl_dir_path"],mod_rtl_dir.split("/")[-1],mod_rtl_fname)
                         with open(modified_sram_rtl_path, 'w') as fd:
                             fd.write(mod_sram_rtl)
-
-
+                        rad_gen_log(f"INFO: Writing sram rtl to {modified_sram_rtl_path}",rad_gen_log_fd)
+                        
                         """ MODIFYING HAMMER CONFIG YAML FILES """
                         # Now we need to modify the base_config file to use the correct sram macro
                         for pc_idx, pc in enumerate(base_config["vlsi.inputs"]["placement_constraints"]):
@@ -1195,13 +1211,14 @@ def main():
                                 mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["master"] = mod_mem_params[0]["name"]
 
                         # Find design files in newly created rtl dir
-                        design_files = rec_get_flist_of_ext(mod_rtl_dir)
+                        design_files, _ = rec_get_flist_of_ext(mod_rtl_dir)
                         mod_base_config["synthesis"]["inputs.input_files"] = design_files
                         mod_base_config["vlsi.inputs"]["sram_parameters"] = os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0] + f'_{mod_mem_params[0]["name"]}.json'
                         # Write the modified base_config file to a new file
                         modified_config_path = os.path.splitext(sanitized_design["base_config_path"])[0]+f'_{mod_mem_params[0]["name"]}.yaml'
                         with open(modified_config_path, 'w') as fd:
-                            yaml.safe_dump(mod_base_config, fd, sort_keys=False)      
+                            yaml.safe_dump(mod_base_config, fd, sort_keys=False)    
+                        rad_gen_log(f"INFO: Writing rad_gen yml config to {modified_config_path}",rad_gen_log_fd)
                 # Accessing variables declared outside and initized in the loop
                 # Compare generated RTL files to configs that exist and run all configs with paths to the generated RTL        
                 run_configs = []
@@ -1210,6 +1227,7 @@ def main():
                     if file.endswith(".yaml") and "SRAM" in file:
                         run_configs.append(os.path.join(base_config_dir,file))
                 """ rad_gen flow settings are equal to the command line args typically expected in rad_gen """
+                """
                 for config in run_configs:
                     # below are the only flow settings which we actually need to run hammer 
                     sw_flow_settings = {
@@ -1228,30 +1246,36 @@ def main():
                     }
                     #Run the flow for each config
                     #rad_gen_flow(sw_flow_settings,sw_run_stages,[config])     
-                    break       
+                    break     
+                """  
             # TODO make this more general but for now this is ok
             # the below case should deal with any asic_param sweep we want to perform
             elif sanitized_design["type"] == 'rtl_params':
                 mod_param_hdr_paths = edit_rtl_proj_params(sanitized_design["params"], sanitized_design["rtl_dir_path"], sanitized_design["base_param_hdr_path"],sanitized_design["base_config_path"])
                 # read_in_rtl_proj_params(sanitized_design["params"],sanitized_design["top_level_module"],sanitized_design["rtl_dir_path"])
                 for hdr_path in mod_param_hdr_paths:
-                    print("PARAMS FOR PATH %s" % (hdr_path))
+                    rad_gen_log(f"PARAMS FOR PATH {hdr_path}",rad_gen_log_fd)
                     read_in_rtl_proj_params(sanitized_design["params"],sanitized_design["top_level_module"],sanitized_design["rtl_dir_path"],hdr_path)
-                """ We shouldn't need to edit the values of params/defines which are operations or values set to other params/defines """
-                """ EDIT PARAMS/DEFINES IN THE SWEEP FILE """
-                # TODO this assumes parameter sweep vars arent kept over multiple files
-                # copy original parameter file containing sweep vars
+                    """ We shouldn't need to edit the values of params/defines which are operations or values set to other params/defines """
+                    """ EDIT PARAMS/DEFINES IN THE SWEEP FILE """
+                    # TODO this assumes parameter sweep vars arent kept over multiple files
+                    # copy original parameter file containing sweep vars
     else:
+        """ USED FOR THE SRAM SWEEP RUN, I THINK THIS IS UNSAFE TO USE TODO REMOVE THIS"""
         # If the args for top level and rtl path are not set, we will use values from the config file
+        """
         if rad_gen_flow_settings["top_level"] == '' or rad_gen_flow_settings["hdl_path"] == '':
             design_config = yaml.safe_load(open(rad_gen_flow_settings["config_path"]))
             # Assuming that the top level module and input files are set in the config file
+            # Add additional input files which may exist in the module rtl_dir
             rad_gen_flow_settings["top_level"] = design_config["synthesis"]["inputs.top_module"]
             config_paths = [rad_gen_flow_settings["config_path"]]
         else:
-            # Edit the config file with cli args
-            design_config, modified_config_path = modify_config_file(rad_gen_flow_settings)
-            config_paths = [modified_config_path]
+        """
+        # Edit the config file with cli args
+        """ Check to make sure all parameters are assigned and modify if required to"""
+        design_config, modified_config_path = modify_config_file(rad_gen_flow_settings)
+        config_paths = [modified_config_path]
 
         # Run the flow
         rad_gen_flow(rad_gen_flow_settings,run_stages,config_paths)
