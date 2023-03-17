@@ -50,19 +50,18 @@ def run_shell_cmd(cmd_str,log_file):
     rad_gen_log(f"Running: {run_cmd}",rad_gen_log_fd)
     sp.call(run_cmd,shell=True,executable='/bin/bash',env=cur_env)
 
-def rec_get_flist_of_ext(design_dir_path):
+def rec_get_flist_of_ext(design_dir_path,hdl_exts):
     """
     Takes in a path and recursively searches for all files of specified extension, returns dirs of those files and file paths in two lists
     """
-    hdl_exts = ['.v','.sv']
-    hdl_exts = [f"({ext})" for ext in hdl_exts]
+    # hdl_exts = [f"({ext})" for ext in hdl_exts]
 
-    design_files = []
-    ext_str = ".*" + '|'.join(hdl_exts)
-    ext_re = re.compile(ext_str)
+    # design_files = []
+    # ext_str = ".*" + '|'.join(hdl_exts) + "$"
+    # ext_re = re.compile(ext_str)
     design_folder = os.path.expanduser(design_dir_path)
-    design_files = [os.path.abspath(os.path.join(r,fn)) for r, _, fs in os.walk(design_folder) for fn in fs if ext_re.search(fn)]
-    design_dirs = [os.path.abspath(r) for r, _, fs in os.walk(design_folder) for fn in fs if ext_re.search(fn)]
+    design_files = [os.path.abspath(os.path.join(r,fn)) for r, _, fs in os.walk(design_folder) for fn in fs if fn.endswith(tuple(hdl_exts))]
+    design_dirs = [os.path.abspath(r) for r, _, fs in os.walk(design_folder) for fn in fs if fn.endswith(tuple(hdl_exts))]
     design_dirs = list(dict.fromkeys(design_dirs))
 
     return design_files,design_dirs
@@ -316,7 +315,8 @@ def sanitize_config(config_dict):
 
 def modify_config_file(args):
     # recursively get all files matching extension in the design directory
-    design_files, design_dirs = rec_get_flist_of_ext(args["hdl_path"])
+    exts = ['.v','.sv','.vhd',".vhdl"]
+    design_files, design_dirs = rec_get_flist_of_ext(args["hdl_path"],exts)
 
     with open(args["config_path"], 'r') as yml_file:
         design_config = yaml.safe_load(yml_file)
@@ -759,8 +759,13 @@ def parse_report_c(top_level_mod,report_path,rep_type,flow_stage, tool_type):
                         timing_dict["Setup"] = float(decimal_re.findall(line)[0])
                     elif cadence_arrival_time_re.search(line):
                         timing_dict["Arrival"] = float(decimal_re.findall(line)[0])
+                    elif "Slack" in line:
+                        timing_dict["Slack"] = float(signed_dec_re.findall(line)[0])
                     if "Setup" in timing_dict and "Arrival" in timing_dict:
                         timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
+                    
+
+
                 report_list.append(timing_dict)
                 timing_rpt_text = timing_rpt_text.replace(timing_path_text,"")
         elif tool_type == "synopsys":
@@ -877,6 +882,19 @@ def parse_reports(report_search_dir,param_search_list,top_level_mod):
                                 break
     return reports
 
+
+def gen_report_to_csv(report):
+    report_to_csv = {}
+    # print(report["obj_dir"])
+    # print(report["par"]["timing"])
+    if "timing" in report["par"] and "area" in report["par"]:
+        # print(report["par"]["timing"])
+        report_to_csv["Top Level Inst"] = report["par"]["area"][0]["Hinst Name"]
+        report_to_csv["Total Area"] = float(report["par"]["area"][0]["Total Area"])/16
+        report_to_csv["Slack"] = float(report["par"]["timing"][0]["Slack"])
+        # report_to_csv["obj_dir"] = report["obj_dir"]
+    # report_to_csv["Power"] = float(report["pt"]["power"][0]["Total Power"])
+    return report_to_csv
 
 def noc_prse_area_brkdwn(report):
     report_to_csv = {}
@@ -1008,16 +1026,17 @@ def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path
         json.dump(mod_mem_params, fd, sort_keys=False)
     # Defines naming convension of SRAM macros TODO
     """ MODIFYING AND WRITING HAMMER CONFIG YAML FILES """
-    base_config["vlsi.inputs"]["placement_constraints"]
+    # base_config["vlsi.inputs"]["placement_constraints"]
+    
     # Now we need to modify the base_config file to use the correct sram macro
-    for pc_idx, pc in enumerate(base_config["vlsi.inputs"]["placement_constraints"]):
-        # TODO make sure to set the dimensions of the top level to be larger than the sum of all sram macro placements and spacing
-        # set the top level to that of the new mapped sram macro we created when writing the rtl
-        if pc["type"] == "toplevel":
-            mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["path"] = sram_map_info["top_level_module"]
-        else:
-            # clean placement constraints
-            del mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]
+    # for pc_idx, pc in enumerate(base_config["vlsi.inputs"]["placement_constraints"]):
+    #     # TODO make sure to set the dimensions of the top level to be larger than the sum of all sram macro placements and spacing
+    #     # set the top level to that of the new mapped sram macro we created when writing the rtl
+    #     if pc["type"] == "toplevel":
+    #         mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["path"] = sram_map_info["top_level_module"]
+    #     else:
+    #         # clean placement constraints
+    #         del mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]
         #     # TODO this requires "SRAM" to be in the macro name which is possibly dangerous
         # if pc["type"] == "hardmacro" and "SRAM" in pc["master"]:
         #     mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["master"] = mod_mem_params[0]["name"]
@@ -1038,19 +1057,46 @@ def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path
         if len(m_sizes) > 0:
             break
             
+    
     # origin in um from the 0,0 point of the design
+    sram_pcs = []
     sram_origin = [20,20]
-    macro_spacing = 5
+    macro_spacing = 15
     for inst_name in sram_map_info["macro_inst_names"]:
         pc = {"type": "hardmacro", "path": f"{sram_map_info['top_level_module']}/{inst_name}", "master": sram_map_info["macro"]}
         coords = [float(name) for name in inst_name.split("_") if digit_re.match(name)]
         pc["x"] = round(sram_origin[0] + coords[0]*(m_sizes[0] + macro_spacing),3)
         pc["y"] = round(sram_origin[1] + coords[1]*(m_sizes[1] + macro_spacing),3)
-        mod_base_config["vlsi.inputs"]["placement_constraints"].append(pc)
+        sram_pcs.append(pc)
+        # mod_base_config["vlsi.inputs"]["placement_constraints"].append(pc)
 
+
+    sram_max_x = max([pc["x"] + m_sizes[0] for pc in sram_pcs])
+    sram_max_y = max([pc["y"] + m_sizes[1] for pc in sram_pcs])
+
+    spacing_outline = 20
+    # TODO instead of finding the top level module, just assign in outright
+    # Now we need to modify the base_config file to use the correct sram macro
+    for pc_idx, pc in enumerate(base_config["vlsi.inputs"]["placement_constraints"]):
+        # TODO make sure to set the dimensions of the top level to be larger than the sum of all sram macro placements and spacing
+        # set the top level to that of the new mapped sram macro we created when writing the rtl
+        if pc["type"] == "toplevel":
+            mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["path"] = sram_map_info["top_level_module"]
+            mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["width"] = sram_max_x + spacing_outline
+            mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["height"] = sram_max_y + spacing_outline
+        else:
+            # clean placement constraints
+            del mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]
+        #     # TODO this requires "SRAM" to be in the macro name which is possibly dangerous
+        # if pc["type"] == "hardmacro" and "SRAM" in pc["master"]:
+        #     mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["master"] = mod_mem_params[0]["name"]
+    
+    for sram_pc in sram_pcs:
+        mod_base_config["vlsi.inputs"]["placement_constraints"].append(sram_pc)
 
     # Find design files in newly created rtl dir
     # TODO adapt to support multiple input files in the sram macro
+    mod_base_config["synthesis"]["inputs.top_module"] = sram_map_info["top_level_module"]
     mod_base_config["synthesis"]["inputs.input_files"] = [rtl_path]
     mod_base_config["synthesis"]["inputs.hdl_search_paths"] = [os.path.split(rtl_path)[0]]
     mod_base_config["vlsi.inputs"]["sram_parameters"] = mem_params_json_fpath
@@ -1060,7 +1106,26 @@ def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path
     modified_config_path = os.path.join(config_out_path,"sram_config_"+f'_{sram_map_info["top_level_module"]}.yaml')
     with open(modified_config_path, 'w') as fd:
         yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
+    return modified_config_path
 
+def get_rad_gen_flow_cmd(top_level_module,config_path,rtl_path):
+    cmd = f'python3 rad_gen.py -e input_hammer_configs/env.yaml -p {config_path} -sram '
+    return cmd
+
+def gen_parse_reports(report_search_dir,top_level_mod):
+    reports = []
+    for dir in os.listdir(report_search_dir):
+        if os.path.isdir(dir) and dir.startswith(top_level_mod):
+        #if os.path.isdir(dir) and top_level_mod in dir:
+            report_dict = {}
+            # print(f"Parsing results for {dir}")
+            syn_rpts, par_rpts, pt_rpts = parse_output(top_level_mod,dir)
+            report_dict["syn"] = syn_rpts
+            report_dict["par"] = par_rpts
+            report_dict["pt"] = pt_rpts
+            report_dict["obj_dir"] = dir
+            reports.append(report_dict)
+    return reports
 ########################################## RAD GEN UTILITIES ##########################################
 ##########################################   RAD GEN FLOW   ############################################
 def rad_gen_flow(flow_settings,run_stages,config_paths):
@@ -1073,6 +1138,9 @@ def rad_gen_flow(flow_settings,run_stages,config_paths):
 
 
     rad_gen_log(f"Using obj_dir: {obj_dir_path}",rad_gen_log_fd)
+    
+    # if run_stages["sim"]:
+    #     sim_config = run_hammer_stage("sim", config_paths, flow_settings, obj_dir_path)
     # Check to see if design has an SRAM configuration
     if run_stages["sram"]:
         sram_config = run_hammer_stage("sram_generator", config_paths, flow_settings, obj_dir_path)
@@ -1158,6 +1226,8 @@ def main():
     parser.add_argument('-par', '--place_n_route', help="path to dir", action='store_true') 
     parser.add_argument('-pt', '--primetime', help="path to dir", action='store_true') 
     parser.add_argument('-sram', '--sram_compiler', help="path to dir", action='store_true') 
+    # parser.add_argument('-sim', '--sram_compiler', help="path to dir", action='store_true') 
+
 
     
     args = parser.parse_args()
@@ -1175,6 +1245,7 @@ def main():
     # Determines which stages of ASIC flow to run 
     run_all_flow = not (args.synthesis or args.place_n_route or args.primetime)
     run_stages = {
+        # "sim" : args.synthesis or run_all_flow,
         "sram" : args.sram_compiler,
         "syn": args.synthesis or run_all_flow,
         "par": args.place_n_route or run_all_flow,
@@ -1196,6 +1267,24 @@ def main():
         report_search_dir = os.path.expanduser("~/rad_gen")
         rad_gen_log(f"Parsing results of parameter sweep using parameters in {args.design_sweep_config_file}",rad_gen_log_fd)
         design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
+        """ USED FOR PARSING SRAM REPORTS """
+        csv_lines = []
+        for design in design_sweep_config["designs"]:
+            for mem in design["mems"]:
+                mem_top_lvl_name = f"sram_macro_map_{mem['rw_ports']}x{mem['w']}x{mem['d']}"
+                reports = gen_parse_reports(report_search_dir,mem_top_lvl_name)
+                for report in reports:
+                    report_to_csv = gen_report_to_csv(report)
+                    if len(report_to_csv) > 0:
+                        csv_lines.append(report_to_csv)
+        csv_fd = open("area_csv.csv","w")
+        writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
+        writer.writeheader()
+        for line in csv_lines:
+            writer.writerow(line)
+        csv_fd.close()
+        sys.exit(1)            
+        # TODO fix to support multiple designs through a single param sweep file, below break only allows for one
         for design in design_sweep_config["designs"]:
             reports = parse_reports(report_search_dir,design["params"].keys(),design["top_level_module"])
             # TODO fix to support multiple designs through a single param sweep file, below break only allows for one
@@ -1245,15 +1334,18 @@ def main():
             # TODO This wont work for multiple SRAMs in a single design, simply to evaluate individual SRAMs
             elif sanitized_design["type"] == "sram":      
                 # This is where we will send the output sram macros
+                """
                 sram_out_path = os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
                 if not os.path.isdir(sram_out_path):
                     os.mkdir(sram_out_path)
                 for mem in sanitized_design["mems"]:
                     mapping = sram_compiler.compile(mem["rw_ports"],mem["w"],mem["d"],"asap7")
                     sram_map_info, rtl_outpath = sram_compiler.write_rtl_from_mapping(mapping,sanitized_design["base_rtl_path"],sram_out_path)
-                    mod_rad_gen_config_from_rtl(base_config, sram_map_info, rtl_outpath)
+                    config_path = mod_rad_gen_config_from_rtl(base_config, sram_map_info, rtl_outpath)
+                    rad_gen_log(get_rad_gen_flow_cmd(sram_map_info["top_level_module"],config_path,rtl_outpath),rad_gen_log_fd)
                     # get mapping and find the macro in lib, instantiate that many and
                 sys.exit(1)          
+                """
                 # load in the mem_params.json file            
                 with open(base_config["vlsi.inputs"]["sram_parameters"], 'r') as fd:
                     mem_params = json.load(fd)
@@ -1334,8 +1426,9 @@ def main():
                                 mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["master"] = mod_mem_params[0]["name"]
 
                         # Find design files in newly created rtl dir
-                        design_files, _ = rec_get_flist_of_ext(mod_rtl_dir)
+                        design_files, design_dirs = rec_get_flist_of_ext(mod_rtl_dir,['.v','.sv','.vhd',".vhdl"])
                         mod_base_config["synthesis"]["inputs.input_files"] = design_files
+                        mod_base_config["synthesis"]["inputs.hdl_search_paths"] = design_dirs
                         mod_base_config["vlsi.inputs"]["sram_parameters"] = os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0] + f'_{mod_mem_params[0]["name"]}.json'
                         # Write the modified base_config file to a new file
                         modified_config_path = os.path.splitext(sanitized_design["base_config_path"])[0]+f'_{mod_mem_params[0]["name"]}.yaml'

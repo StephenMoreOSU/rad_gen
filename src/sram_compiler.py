@@ -36,6 +36,7 @@ def compile(rw_ports,width,depth,pdk):
     # This is going to be a very basic, dumb sram compiler
     # deincentivize depth over width
     depth_weight = (0.06 / 4 ) # factor which is added to cost as penalty for each depthwise macro
+    width_weight = 0.01 # It costs extra routing resources to be able to connect the pins of wider macros so this is to deincentivize width
     best_cost = float("inf")
     mapping_options = []
     for sram in srams.split("\n"):
@@ -57,8 +58,10 @@ def compile(rw_ports,width,depth,pdk):
                 cur_compiled_depth += macro_d
                 num_d_macros += 1
             # (n_w_macros * width_weight) * (num_d_macros * depth_weight) *
+            util_perc = (width*depth) / (cur_compiled_depth * n_w_macros * macro_w)
             """ number of macros in X direction * width weight * number of macros in Y direction * depth weight * read/write ports * depth """
-            cur_cost = (macro_rw_ps * (cur_compiled_depth * macro_w * n_w_macros) * (1 + (num_d_macros * depth_weight))* 1e-3) # normalized by 1k
+            # cur_cost = (1/(macro_rw_ps * (cur_compiled_depth * macro_w * n_w_macros) - (width*depth*rw_ports)))*(num_d_macros * depth_weight) + (n_w_macros * width_weight)
+            cur_cost = (1/(util_perc + 1e-3))*(num_d_macros * depth_weight)*(n_w_macros * width_weight)
             macro_mapping = {
                 "macro": sram,
                 "num_rw_ports": macro_rw_ps,
@@ -80,13 +83,19 @@ def compile(rw_ports,width,depth,pdk):
             #print(f"mapped_size {cur_compiled_depth * n_w_macros * width} : req_size {width*depth}")
             #print(f"SRAM: {sram} Area Increase Factor {truncate((cur_compiled_depth * n_w_macros * width) / (width*depth),3)}")
     #print(f"Best SRAM: {macro_mapping} : req_size {width, depth} req_base_cost : {truncate(width * depth,3)}")
-    print(f'Best SRAM Mapping: {mapping_options[0]}')
+    # print(f'Best SRAM Mapping: {mapping_options[0]}')
+    for i in range(len(mapping_options)):
+        print(f'Best SRAM Mapping: {mapping_options[i]}')
         
     return mapping_options[0]
 
 
 def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outpath: str) -> tuple:
-    compiled_sram_outpath = os.path.join(outpath,f'{mapping_dict["macro"]}_mapped.sv')
+    top_level_mod_name = f"sram_macro_map_{mapping_dict['num_rw_ports']}x{mapping_dict['width']}x{mapping_dict['depth']}"
+    compiled_sram_outdir = os.path.join(outpath,top_level_mod_name)
+    if not os.path.exists(compiled_sram_outdir):
+        os.mkdir(compiled_sram_outdir)
+    compiled_sram_outpath = os.path.join(compiled_sram_outdir,f"{top_level_mod_name}.sv")
 
     mapped_addr_w = int(math.log2(mapping_dict["depth"]))
     mapped_data_w = int(mapping_dict["width"])
@@ -122,13 +131,14 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
             f"    input logic mode_{i}, ", # 0 for read, 1 for write
         ]
     sram_map_port_lines[-1] = sram_map_port_lines[-1].replace(",","")
-    top_level_mod_name = f"sram_macro_map_{mapping_dict['num_rw_ports']}x{mapping_dict['width']}x{mapping_dict['depth']}"
+
     sram_map_mod_lines = [
         f"module {top_level_mod_name} (",
         f"    input logic clk,",
         *sram_map_port_lines,
         f");",
     ]
+
     cs_dec_mod_case_lines = [
             f"        {mapped_addr_w-macro_addr_w}'b" + format(case_idx,f'0{mapped_addr_w-macro_addr_w}b') + f": out = {mapping_dict['num_d_macros']}'b" + format((1 << case_idx),f"0{mapping_dict['num_d_macros']}b") + ";"
             for case_idx in range(2**(mapped_addr_w-macro_addr_w))
@@ -148,11 +158,11 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
     ]
     two_to_N_mux_mod_lines = [
         "module mux #(",
-        f"    parameter N = {mapped_addr_w-macro_addr_w}; ",
+        f"    parameter N = {mapped_addr_w-macro_addr_w} ",
         f") (",
         f"    input logic [N-1:0] select,",
         f"    input logic [{mapping_dict['macro_w'] * mapping_dict['num_w_macros']}-1:0] in [2**N-1:0],",
-        f"    output logic out",
+        f"    output logic [{mapping_dict['macro_w'] * mapping_dict['num_w_macros']}-1:0] out",
         f");",
         f"    assign out = in[select];",
         f"endmodule",
@@ -181,13 +191,13 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
                 rdata_signal_lists[i-1].append(f"mem_{x_coord}_{y_coord}_{i}_rdata")
                 # Assign the bottom lsbs of address to all macro addresses
                 inst_signal_assigns_lines += [
-                    f"assign mem_{x_coord}_{y_coord}_{i}_addr = addr_{i}[{macro_addr_w}-1:0];",
+                    f"assign mem_{x_coord}_{y_coord}_{i}_addr = reg_addr_{i}[{macro_addr_w}-1:0];",
                     # We arrange the grid moving left to right bottom to top [0,0] is bottom left, so we want to set the MSBs of width to the 0,0 coordinate
                     # PREVIOUS when looping x coord from top to bottom First bit select of macro is width-1 : width-1 - macro_w -> -:
-                    f"assign mem_{x_coord}_{y_coord}_{i}_wdata = wdata_{i}[({mapping_dict['macro_w']}*{mapping_dict['num_w_macros']-x_coord}-1)-:{mapping_dict['macro_w']}];",
-                    f"assign mem_{x_coord}_{y_coord}_{i}_we = ~(mode_{i} & en_{i});",
-                    f"assign mem_{x_coord}_{y_coord}_{i}_re = ~(~mode_{i} & en_{i});",
-                    f"assign mem_{x_coord}_{y_coord}_{i}_cs = ~en_{i};",
+                    f"assign mem_{x_coord}_{y_coord}_{i}_wdata = reg_wdata_{i}[({mapping_dict['macro_w']}*{mapping_dict['num_w_macros']-x_coord}-1)-:{mapping_dict['macro_w']}];",
+                    f"assign mem_{x_coord}_{y_coord}_{i}_we = ~(reg_mode_{i} & reg_en_{i});",
+                    f"assign mem_{x_coord}_{y_coord}_{i}_re = ~(~reg_mode_{i} & reg_en_{i});",
+                    f"assign mem_{x_coord}_{y_coord}_{i}_cs = ~reg_en_{i};",
                 ]
                 sram_port_lines += [
                     f"      .CE{i}(clk),",
@@ -222,13 +232,33 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
     mux_signal_insts_lines = []
     mux_signal_assign_lines = []
     mux_isnt_lines = []
+    dec_signal_insts_lines = []
+    dec_inst_lines = []
+    sram_map_reg_lines = []
+    sram_map_ff_reg_lines = [
+        f"always_ff @(posedge clk) begin",
+    ]
     for i in range(1,mapping_dict["num_rw_ports"]+1,1):
-        dec_signal_insts_lines = [
+        sram_map_reg_lines += [
+            f"logic [{mapped_addr_w}-1:0] reg_addr_{i};",
+            f"logic [{mapped_data_w}-1:0] reg_wdata_{i};",
+            f"logic [{mapped_data_w}-1:0] reg_rdata_{i};",
+            f"logic reg_en_{i};",
+            f"logic reg_mode_{i};"
+        ]
+        sram_map_ff_reg_lines += [ 
+            f"    reg_addr_{i} <= addr_{i};",
+            f"    reg_wdata_{i} <= wdata_{i};",
+            f"    reg_en_{i} <= en_{i};",
+            f"    reg_mode_{i} <= mode_{i};",
+            f"    rdata_{i} <= reg_rdata_{i};",
+        ]
+        dec_signal_insts_lines += [
             f"logic [{mapping_dict['num_d_macros']}-1:0] cs_bits_{i};"
         ]
-        dec_inst_lines = [
+        dec_inst_lines += [
             f"cs_decoder_{mapped_addr_w-macro_addr_w}_to_{mapping_dict['num_d_macros']} u_cs_decoder_{i} (",
-            f"   .in(addr_{i}[{mapped_addr_w}-1:{mapped_addr_w-1-(mapped_addr_w-macro_addr_w)}]),",
+            f"   .in(reg_addr_{i}[{mapped_addr_w}-1:{mapped_addr_w-1-(mapped_addr_w-macro_addr_w)}]),",
             f"   .out(cs_bits_{i})",
             f");",
         ]
@@ -243,15 +273,20 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
 
         # We need a N to 1 mux of size width
         mux_isnt_lines += [
-            f"mux #(.N({mapping_dict['num_d_macros']})) u_mux_{i}_{mapping_dict['num_d_macros']}_to_1 (",
+            f"mux #(.N({mapped_addr_w-macro_addr_w})) u_mux_{i}_{mapping_dict['num_d_macros']}_to_1 (",
             f"   .select(cs_bits_{i}),",
             f"   .in (mux_in_{i}),",
-            f"   .out(rdata_{i})",
+            f"   .out(reg_rdata_{i})",
             f");",
         ]
-    
+    sram_map_ff_reg_lines += [
+        f"end",
+    ]
+
     out_fd = open(compiled_sram_outpath,"w")
     for l in sram_map_mod_lines:
+        print(l,file=out_fd)
+    for l in sram_map_reg_lines + sram_map_ff_reg_lines:
         print(l,file=out_fd)
     for l in sram_macro_insts_lines:
         print(l,file=out_fd)
@@ -267,7 +302,6 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
         print(l,file=out_fd)
 
     out_fd.close()
-    sram_info = {}
     mapping_dict["top_level_module"] = top_level_mod_name
     # TODO its assumed that the coordinates are inside of inst names
     mapping_dict["macro_inst_names"] = macro_inst_names
