@@ -22,13 +22,146 @@ import csv
 import pandas as pd
 
 import src.sram_compiler as sram_compiler 
+from dataclasses import dataclass
 
-
-
+from typing import Pattern
 ########################################## DATA STRUCTURES  ###########################################
 
+@dataclass 
+class ASIC_flow_settings:
+    """ These are settings specific to a design running through the flow"""
+    # Paths
+    hdl_path: str = ""
+    config_path: str = ""
+    top_level_module: str = ""
+    # Stages being run
+    run_sram: bool = False
+    run_syn: bool = False
+    run_par: bool = False
+    run_pt: bool = False
+    use_latest_obj_dir: bool = False
+    # below are not exposed to the cli yet
+    obj_dir: str = ""
+
+""" STARTING SWEEP DATA STRUCTURES"""
+@dataclass
+class MultiDesign_settings:
+    """
+    Settings which are used by users for higher level data preperation 
+    Ex.
+     - Preparing designs to be swept via RTL/VLSI parameters
+     - Using the SRAM mapper
+    """
+    sweep_config_path: str = ""
+    result_config_path: str = ""
+    # path which will look for obj files to be parsed
+    result_search_path: str = ""
+
+@dataclass
+class Sweep_setting:
+    """
+    Sweep settings for a specific design
+    Ex. a single design in which RTL parameters are swept
+    """
+    # Could probably remove the base config path TODO
+    base_config_path: str = ""
+    # The directory which will be searched through for all RTL files that need to be used in the design
+    rtl_dir_path: str = ""
 
 
+""" ENDING SWEEP DATA STRUCTURES"""
+
+@dataclass
+class RADGen_settings:
+    """ Settings which are specific to a user of the RADGen tool, across all designs"""
+    env_path: str = ""
+    openram_path: str = ""
+    hammer_home_path: str = ""
+    # utility stuff
+    log_path: str = ""
+    log_verbosity: int = -1
+    # top level path of rad gen tool
+    rad_gen_home_path: str = ""
+
+@dataclass
+class VLSI_mode:
+    enable: bool = False
+    config_reuse: bool = False
+
+@dataclass 
+class RADGen_mode:
+    """ 
+    The mode in which the RADGen tool is running
+    Ex. 
+     - Sweep mode
+     - Single design mode
+    """
+    tool_mode: str = ""
+    sweep_gen: bool = False
+    result_parse: bool = False
+    vlsi_flow: VLSI_mode = VLSI_mode()
+    
+
+@dataclass
+class Regexes:
+    wspace_re: Pattern = re.compile(r"\s+")
+    find_params_re: Pattern = re.compile(f"parameter\s+\w+(\s|=)+.*;")
+    find_defines_re: Pattern = re.compile(f"`define\s+\w+\s+.*")
+    grab_bw_soft_bkt: Pattern = re.compile(f"\(.*\)")
+    
+    find_localparam_re: Pattern = re.compile(f"localparam\s+\w+(\s|=)+.*?;",re.MULTILINE|re.DOTALL)
+    first_eq_re: Pattern = re.compile("\s=\s")
+    find_soft_brkt_chars_re: Pattern = re.compile(f"\(|\)", re.MULTILINE)
+
+
+    find_verilog_fn_re: Pattern = re.compile(f"function.*?function", re.MULTILINE|re.DOTALL)
+    grab_verilog_fn_args: Pattern = re.compile(f"\(.*?\)",re.MULTILINE|re.DOTALL)
+    find_verilog_fn_hdr: Pattern = re.compile("<=?")
+
+    decimal_re: Pattern = re.compile("\d+\.{0,1}\d*",re.MULTILINE)
+    signed_dec_re: Pattern = re.compile("\-{0,1}\d+\.{0,1}\d*",re.MULTILINE)
+    # gds to area 
+
+    
+
+@dataclass
+class Tech_info:
+    lib: str = ""
+    sram_lib_path: str = ""
+    # Process settings in RADGen settings as we may need to perform post processing (ASAP7)
+    pdk_rundir: str = "" 
+    cds_lib: str = ""
+
+@dataclass
+class Script_info:
+    # FILENAMES OF VARIOUS SCRIPTS
+    gds_to_area_fname: str = "get_area"
+
+
+
+# struct holding all regexes used in rad gen
+res = Regexes()
+
+tech_info = Tech_info(
+        lib="asap7",
+        sram_lib_path=os.path.expanduser("~/hammer/src/hammer-vlsi/technology/asap7/sram_compiler/memories"),
+        pdk_rundir=os.path.expanduser("~/ASAP_7_IC/asap7_rundir"),
+        cds_lib="asap7_TechLib"
+    )
+
+
+script_info = Script_info()
+
+# Create the global variables which will be later modified
+rad_gen_settings = RADGen_settings(rad_gen_home_path=os.path.expanduser("~/rad_gen"))
+asic_flow_settings = ASIC_flow_settings()
+multi_design_settings = MultiDesign_settings()
+# Could have multiple sweeps per design
+sweep_settings = [Sweep_setting()]
+
+# modes of operation for RAD Gen
+rad_gen_mode = RADGen_mode()
+vlsi_mode = VLSI_mode()
 ########################################## DATA STRUCTURES  ###########################################
 
 
@@ -49,6 +182,16 @@ def run_shell_cmd(cmd_str,log_file):
     run_cmd = cmd_str + f" | tee {log_file}"
     rad_gen_log(f"Running: {run_cmd}",rad_gen_log_fd)
     sp.call(run_cmd,shell=True,executable='/bin/bash',env=cur_env)
+
+def run_shell_cmd_no_logs(cmd_str):
+    rad_gen_log(f"Running: {cmd_str}",rad_gen_log_fd)
+    sp.call(cmd_str,shell=True,executable='/bin/bash',env=cur_env)
+
+def run_csh_cmd(cmd_str):
+    rad_gen_log(f"Running: {cmd_str}",rad_gen_log_fd)
+    sp.call(['csh', '-c', cmd_str])
+
+    
 
 def rec_get_flist_of_ext(design_dir_path,hdl_exts):
     """
@@ -98,26 +241,26 @@ def edit_config_file(config_fpath, config_dict):
 
 ########################################## GENERAL UTILITIES ##########################################
 
-def write_lib_to_db_script(obj_dir):
-    # create PT run-dir
-    pt_outpath = os.path.join(obj_dir,"pt-rundir")
-    if not os.path.isdir(pt_outpath) :
-        os.mkdir(pt_outpath)
-    lib_dir = os.path.join(obj_dir,"tech-asap7-cache/LIB/NLDM")
+# def write_lib_to_db_script(obj_dir):
+#     # create PT run-dir
+#     pt_outpath = os.path.join(obj_dir,"pt-rundir")
+#     if not os.path.isdir(pt_outpath) :
+#         os.mkdir(pt_outpath)
+#     lib_dir = os.path.join(obj_dir,"tech-asap7-cache/LIB/NLDM")
 
-    file_lines = ["enable_write_lib_mode"]
-    for lib in os.listdir(lib_dir):
-        read_lib_cmd = "read_lib " + f"{os.path.join(lib_dir,lib)}"
-        write_lib_cmd = "write_lib " + f"{os.path.splitext(lib)[0]} " + "-f db " + "-o " f"{os.path.splitext(os.path.join(lib_dir,lib))[0]}.db"
-        file_lines.append(read_lib_cmd)
-        file_lines.append(write_lib_cmd)
+#     file_lines = ["enable_write_lib_mode"]
+#     for lib in os.listdir(lib_dir):
+#         read_lib_cmd = "read_lib " + f"{os.path.join(lib_dir,lib)}"
+#         write_lib_cmd = "write_lib " + f"{os.path.splitext(lib)[0]} " + "-f db " + "-o " f"{os.path.splitext(os.path.join(lib_dir,lib))[0]}.db"
+#         file_lines.append(read_lib_cmd)
+#         file_lines.append(write_lib_cmd)
 
     
-    fd = open(os.path.join(pt_outpath,"lib_to_db.tcl"),"w")
-    for line in file_lines:
-        file_write_ln(fd,line)
-    file_write_ln(fd,"quit")
-    fd.close()
+#     fd = open(os.path.join(pt_outpath,"lib_to_db.tcl"),"w")
+#     for line in file_lines:
+#         file_write_ln(fd,line)
+#     file_write_ln(fd,"quit")
+#     fd.close()
 
 
 ########################################## PRIMETIME ##########################################
@@ -166,13 +309,14 @@ def write_pt_timing_script(power_in_json_data, obj_dir, args):
     # Make sure that the $STDCELLS env var is set and use it to find the .lib files to use for Primetime
     search_paths = "/CMC/tools/synopsys/syn_vN-2017.09/libraries/syn /CMC/tools/synopsys/syn_vN-2017.09/libraries/syn_ver /CMC/tools/synopsys/syn_vN-2017.09/libraries/sim_ver"
     
-    db_dir =  os.path.join(os.getcwd(),"asap7_db_libs")
+    db_dirs =  [os.path.join(rad_gen_settings.rad_gen_home_path,db_lib) for db_lib in ["sram_db_libs","asap7_db_libs"] ]
 
     # options are ["TT","FF","SS"]
-    corner_filt_str = "SS"
+    # corner_filt_str = "SS"
     # options are ["SLVT", "LVT", "RVT", "SRAM"] in order of decreasing drive strength
-    transistor_type_str = "LVT"
-    target_libs = " ".join([os.path.join(db_dir,lib) for lib in os.listdir(db_dir) if (lib.endswith(".db") and corner_filt_str in lib and transistor_type_str in lib)])
+    # transistor_type_str = "LVT"
+    
+    target_libs = " ".join([os.path.join(db_dir,lib) for db_dir in db_dirs for lib in os.listdir(db_dir) if (lib.endswith(".db") )])
     
     #default switching probability (TODO) find where this is and make it come from there
     switching_prob = "0.5"
@@ -436,7 +580,7 @@ def replace_rtl_param(top_p_name_val, p_names, p_vals, base_config_path, base_pa
     with open(mod_config_path,"w") as config_fd:
         yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
 
-    return mod_param_out_fpath
+    return mod_param_out_fpath, mod_config_path
 
 def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_config_path):
     """ 
@@ -453,6 +597,7 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
     base_param_hdr = c_style_comment_rm(open(base_param_hdr_path).read())
     
     mod_parameter_paths = []
+    mod_config_paths = []
     # p_val is a list of parameter sweep values
     for p_name,p_vals in rtl_params.items():
         # TODO FIXME this hacky conditional seperating print params vs edit params
@@ -477,8 +622,9 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
                             edit_param = p_name_i
                         p_names_i.append(edit_param)
                         p_vals_i.append(p_val_i)
-                    mod_param_fpath = replace_rtl_param(top_p_val_name, p_names_i, p_vals_i, base_config_path, base_param_hdr, base_param_hdr_path, param_sweep_hdr_dir)
+                    mod_param_fpath, mod_config_fpath = replace_rtl_param(top_p_val_name, p_names_i, p_vals_i, base_config_path, base_param_hdr, base_param_hdr_path, param_sweep_hdr_dir)
                     mod_parameter_paths.append(mod_param_fpath)
+                    mod_config_paths.append(mod_config_fpath)
             else:
                 for p_val in p_vals:
                     """ GENERATING AND WRITING RTL PARAMETER FILES """
@@ -491,6 +637,7 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
                     if not os.path.isdir(mod_param_dir_str):
                         os.mkdir(mod_param_dir_str)
                     mod_param_out_fpath = os.path.join(mod_param_dir_str,"parameters.v")
+                    rad_gen_log("Writing modified parameter file to: "+mod_param_out_fpath,rad_gen_log_fd)
                     with open(mod_param_out_fpath,"w") as param_out_fd:
                         param_out_fd.write(mod_param_hdr)
                     mod_parameter_paths.append(mod_param_out_fpath)
@@ -499,10 +646,204 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
                         rad_gen_config = yaml.safe_load(config_fd)
                     rad_gen_config["synthesis"]["inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_str))
                     mod_config_path = os.path.splitext(base_config_path)[0]+f'_{p_name}_{p_val}.yaml'
+                    print("Writing modified config file to: "+mod_config_path,rad_gen_log_fd)
                     with open(mod_config_path,"w") as config_fd:
                         yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
+                    mod_config_paths.append(mod_config_path)
 
-    return mod_parameter_paths
+    return mod_parameter_paths, mod_config_paths
+
+
+def search_path_list_for_file(path_list,fname):
+    found_file = False
+    file_path = ""
+    for path in path_list:
+        if(os.path.isfile(os.path.join(path,fname))):
+            if found_file == True:
+                rad_gen_log(f"WARNING: {fname} found in multiple paths",rad_gen_log_fd)
+            file_path = os.path.join(path,fname)
+    return file_path
+
+def get_params_and_defines_from_rtl(rtl_text, rtl_preproc_vals, param_define_deps):
+    for inc_line in rtl_text.split("\n"): 
+        # Look for parameters
+        if res.find_params_re.search(inc_line):
+            # TODO this parameter re will not work if no whitespace between params
+            clean_line = " ".join(res.wspace_re.split(inc_line)[1:]).replace(";","")
+            # Get the parameter name and value
+            param_name = clean_line.split("=")[0].replace(" ","")
+            param_val = clean_line.split("=")[1].replace(" ","").replace("`","")
+
+
+            # create dep list for params
+            for i in range(len(rtl_preproc_vals)):
+                if rtl_preproc_vals[i]["name"] in param_val:
+                    param_define_deps.append(rtl_preproc_vals[i]["name"])
+
+            # Add the parameter name and value to the design_params dict
+            #rtl_preproc["params"][param_name] = str(param_val)
+            rtl_preproc_vals.append({"name" : param_name, "value" : str(param_val),"type": "param"})
+
+        elif res.find_defines_re.search(inc_line):
+            # TODO this define re will not work if no whitespace between params
+            clean_line = " ".join(res.wspace_re.split(inc_line)[1:])
+            # Get the define name and value
+            define_name = res.wspace_re.split(clean_line)[0]
+            if res.grab_bw_soft_bkt.search(clean_line):
+                define_val = res.grab_bw_soft_bkt.search(clean_line).group(0)
+            else:
+                define_val = res.wspace_re.split(clean_line)[1].replace("`","")
+            # create dep list for defines
+            for i in range(len(rtl_preproc_vals)):
+                if rtl_preproc_vals[i]["name"] in define_val:
+                    param_define_deps.append(rtl_preproc_vals[i]["name"])
+            #rtl_preproc["defines"][define_name] = str(define_val)
+            rtl_preproc_vals.append({"name": define_name, "value" : str(define_val),"type": "define"})
+    return rtl_preproc_vals, param_define_deps
+
+# def get_functions_from_rtl(rtl_text):
+#     tmp_rtl_text = rtl_text
+#     while res.find_function_re.search(tmp_rtl_text):
+#         function_text = res.find_function_re.search(tmp_rtl_text).group(0)
+#         lines = function_text.split(";")
+#         top_line = lines[0]
+#         args = res.find_function_args_re.search(top_line).group(0).split(",")
+#         function_text = re.sub(pattern=",".join(args),string=function_text,repl="")
+#         fn_hdr = res.find_
+        
+#         tmp_rtl_text = res.find_function_re.sub(string=tmp_rtl_text,repl="",count=1)
+
+
+# def clogb(val):
+#     clogb = 0
+#     val = val - 1
+#     while val > 0:
+#         val >>= 1
+#         clogb +=1
+#     return clogb
+
+# def croot(val,base):
+#     croot = 0
+#     i = 0
+#     while i < val:
+#         croot += 1
+#         i = 1
+#         for _ in range(base):
+#             i *= croot
+#     return croot
+
+def read_in_rtl_proj_params_all(top_level, hdl_search_paths):
+    init_globals()
+
+    top_lvl_re = re.compile(f"module\s+{top_level}",re.MULTILINE)
+    # Find all parameters which will be used in the design (ie find top level module rtl, parse include files top to bottom and get those values )
+    """ FIND TOP LEVEL MODULE IN RTL FILES """
+    top_lvl_match_found = False
+    top_lvl_rtl_text = ""
+    # creating another hdl paths var to deal with below TODO issue
+    new_hdl_paths = []
+    for path in hdl_search_paths:
+        # This is to fix the below TODO, I suppose its ok
+        cur_paths = res.wspace_re.split(path)
+        for c_path in cur_paths:
+            if os.path.isdir(c_path):
+                new_hdl_paths.append(c_path)
+                # TODO fix issue with the NoC sweeps in which the hdl search paths are set to two paths seperated with a space
+                # Ex. /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src/clib
+                for rtl_file in os.listdir(c_path):
+                    if rtl_file.endswith(".v") or rtl_file.endswith(".sv") or rtl_file.endswith(".vhd") or rtl_file.endswith(".vhdl") and os.path.isfile(os.path.join(c_path,rtl_file)):
+                        # read in the file with comments removed
+                        rtl_text = c_style_comment_rm(open(os.path.join(c_path,rtl_file)).read())
+                        if top_lvl_re.search(rtl_text):
+                            print(f"Found top level module {top_level} in {c_path}/{rtl_file}")
+                            if top_lvl_match_found == True:
+                                rad_gen_log(f"ERROR: Multiple top level modules found in rtl files",rad_gen_log_fd)
+                                sys.exit(1)
+                            top_lvl_match_found = True
+                            top_lvl_rtl_text = rtl_text
+    """ RTL TOP LEVEL FOUND AT THIS POINT"""
+    # lists which will hold parameters and a list of all required dependancies as we move through the includes
+    rtl_preproc_vals = []
+    param_define_deps = []
+    for line in top_lvl_rtl_text.split("\n"):
+        # Look for include statements
+        if "include" in line:
+            # Get the include file path
+            include_fname = res.wspace_re.split(line)[1].replace('"','')
+            fpath = search_path_list_for_file(new_hdl_paths,include_fname)
+            include_rtl = c_style_comment_rm(open(fpath).read())
+            rtl_preproc_vals, param_define_deps = get_params_and_defines_from_rtl(include_rtl,rtl_preproc_vals,param_define_deps)
+    """ NOW WE HAVE A LIST OF ALL PARAMS AND DEFINES IN THE RTL & THEIR DEPENDANCIES """
+    # remove duplicate dependancies
+    # Only using parsing technique of looking for semi colon in localparams as these are expected to have larger operations
+    # Not parsing lines as we need multiline capture w regex
+    tmp_top_lvl_rtl = top_lvl_rtl_text
+    local_param_matches = []
+    # TODO allow for parameters / defines to also be defined in the top level module (not just in the includes)
+    # Searching through the text in this way preserves initialization order
+    while res.find_localparam_re.search(tmp_top_lvl_rtl):
+        local_param = res.find_localparam_re.search(tmp_top_lvl_rtl).group(0)
+        local_param_matches.append(local_param)
+        tmp_top_lvl_rtl = tmp_top_lvl_rtl.replace(local_param,"")
+    """ NOW WE HAVE A LIST OF ALL LOCALPARAMS IN THE TOP LEVEL RTL """
+    """ EVALUATING BOOLEANS FOR LOCAL PARAMS W PARAMS AND DEFINES """
+    
+    # We are going to make .h and .c files which we can use the gcc preproc engine to evaluate the defines and local parameters
+    # Loop through all parameters and find its dependancies on other parameters
+    for local_param_str in local_param_matches:
+        """ CREATING LIST OF REQUIRED DEPENDANCIES FOR ALL PARAMS """
+        local_param_name = re.sub("localparam\s+",repl="",string=res.first_eq_re.split(local_param_str)[0]).replace(" ","").replace("\n","")
+        local_param_val = res.first_eq_re.split(local_param_str)[1]
+        rtl_preproc_vals.append({"name": local_param_name, "value": local_param_val, "type": "localparam"})
+
+    
+    """ CONVERT SV/V LOCALPARAMS TO C DEFINES """
+    # Write out localparams which need to be evaluated to a temp dir
+    tmp_dir = "/tmp/rad_gen_tmp"
+    if not os.path.exists(tmp_dir):
+        os.mkdir(tmp_dir)
+    rtl_preproc_fname = os.path.join(tmp_dir,"rtl_preproc_vals")
+    header_fd = open(rtl_preproc_fname + ".h","w")
+    main_fd = open(rtl_preproc_fname + ".c","w")
+    # init .c file containing main which will just print out the values of our params/defs/localparams
+    main_lines = [
+        f'#include "{rtl_preproc_fname}.h"',
+        f'#include <stdio.h>',
+        '',
+        '',
+        'int main(int argc, char argv [] ) {',
+        # CODE TO PRINT PARAMS GOES HERE
+    ]
+
+
+
+    # rtl_preproc_vals 
+    for val in rtl_preproc_vals:
+        clean_c_def_val = val["value"].replace("\n","").replace(";","").replace("`","")
+        c_def_str = "#define " + val["name"] + " (" + clean_c_def_val + ")"
+        print(c_def_str,file=header_fd)
+    header_fd.close()
+    sys.exit(1)
+    # Look through sweep param list in config file and match them to the ones found in design
+    for val in rtl_preproc_vals:
+        # If they match, write the c code which will print the parameter and its value
+        main_lines.append("\t" + f'printf("{val["name"]}: %d \n",{val["name"]});'.encode('unicode_escape').decode('utf-8'))
+                
+    for line in main_lines:
+        print(line,file=main_fd)
+    print("}",file=main_fd)
+    main_fd.close()
+    # This runs the c file which prints out evaluated parameter values set in the verilog
+    gcc_out = sp.run(["/usr/bin/gcc",f"{rtl_preproc_fname}.h",f"{rtl_preproc_fname}.c"],stderr=sp.PIPE,stdout=sp.PIPE,stdin=sp.PIPE)#,"-o",f'{os.path.join(tmp_dir,"print_params")}'])
+    sp.run(["a.out"])
+    sp.run(["rm","a.out"])
+    # Now we have a list of dictionaries containing the localparam string and thier dependancies
+
+    sys.exit(1)
+    # Found the file with the top level module
+
+
+
 
 def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param_inc_path=False):
     wspace_re = re.compile(r"\s+")
@@ -683,7 +1024,7 @@ def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param
     sp.run(["rm","a.out"])
 
 
-def parse_report_c(top_level_mod,report_path,rep_type,flow_stage, tool_type):
+def parse_report_c(top_level_mod,report_path,rep_type,flow_stage, tool_type, summarize=False):
     
     pwr_lookup ={
         "W": float(1),
@@ -747,6 +1088,8 @@ def parse_report_c(top_level_mod,report_path,rep_type,flow_stage, tool_type):
                         report_dict[cadence_hdr_catagories[i]] = sep_line[sep_idx]
                         sep_idx = sep_idx + 1                       
                 report_list.append(report_dict)
+                if summarize:
+                    break
     elif(rep_type == "timing"):
         timing_rpt_text = open(report_path,"r").read()
         if tool_type == "cadence":
@@ -767,6 +1110,8 @@ def parse_report_c(top_level_mod,report_path,rep_type,flow_stage, tool_type):
 
 
                 report_list.append(timing_dict)
+                if summarize:
+                    break
                 timing_rpt_text = timing_rpt_text.replace(timing_path_text,"")
         elif tool_type == "synopsys":
             timing_dict = {}
@@ -829,21 +1174,21 @@ def parse_output(top_level_mod, output_path):
     if os.path.isdir(syn_report_path):
         for file in os.listdir(syn_report_path):
             if("area" in file):
-                syn_results["area"] = parse_report_c(top_level_mod,os.path.join(syn_report_path,file),"area","syn","cadence")
+                syn_results["area"] = parse_report_c(top_level_mod,os.path.join(syn_report_path,file),"area","syn","cadence",summarize=False)
             elif("time" in file or "timing" in file):
-                syn_results["timing"] = parse_report_c(top_level_mod,os.path.join(syn_report_path,file),"timing","syn","cadence")
+                syn_results["timing"] = parse_report_c(top_level_mod,os.path.join(syn_report_path,file),"timing","syn","cadence",summarize=False)
     if os.path.isdir(par_report_path):
         for file in os.listdir(par_report_path):
             if(file == "area.rpt"):
-                par_results["area"] = parse_report_c(top_level_mod,os.path.join(par_report_path,file),"area","par","cadence")
+                par_results["area"] = parse_report_c(top_level_mod,os.path.join(par_report_path,file),"area","par","cadence",summarize=False)
             elif(file == "timing.rpt"):
-                par_results["timing"] = parse_report_c(top_level_mod,os.path.join(par_report_path,file),"timing","par","cadence")
+                par_results["timing"] = parse_report_c(top_level_mod,os.path.join(par_report_path,file),"timing","par","cadence",summarize=False)
     if os.path.isdir(pt_report_path):
         for file in os.listdir(pt_report_path):
             if("timing" in file):
-                pt_results["timing"] = parse_report_c(top_level_mod,os.path.join(pt_report_path,file),"timing","pt","synopsys")
+                pt_results["timing"] = parse_report_c(top_level_mod,os.path.join(pt_report_path,file),"timing","pt","synopsys",summarize=False)
             elif ("power" in file):
-                pt_results["power"] = parse_report_c(top_level_mod,os.path.join(pt_report_path,file),"power","pt","synopsys")
+                pt_results["power"] = parse_report_c(top_level_mod,os.path.join(pt_report_path,file),"power","pt","synopsys",summarize=False)
 
     return syn_results, par_results, pt_results
 
@@ -877,9 +1222,20 @@ def parse_reports(report_search_dir,param_search_list,top_level_mod):
                                 param_val = param_grab_re.search(param_dir_name).group(0).split("_")[-1]
                                 report_dict["rtl_param"] = { param : param_val }
                                 # print({ param : param_val })
-                                if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
-                                    reports.append(report_dict)
-                                break
+
+            # Add the gds areas to the report
+            gds_file = os.path.join(report_search_dir,dir,"par-rundir",f"{top_level_mod}_drc.gds")
+            if os.path.isfile(gds_file):
+                write_virtuoso_gds_to_area_script(gds_file)
+                for ext in ["csh","sh"]:
+                    permission_cmd = "chmod +x " +  os.path.join(tech_info.pdk_rundir,f'{script_info.gds_to_area_fname}.{ext}')
+                    run_shell_cmd_no_logs(permission_cmd)
+                # run_shell_cmd_no_logs(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.sh"))
+                run_csh_cmd(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.csh"))
+                report_dict["gds_area"] = parse_gds_to_area_output()
+                if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
+                    reports.append(report_dict)
+
     return reports
 
 
@@ -890,8 +1246,10 @@ def gen_report_to_csv(report):
     if "timing" in report["par"] and "area" in report["par"]:
         # print(report["par"]["timing"])
         report_to_csv["Top Level Inst"] = report["par"]["area"][0]["Hinst Name"]
-        report_to_csv["Total Area"] = float(report["par"]["area"][0]["Total Area"])/16
+        report_to_csv["Total Area"] = float(report["par"]["area"][0]["Total Area"])
         report_to_csv["Slack"] = float(report["par"]["timing"][0]["Slack"])
+        report_to_csv["GDS Area"] = float(report["gds_area"])
+        report_to_csv["Obj Dir"] = report["obj_dir"]
         # report_to_csv["obj_dir"] = report["obj_dir"]
     # report_to_csv["Power"] = float(report["pt"]["power"][0]["Total Power"])
     return report_to_csv
@@ -906,6 +1264,10 @@ def noc_prse_area_brkdwn(report):
     total_area = float(report["par"]["area"][0]["Total Area"])
     print(f'Total Area: {total_area}')
     report_to_csv["Total Area"] = total_area
+
+    gds_area = float(report["gds_area"])
+    report_to_csv["GDS Area"] = gds_area
+    print(f'GDS Area: {gds_area}')
     # input modules
     if("num_ports" in report["rtl_param"]): 
         num_ports = int(report["rtl_param"]["num_ports"]) 
@@ -1062,11 +1424,13 @@ def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path
     sram_pcs = []
     sram_origin = [20,20]
     macro_spacing = 15
-    for inst_name in sram_map_info["macro_inst_names"]:
-        pc = {"type": "hardmacro", "path": f"{sram_map_info['top_level_module']}/{inst_name}", "master": sram_map_info["macro"]}
-        coords = [float(name) for name in inst_name.split("_") if digit_re.match(name)]
-        pc["x"] = round(sram_origin[0] + coords[0]*(m_sizes[0] + macro_spacing),3)
-        pc["y"] = round(sram_origin[1] + coords[1]*(m_sizes[1] + macro_spacing),3)
+    for macro in sram_map_info["macro_list"]:
+        pc = {"type": "hardmacro", "path": f"{sram_map_info['top_level_module']}/{macro['inst']}", "master": sram_map_info["macro"]}
+        # coords = [float(name) for name in inst_name.split("_") if digit_re.match(name)]
+        pc["x"] = round(sram_origin[0] + macro["phys_coord"][0]*(m_sizes[0] + macro_spacing),3)
+        pc["y"] = round(sram_origin[1] + macro["phys_coord"][1]*(m_sizes[1] + macro_spacing),3)
+        # if(macro["log_coord"] != macro["phys_coord"]):
+        #     print(f'{macro["log_coord"]} --> {macro["phys_coord"]}')
         sram_pcs.append(pc)
         # mod_base_config["vlsi.inputs"]["placement_constraints"].append(pc)
 
@@ -1108,14 +1472,21 @@ def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path
         yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
     return modified_config_path
 
-def get_rad_gen_flow_cmd(top_level_module,config_path,rtl_path):
-    cmd = f'python3 rad_gen.py -e input_hammer_configs/env.yaml -p {config_path} -sram '
+def get_rad_gen_flow_cmd(config_path, sram_flag=False, top_level_mod=None, hdl_path=None):
+    if top_level_mod is None and hdl_path is None:
+        cmd = f'python3 rad_gen.py -e input_hammer_configs/env.yaml -p {config_path}'
+    else:
+        cmd = f'python3 rad_gen.py -e input_hammer_configs/env.yaml -p {config_path} -t {top_level_mod} -v {hdl_path}'
+
+    if sram_flag:
+        cmd = cmd + " -sram"
     return cmd
 
 def gen_parse_reports(report_search_dir,top_level_mod):
     reports = []
     for dir in os.listdir(report_search_dir):
         if os.path.isdir(dir) and dir.startswith(top_level_mod):
+            print(f"Parsing results for {dir}")
         #if os.path.isdir(dir) and top_level_mod in dir:
             report_dict = {}
             # print(f"Parsing results for {dir}")
@@ -1124,10 +1495,52 @@ def gen_parse_reports(report_search_dir,top_level_mod):
             report_dict["par"] = par_rpts
             report_dict["pt"] = pt_rpts
             report_dict["obj_dir"] = dir
-            reports.append(report_dict)
+            # Add the gds areas to the report
+            gds_file = os.path.join(report_search_dir,dir,"par-rundir",f"{top_level_mod}_drc.gds")
+            if os.path.isfile(gds_file):
+                write_virtuoso_gds_to_area_script(gds_file)
+                for ext in ["csh","sh"]:
+                    permission_cmd = "chmod +x " +  os.path.join(tech_info.pdk_rundir,f'{script_info.gds_to_area_fname}.{ext}')
+                    run_shell_cmd_no_logs(permission_cmd)
+                # run_shell_cmd_no_logs(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.sh"))
+                run_csh_cmd(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.csh"))
+                report_dict["gds_area"] = parse_gds_to_area_output()
+                if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
+                    reports.append(report_dict)
     return reports
 ########################################## RAD GEN UTILITIES ##########################################
 ##########################################   RAD GEN FLOW   ############################################
+
+
+def write_lc_lib_to_db_script (in_libs_paths):
+    """ Takes in a list of abs paths for libs that need to be converted to .dbs """
+    lc_script_name = "lc_lib_to_db.tcl"
+    pt_outpath = os.path.join(asic_flow_settings.obj_dir,"pt-rundir")
+    db_lib_outpath = os.path.join(rad_gen_settings.rad_gen_home_path,"sram_db_libs")
+    if not os.path.isdir(pt_outpath):
+        os.makedirs(pt_outpath)
+    if not os.path.isdir(db_lib_outpath):
+        os.makedirs(db_lib_outpath)
+    lc_script_path = os.path.join(pt_outpath,lc_script_name)
+    
+    file_lines = []
+    for lib in in_libs_paths:
+        read_lib_cmd = "read_lib " + f"{lib}"
+        write_lib_cmd = "write_lib " + f"{os.path.splitext(os.path.basename(lib))[0]} " + "-f db " + "-o " f"{os.path.join(db_lib_outpath,os.path.splitext(os.path.basename(lib))[0])}.db"
+        file_lines.append(read_lib_cmd)
+        file_lines.append(write_lib_cmd)
+    fd = open(lc_script_path,"w")
+    for line in file_lines:
+        file_write_ln(fd,line)
+    file_write_ln(fd,"quit")
+    fd.close()
+
+    return os.path.abspath(lc_script_path)
+
+
+
+
+
 def rad_gen_flow(flow_settings,run_stages,config_paths):
     # Set the obj directory for hammer
     if flow_settings["use_latest_obj_dir"] == True:
@@ -1135,10 +1548,15 @@ def rad_gen_flow(flow_settings,run_stages,config_paths):
     else:
         timestr = time.strftime("%Y-%m-%d---%H-%M-%S")
         obj_dir_path = f'{flow_settings["top_level"]}-{timestr}'
+    # 
+    asic_flow_settings.obj_dir = obj_dir_path
 
+    # Create the obj directory if it doesnt exist, hammer already does this but it will be used for preprocesing the rtl and outputting its parameter values
+    if not os.path.exists(obj_dir_path):
+        os.makedirs(obj_dir_path)
 
     rad_gen_log(f"Using obj_dir: {obj_dir_path}",rad_gen_log_fd)
-    
+
     # if run_stages["sim"]:
     #     sim_config = run_hammer_stage("sim", config_paths, flow_settings, obj_dir_path)
     # Check to see if design has an SRAM configuration
@@ -1147,6 +1565,12 @@ def rad_gen_flow(flow_settings,run_stages,config_paths):
         config_paths.append(sram_config)
     #run hammer stages
     if run_stages["syn"]:
+        """
+        for config in config_paths:
+            config_settings = yaml.safe_load(open(config, 'r'))
+            if "synthesis" in config_settings.keys():
+                read_in_rtl_proj_params_all(config_settings["synthesis"]["inputs.top_module"],config_settings["synthesis"]["inputs.hdl_search_paths"])
+        """
         syn_config = run_hammer_stage("syn", config_paths, flow_settings, obj_dir_path)
         # get_hammer_config("syn-to-par", flow_settings)
     if run_stages["par"]:
@@ -1167,6 +1591,18 @@ def rad_gen_flow(flow_settings,run_stages,config_paths):
         write_pt_sdc(par_to_power_data,os.path.join(os.getcwd(),obj_dir_path))
 
         #now use the pnr output to run primetime
+        # find the required macro lib files and convert to .db
+        if "vlsi.inputs.sram_parameters" in par_to_power_data.keys():
+            macros = [params["name"] for params in par_to_power_data["vlsi.inputs.sram_parameters"]]
+            timing_lib_paths = [os.path.join(tech_info.sram_lib_path,"lib",f"{macro}_lib") for macro in macros]
+            conversion_libs = []
+            for timing_lib_path in timing_lib_paths:
+                conversion_libs += [os.path.join(timing_lib_path,f) for f in os.listdir(timing_lib_path) if f.endswith(".lib")]
+            lc_script_path = write_lc_lib_to_db_script(conversion_libs)
+            lc_run_cmd = f"lc_shell -f {lc_script_path}"
+            os.chdir(os.path.join(rad_gen_settings.rad_gen_home_path,asic_flow_settings.obj_dir,"pt-rundir"))
+            run_shell_cmd_no_logs(lc_run_cmd)
+            os.chdir(rad_gen_settings.rad_gen_home_path)
 
         ################################ LIB TO DB CONVERSION ################################
         #prepare lib files to be read in from pt, means we need to unzip them in asap7 cache
@@ -1193,6 +1629,144 @@ def rad_gen_flow(flow_settings,run_stages,config_paths):
 ##########################################   RAD GEN FLOW   ############################################
 
 
+def init_globals():
+    """ Initializes all global variables s.t functions can use them"""
+    global rad_gen_settings
+    global asic_flow_settings
+    global multi_design_settings
+    global sweep_settings
+    global rad_gen_mode
+    global vlsi_mode
+    global res
+    global tech_info
+
+# def check_for_valid_input(data_struct):
+
+def check_for_valid_path(path):
+    ret_val = False
+    if os.path.exists(os.path.abspath(path)):
+        ret_val = True
+    else:
+        rad_gen_log(f"ERROR: {path} does not exist", rad_gen_log_fd)
+    return ret_val
+
+def handle_error(fn, expected_vals: set):
+    # for fn in funcs:
+    if not fn():
+        sys.exit(1)
+
+def init_structs_from_cli(args):
+    init_globals()
+    tool_mode = args.tool_mode
+    rad_gen_mode.tool_mode = tool_mode
+    """ Settings required when running in VLSI flow mode """
+    if tool_mode == "vlsi":
+        rad_gen_mode.vlsi_flow.enable = True
+        if args.top_level != "" and args.hdl_path != "":
+            rad_gen_mode.vlsi_flow.config_reuse = True
+            asic_flow_settings.top_level_module = args.top_level
+            asic_flow_settings.hdl_path = args.hdl_path
+            # If path is invalid, exit with error handler
+            handle_error(lambda: check_for_valid_path(args.hdl_path), {True : None})
+        else:
+            # This means that the config file the user passed into the tool is expected to be valid
+            rad_gen_mode.vlsi_flow.config_reuse = False
+        
+        handle_error(lambda: check_for_valid_path(args.config_path), {True : None})
+        asic_flow_settings.config_path = args.config_path
+        
+        # if not specified the flow will run all the stages by defualt
+        run_all_flow = not (args.synthesis or args.place_n_route or args.primetime)
+        asic_flow_settings.run_sram = args.sram_compiler or run_all_flow
+        asic_flow_settings.run_syn = args.synthesis or run_all_flow
+        asic_flow_settings.run_par = args.place_n_route or run_all_flow
+        asic_flow_settings.run_pt = args.primetime or run_all_flow
+        # If user wants to use the latest generated obj dir for the design
+        asic_flow_settings.use_latest_obj_dir = args.use_latest_obj_dir
+    # Settings required when running in SWEEP Mode
+    elif tool_mode == "sweep_gen":
+        rad_gen_mode.sweep_gen.enable = True
+    
+    # elif tool_mode == "sweep_gen":
+        # rad_gen_mode.sweep_gen.enable = True
+    
+
+def sort_by_params(reports, result_parse_config):
+    # This directory is where a sucessful synthesis run will have a json file from which we can get the hdl search path of the design
+    # From the hdl search path we can find the parameters used for the run ...
+    config_search_dir = os.path.join("syn-rundir","syn-output-full.json")
+    syn_config_outpath = os.path.join(result_parse_config["report_search_path"],report["obj_dir"],config_search_dir)
+    for report in reports:
+        if os.path.isfile(syn_config_outpath):
+            syn_out_config = json.load(open(syn_config_outpath))
+            for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
+                print("test")
+
+
+def write_virtuoso_gds_to_area_script(gds_fpath):
+    # skill_fname = "get_area.il"
+    skill_script_lines = [
+        f"system(\"strmin -library {tech_info.cds_lib} -strmFile {gds_fpath} -logFile strmIn.log\")",
+        f'cv = dbOpenCellViewByType("asap7_TechLib" "TOPCELL" "layout")',
+        "print(cv~>bBox)",
+    ]
+    skill_fpath = os.path.join(tech_info.pdk_rundir, f"{script_info.gds_to_area_fname}.il")
+    csh_fpath = os.path.join(tech_info.pdk_rundir, f"{script_info.gds_to_area_fname}.csh")
+    bash_script_fpath = os.path.join(tech_info.pdk_rundir, f"{script_info.gds_to_area_fname}.sh")
+    bash_script_lines = [
+        "#!/bin/bash",
+        f"{csh_fpath}",
+        
+    ]
+
+    # TODO remove abs paths
+    csh_script_lines = [
+        "#!/bin/csh",
+       f"source ~/auto_asic_flow/setup_virtuoso_env.sh && virtuoso -nograph -replay {skill_fpath} -log get_area.log {skill_fpath} -log {script_info.gds_to_area_fname}.log"
+    ]
+
+    fd = open(skill_fpath, 'w')
+    for line in skill_script_lines:
+        file_write_ln(fd, line)
+    fd.close()
+    fd = open(csh_fpath, 'w')
+    for line in csh_script_lines:
+        file_write_ln(fd, line)
+    fd.close()
+    fd = open(bash_script_fpath, 'w')
+    for line in bash_script_fpath:
+        file_write_ln(fd, line)
+    fd.close()
+
+def parse_gds_to_area_output():
+
+    gds_to_area_log_fpath = os.path.join(tech_info.pdk_rundir, script_info.gds_to_area_fname + ".log")
+    fd = open(gds_to_area_log_fpath, 'r')
+    lines = fd.readlines()
+    fd.close()
+    # Find the line with the area
+    for i, line in enumerate(lines):
+        if "print(cv~>bBox)" in line:
+            bbox_bounds = res.signed_dec_re.findall(lines[i+1])
+    width = float(bbox_bounds[2]) - float(bbox_bounds[0])
+    height = float(bbox_bounds[3]) - float(bbox_bounds[1])
+    area = width * height
+    print(f"Area of design is {width}x{height}={area} um^2")
+    return area
+
+
+def get_area_from_gds(gds_fpath):
+    """ Returns the area of the design from gds report generated by virutoso """
+    
+def write_dict_to_csv(csv_lines):
+    csv_fd = open("area_csv.csv","w")
+    writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
+    writer.writeheader()
+    for line in csv_lines:
+        writer.writerow(line)
+    csv_fd.close()
+
+
 def main():
     global cur_env
     global openram_gen_path
@@ -1209,9 +1783,11 @@ def main():
     # 1 - Only errors
     # 2 - Errors and warnings
     # 3 - Errors, warnings, and info    
+    init_globals()
 
     openram_gen_path = "openram_gen"
     parser = argparse.ArgumentParser()
+    parser.add_argument('-m', '--tool_mode', help="name of top level design in HDL", type=str, default='')
     parser.add_argument('-t', '--top_level', help="name of top level design in HDL", type=str, default='')
     parser.add_argument('-v', '--hdl_path', help="path to directory containing HDL files", type=str, default='')
     parser.add_argument('-e', '--env_path', help="path to hammer env.yaml file", type=str, default='')
@@ -1221,6 +1797,8 @@ def main():
     
     parser.add_argument('-s', '--design_sweep_config_file', help="path to config file containing design sweep parameters",  type=str, default='')
     parser.add_argument('-c', '--compile_results', help="path to dir", action='store_true') 
+    parser.add_argument('-j', '--result_parse_config_file', help="path to config file containing design sweep parameters",  type=str, default='')
+
 
     parser.add_argument('-syn', '--synthesis', help="path to dir", action='store_true') 
     parser.add_argument('-par', '--place_n_route', help="path to dir", action='store_true') 
@@ -1228,8 +1806,6 @@ def main():
     parser.add_argument('-sram', '--sram_compiler', help="path to dir", action='store_true') 
     # parser.add_argument('-sim', '--sram_compiler', help="path to dir", action='store_true') 
 
-
-    
     args = parser.parse_args()
 
 
@@ -1264,10 +1840,26 @@ def main():
     rad_gen_flow_settings = vars(args)
 
     if args.compile_results and args.design_sweep_config_file != '':
+        # read in the result config file
         report_search_dir = os.path.expanduser("~/rad_gen")
+        design_sweep_config = sanitize_config(yaml.safe_load(open(args.design_sweep_config_file)))
+        csv_lines = []
+        for design in design_sweep_config["designs"]:
+            design_config = sanitize_config(design)
+            rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {args.design_sweep_config_file}",rad_gen_log_fd)
+            reports = gen_parse_reports(report_search_dir,design_config["top_level_module"])
+            for report in reports:
+                report_to_csv = gen_report_to_csv(report)
+                if len(report_to_csv) > 0:
+                    csv_lines.append(report_to_csv)
+        write_dict_to_csv(csv_lines)
+        sys.exit(1)
+        
+        """
+        # SRAM REPORT PARSING 
         rad_gen_log(f"Parsing results of parameter sweep using parameters in {args.design_sweep_config_file}",rad_gen_log_fd)
         design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
-        """ USED FOR PARSING SRAM REPORTS """
+        # USED FOR PARSING SRAM REPORTS
         csv_lines = []
         for design in design_sweep_config["designs"]:
             for mem in design["mems"]:
@@ -1277,6 +1869,7 @@ def main():
                     report_to_csv = gen_report_to_csv(report)
                     if len(report_to_csv) > 0:
                         csv_lines.append(report_to_csv)
+            
         csv_fd = open("area_csv.csv","w")
         writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
         writer.writeheader()
@@ -1284,12 +1877,16 @@ def main():
             writer.writerow(line)
         csv_fd.close()
         sys.exit(1)            
+        """
+        """ ORIGINAL NOC RESULT PARSING CODE """
+        rad_gen_log(f"Parsing results of parameter sweep using parameters in {args.design_sweep_config_file}",rad_gen_log_fd)
+        design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
         # TODO fix to support multiple designs through a single param sweep file, below break only allows for one
         for design in design_sweep_config["designs"]:
             reports = parse_reports(report_search_dir,design["params"].keys(),design["top_level_module"])
             # TODO fix to support multiple designs through a single param sweep file, below break only allows for one
             break        
-
+        
         """ OUTPUTTING REPORTS FOR THE NOC SWEEP VALUES TODO MAKE LESS DESIGN SPECIFIC """
         csv_lines = []
         for report in reports:
@@ -1334,18 +1931,18 @@ def main():
             # TODO This wont work for multiple SRAMs in a single design, simply to evaluate individual SRAMs
             elif sanitized_design["type"] == "sram":      
                 # This is where we will send the output sram macros
-                """
                 sram_out_path = os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
                 if not os.path.isdir(sram_out_path):
                     os.mkdir(sram_out_path)
                 for mem in sanitized_design["mems"]:
                     mapping = sram_compiler.compile(mem["rw_ports"],mem["w"],mem["d"],"asap7")
                     sram_map_info, rtl_outpath = sram_compiler.write_rtl_from_mapping(mapping,sanitized_design["base_rtl_path"],sram_out_path)
+                    sram_map_info = sram_compiler.translate_logical_to_phsical(sram_map_info)
                     config_path = mod_rad_gen_config_from_rtl(base_config, sram_map_info, rtl_outpath)
-                    rad_gen_log(get_rad_gen_flow_cmd(sram_map_info["top_level_module"],config_path,rtl_outpath),rad_gen_log_fd)
+                    rad_gen_log(get_rad_gen_flow_cmd(config_path,sram_flag=True),rad_gen_log_fd)
                     # get mapping and find the macro in lib, instantiate that many and
                 sys.exit(1)          
-                """
+                
                 # load in the mem_params.json file            
                 with open(base_config["vlsi.inputs"]["sram_parameters"], 'r') as fd:
                     mem_params = json.load(fd)
@@ -1467,10 +2064,12 @@ def main():
             # TODO make this more general but for now this is ok
             # the below case should deal with any asic_param sweep we want to perform
             elif sanitized_design["type"] == 'rtl_params':
-                mod_param_hdr_paths = edit_rtl_proj_params(sanitized_design["params"], sanitized_design["rtl_dir_path"], sanitized_design["base_param_hdr_path"],sanitized_design["base_config_path"])
+                mod_param_hdr_paths, mod_config_paths = edit_rtl_proj_params(sanitized_design["params"], sanitized_design["rtl_dir_path"], sanitized_design["base_param_hdr_path"],sanitized_design["base_config_path"])
                 # read_in_rtl_proj_params(sanitized_design["params"],sanitized_design["top_level_module"],sanitized_design["rtl_dir_path"])
-                for hdr_path in mod_param_hdr_paths:
+                for hdr_path, config_path in zip(mod_param_hdr_paths, mod_config_paths):
+                # for hdr_path in mod_param_hdr_paths:
                     rad_gen_log(f"PARAMS FOR PATH {hdr_path}",rad_gen_log_fd)
+                    rad_gen_log(get_rad_gen_flow_cmd(config_path,sram_flag=False,top_level_mod=sanitized_design["top_level_module"],hdl_path=sanitized_design["rtl_dir_path"]),rad_gen_log_fd)
                     read_in_rtl_proj_params(sanitized_design["params"],sanitized_design["top_level_module"],sanitized_design["rtl_dir_path"],hdr_path)
                     """ We shouldn't need to edit the values of params/defines which are operations or values set to other params/defines """
                     """ EDIT PARAMS/DEFINES IN THE SWEEP FILE """
