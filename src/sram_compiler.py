@@ -86,8 +86,111 @@ def compile(rw_ports,width,depth,pdk):
     # print(f'Best SRAM Mapping: {mapping_options[0]}')
     for i in range(len(mapping_options)):
         print(f'Best SRAM Mapping: {mapping_options[i]}')
-        
     return mapping_options[0]
+
+
+def translate_sram_grid(w: int, d: int, mapping_grid: list, cut_bool: bool) -> list:
+    # if cut bool is 1 then we are cutting the grid in half in the x direction (vertical cut)
+    # if cut bool is 0 then we are cutting the grid in half in the y direction (horizontal cut)
+    sq_val = float(w / d) if w > d else float(d / w)
+    cur_bounds = [max([coord["phys_coord"][i] for coord in mapping_grid]) for i in range(2)]
+    
+    updated_mapping_grid = []
+    mapping_idx = 0
+    cut_map_limit = -1
+
+    for coord in mapping_grid:
+        new_p_coord = []
+        new_p_coord.append(coord["phys_coord"][0])
+        new_p_coord.append(coord["phys_coord"][1])
+
+        # old_p_coord = coord["phys_coord"]
+        if cut_bool: 
+            # Veritical Cut
+            if sq_val > 2.0:
+                if coord["phys_coord"][0] > math.floor(cur_bounds[0] / 2):
+                    new_p_coord[0] = coord["phys_coord"][0] - w // 2
+                    new_p_coord[1] = coord["phys_coord"][1] + d        
+            else:                   
+                if coord["phys_coord"][0] > math.floor(cur_bounds[0]*3 / 4):
+                    cut_map_limit = w*d * 3/4
+                    new_p_coord[0] = mapping_idx % d
+                    new_p_coord[1] = max([n_coord["phys_coord"][1] for n_coord in mapping_grid]) + mapping_idx // d + 1
+                    mapping_idx += 1                
+        else:
+            if sq_val > 2.0:
+                # Horizontal Cut
+                if coord["phys_coord"][1] > math.floor(cur_bounds[1] / 2):
+                    new_p_coord[0] = coord["phys_coord"][1] + w // 2
+                    new_p_coord[1] = coord["phys_coord"][0] - d
+            else:
+                if coord["phys_coord"][1] > math.floor(cur_bounds[1]*3 / 4):
+                    cut_map_limit = w*d * 3/4
+                    new_p_coord[1] = mapping_idx % w
+                    new_p_coord[0] = max([n_coord["phys_coord"][1] for n_coord in mapping_grid]) + mapping_idx // w + 1
+                    mapping_idx += 1                
+        
+        # print(f"{old_p_coord} --> {new_p_coord}")    
+        if mapping_idx >= cut_map_limit:
+            mapping_idx = 0
+        # Check to make sure no coords being overridden
+        for n_coord in updated_mapping_grid:
+            if n_coord["phys_coord"] == new_p_coord:
+                print(f"ERROR: {n_coord['phys_coord']} == {new_p_coord}")
+        updated_mapping_grid.append({"phys_coord": new_p_coord, "log_coord": coord["log_coord"]})
+    
+    cur_w = max([n_coord["phys_coord"][0] for n_coord in updated_mapping_grid]) + 1
+    cur_d = max([n_coord["phys_coord"][1] for n_coord in updated_mapping_grid]) + 1
+    return updated_mapping_grid, cur_w, cur_d
+
+
+def translate_logical_to_phsical(mapping_dict) -> dict:
+    """ This function uses the macro instantiation names as the logical mapping and returns a physical mapping"""
+    digit_re = re.compile("\d+")
+    macro_list = []
+    # Get logical coords from the inst names
+    for inst_name in mapping_dict["macro_inst_names"]:
+        coords = [int(name) for name in inst_name.split("_") if digit_re.match(name)]
+        macro_list.append({"log_coord": coords, "phys_coord": coords})
+    
+    i = 0
+
+    cur_w = mapping_dict["num_w_macros"]
+    cur_d = mapping_dict["num_d_macros"]
+    prev_area = cur_w * cur_d
+    # The higher this is the less square the grid will be
+    # sq_val = float(cur_w / cur_d) if cur_w > cur_d else float(cur_d / cur_w) 
+    sq_val = float(cur_w / cur_d) if cur_w > cur_d else float(cur_d / cur_w) 
+    # stops at an aspect ratio of 2
+    while sq_val >= 2.0:
+        aspect_ratio = cur_w / cur_d
+        # check to see if some threshold of squareness has been met
+        if aspect_ratio > 1.0:
+            macro_list, cur_w, cur_d = translate_sram_grid(cur_w,cur_d,macro_list, True)
+        elif aspect_ratio < 1.0:
+            macro_list, cur_w, cur_d = translate_sram_grid(cur_w,cur_d,macro_list, False)
+        else:
+            break
+        sq_val = float(cur_w / cur_d) if cur_w > cur_d else float(cur_d / cur_w) 
+        i = i + 1
+    mapping_dict["macro_list"] = []
+    new_area = cur_w * cur_d
+    print(f"Utilization: {prev_area / new_area}")
+
+    for inst_name in mapping_dict["macro_inst_names"]:
+        coords = [int(name) for name in inst_name.split("_") if digit_re.match(name)]
+        for macro_info in macro_list:
+            if macro_info["log_coord"] == coords:
+                mapping_dict["macro_list"].append({"inst": inst_name, "log_coord": coords, "phys_coord": macro_info["phys_coord"]})
+                macro_info["phys_coord"] = coords
+                break
+
+    
+    return mapping_dict
+        # This means the mapping is square so we can return
+        # split the grid in with a line going down center of the grid in x direction
+
+
 
 
 def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outpath: str) -> tuple:
@@ -312,6 +415,11 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
     # print(sram_inst_rtl)
 
 
+
+# def full_compile(mem_dict: dict, tech: str):
+#     """Compile the memory dictionary into config and RTL files"""
+#     mapping = compile(mem_dict["rw_ports"],mem_dict["w"],mem_dict["d"],tech)
+#     sram_map_info, rtl_outpath = write_rtl_from_mapping()
 
 # def main():
 #     sram_compiler(2,512,512,"asap7")

@@ -102,7 +102,11 @@ class RADGen_mode:
     sweep_gen: bool = False
     result_parse: bool = False
     vlsi_flow: VLSI_mode = VLSI_mode()
-    
+
+@dataclass
+class SRAM_compiler_settings:
+    rtl_out: str = os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
+    config_out: str = os.path.expanduser("~/rad_gen/input_designs/sram/configs/compiler_outputs")
 
 @dataclass
 class Regexes:
@@ -134,6 +138,7 @@ class Tech_info:
     pdk_rundir: str = "" 
     cds_lib: str = ""
 
+
 @dataclass
 class Script_info:
     # FILENAMES OF VARIOUS SCRIPTS
@@ -155,6 +160,8 @@ tech_info = Tech_info(
         cds_lib="asap7_TechLib"
     )
 
+
+sram_compiler_settings = SRAM_compiler_settings()
 
 script_info = Script_info()
 report_info = Report_info()
@@ -1293,7 +1300,9 @@ def gen_report_to_csv(report):
         report_to_csv["Obj Dir"] = report["obj_dir"]
 
         if "sram_macros" in report:
-            report_to_csv["sram_macros"] = report["sram_macros"]
+            report_to_csv["SRAM Macros"] = report["sram_macros"]
+        if "sram_macro_lef_areas" in report:
+            report_to_csv["SRAM LEF Areas"] = report["sram_macro_lef_areas"]
         # report_to_csv["obj_dir"] = report["obj_dir"]
     # report_to_csv["Power"] = float(report["pt"]["power"][0]["Total Power"])
     return report_to_csv
@@ -1396,11 +1405,25 @@ def create_bordered_str(text: str = "", border_char: str = "#", total_len: int =
 #         sys.exit(1)
 #     sys.exit(1)
 
+def get_sram_macro_sizes(macro_fname: str) -> list:
+    for file in os.listdir(os.path.join(tech_info.sram_lib_path,"lef")):
+        m_sizes = []
+        if macro_fname in file:
+            # TODO fix the way that the size of macro is being searched for this way would not work in all cases
+            lef_text = open(os.path.join(tech_info.sram_lib_path,"lef",file), "r").read()
+            for line in lef_text.split("\n"):
+                if "SIZE" in line:
+                    # This also assumes the symmetry in the lef is X Y rather than searching for it TODO
+                    m_sizes = [float(s) for s in line.split(" ") if res.decimal_re.match(s)]
+                    break
+        if len(m_sizes) > 0:
+            break
+    return m_sizes
+
         
 def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path: str) -> dict:
     # sram library path, TODO fix hardcoding, im tired rn
-    sram_lib_path = os.path.expanduser("~/hammer/src/hammer-vlsi/technology/asap7/sram_compiler/memories")
-    config_out_path = os.path.expanduser("~/rad_gen/input_designs/sram/configs/compiler_outputs")
+    config_out_path = sram_compiler_settings.config_out
     if not os.path.exists(config_out_path):
         os.mkdir(config_out_path)
 
@@ -1470,19 +1493,19 @@ def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path
     
     # For each sram macro we instantiate we need to create a placement for it 
     # Get width and height of macros from the lef file
-    for file in os.listdir(os.path.join(sram_lib_path,"lef")):
-        m_sizes = []
-        if sram_map_info["macro"] in file:
-            # TODO fix the way that the size of macro is being searched for this way would not work in all cases
-            lef_text = open(os.path.join(sram_lib_path,"lef",file), "r").read()
-            for line in lef_text.split("\n"):
-                if "SIZE" in line:
-                    # This also assumes the symmetry in the lef is X Y rather than searching for it TODO
-                    m_sizes = [float(s) for s in line.split(" ") if decimal_re.match(s)]
-                    break
-        if len(m_sizes) > 0:
-            break
-            
+    # for file in os.listdir(os.path.join(sram_lib_path,"lef")):
+    #     m_sizes = []
+    #     if sram_map_info["macro"] in file:
+    #         # TODO fix the way that the size of macro is being searched for this way would not work in all cases
+    #         lef_text = open(os.path.join(sram_lib_path,"lef",file), "r").read()
+    #         for line in lef_text.split("\n"):
+    #             if "SIZE" in line:
+    #                 # This also assumes the symmetry in the lef is X Y rather than searching for it TODO
+    #                 m_sizes = [float(s) for s in line.split(" ") if decimal_re.match(s)]
+    #                 break
+    #     if len(m_sizes) > 0:
+    #         break
+    m_sizes = get_sram_macro_sizes(sram_map_info["macro"])
     
     # origin in um from the 0,0 point of the design
     sram_pcs = []
@@ -1546,25 +1569,6 @@ def get_rad_gen_flow_cmd(config_path, sram_flag=False, top_level_mod=None, hdl_p
         cmd = cmd + " -sram"
     return cmd
 
-# def decode_rtl_param_str(param_str,param_list):
-#     split_str = param_str.split("_")
-#     param_list = []
-#     tmp_param_str = param_str
-#     while len(tmp_param_str) > 0:
-#         param_name = []
-#         param_val = None
-#         for word in split_str:
-#             if (res.decimal_re.search(word)):
-#                 param_val = int(word)
-#                 break
-#             else:
-#                 param_name += word
-#             param_name = "_".join(param_name)
-#         tmp_param_str = tmp_param_str.replace(f"{param_name}_{param_val}","")
-    
-
-#     return param_name, param_val
-
 
 def gen_parse_reports(report_search_dir,top_level_mod, design_config: dict = None):
     reports = []
@@ -1582,12 +1586,16 @@ def gen_parse_reports(report_search_dir,top_level_mod, design_config: dict = Non
             # checks to see if initial run was even valid
             """ Looking for SRAM Macros """
             sram_macros = []
+            macro_lef_areas = []
             if os.path.isfile(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json")):
                 syn_out_config = json.load(open(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json")))
                 if "vlsi.inputs.sram_parameters" in syn_out_config.keys():
                     for sram in syn_out_config["vlsi.inputs.sram_parameters"]:
                         sram_macros.append(sram["name"])
-            report_dict["sram_macros"] = ", ".join(sram_macros)
+                        m_sizes = get_sram_macro_sizes(sram["name"])
+                        macro_lef_areas.append(m_sizes[0]*m_sizes[1])
+                report_dict["sram_macros"] = ", ".join(sram_macros)
+                report_dict["sram_macro_lef_areas"] = ", ".join([str(x) for x in macro_lef_areas])
             # Add the gds areas to the report
             gds_file = os.path.join(report_search_dir,dir,"par-rundir",f"{top_level_mod}_drc.gds")
             if os.path.isfile(gds_file):
@@ -1754,6 +1762,7 @@ def init_globals():
     global tech_info
     global report_info
     global script_info
+    global sram_compiler_settings
 
 # def check_for_valid_input(data_struct):
 
@@ -1872,6 +1881,154 @@ def write_dict_to_csv(csv_lines,csv_fname):
         writer.writerow(line)
     csv_fd.close()
 
+def modify_mem_params(mem_params, width, depth, num_ports):
+    mem_params[0]["depth"] = str(depth)
+    mem_params[0]["width"] = str(width)
+    # Defines naming convension of SRAM macros TODO
+    mem_params[0]["name"] = f"SRAM{num_ports}RW{depth}x{width}"
+    if num_ports == 2:
+        mem_params[0]["ports"] = [{}]*2
+        mem_params[0]["family"] = "2RW"
+        mem_params[0]["ports"][0]["read enable port name"] = "OEB1"
+        mem_params[0]["ports"][0]["read enable port polarity"] = "active low"
+        mem_params[0]["ports"][0]["write enable port name"] = "WEB1"
+        mem_params[0]["ports"][0]["write enable port polarity"] = "active low"
+        mem_params[0]["ports"][0]["chip enable port name"] = "CSB1"
+        mem_params[0]["ports"][0]["chip enable port polarity"] = "active low"
+        mem_params[0]["ports"][0]["clock port name"] = "CE1"
+        mem_params[0]["ports"][0]["clock port polarity"] = "positive edge"
+        mem_params[0]["ports"][0]["address port name"] = "A1"
+        mem_params[0]["ports"][0]["address port polarity"] = "active high"
+        mem_params[0]["ports"][0]["output port name"] = "O1"
+        mem_params[0]["ports"][0]["output port polarity"] = "active high"
+        mem_params[0]["ports"][0]["input port name"] = "I1"
+        mem_params[0]["ports"][0]["input port polarity"] = "active high"
+        mem_params[0]["ports"][1]["read enable port name"] = "OEB2"
+        mem_params[0]["ports"][1]["read enable port polarity"] = "active low"
+        mem_params[0]["ports"][1]["write enable port name"] = "WEB2"
+        mem_params[0]["ports"][1]["write enable port polarity"] = "active low"
+        mem_params[0]["ports"][1]["chip enable port name"] = "CSB2"
+        mem_params[0]["ports"][1]["chip enable port polarity"] = "active low"
+        mem_params[0]["ports"][1]["clock port name"] = "CE2"
+        mem_params[0]["ports"][1]["clock port polarity"] = "positive edge"
+        mem_params[0]["ports"][1]["address port name"] = "A2"
+        mem_params[0]["ports"][1]["address port polarity"] = "active high"
+
+def gen_compiled_srams(base_config, sanitized_design):
+    for mem in sanitized_design["mems"]:
+        mapping = sram_compiler.compile(mem["rw_ports"],mem["w"],mem["d"],"asap7")
+        sram_map_info, rtl_outpath = sram_compiler.write_rtl_from_mapping(mapping,sanitized_design["base_rtl_path"],sram_compiler_settings.rtl_out)
+        sram_map_info = sram_compiler.translate_logical_to_phsical(sram_map_info)
+        config_path = mod_rad_gen_config_from_rtl(base_config, sram_map_info, rtl_outpath)
+        rad_gen_log(get_rad_gen_flow_cmd(config_path,sram_flag=True),rad_gen_log_fd)
+        # get mapping and find the macro in lib, instantiate that many and
+
+def sram_sweep_gen(base_config, sanitized_design):
+    # This is where we will send the output sram macros
+    # sram_out_path = os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
+    if not os.path.isdir(sram_compiler_settings.rtl_out):
+        os.mkdir(sram_compiler_settings.rtl_out)
+    gen_compiled_srams(base_config, sanitized_design)
+    # load in the mem_params.json file            
+    with open(base_config["vlsi.inputs"]["sram_parameters"], 'r') as fd:
+        mem_params = json.load(fd)
+    # List of available SRAM macros
+    sram_macro_lefs = os.listdir(os.path.join(tech_info.sram_lib_path,"lef"))
+    # Sweep over all widths and depths for SRAMs in the sweep config file  
+    for rw_port in sanitized_design["rw_ports"]:         
+        for depth in sanitized_design["depths"]:
+            for width in sanitized_design["widths"]:
+                """ MODIFIYING MEM CONFIG JSON FILES """
+                # If we want to iterate through and keep an original reference set of configs we need to use deepcopy on the dict
+                # This concept is very annoying as when assigning any variable to a dict you are actually just creating a reference to the dict (Very unlike C) :(
+                # All mem_params are indexed to 0 since we are only sweeping over a single SRAM TODO
+                # Create copies of each configs s.t they can be modified without affecting the original
+                mod_base_config = copy.deepcopy(base_config)
+                mod_mem_params = copy.deepcopy(mem_params)
+                modify_mem_params(mod_mem_params, width, depth, rw_port)
+                # Make sure that the SRAM macro exists in the list of SRAM macros
+                if not any(mod_mem_params[0]["name"] in macro for macro in sram_macro_lefs):
+                    rad_gen_log(f"WARNING: {mod_mem_params[0]['name']} not found in list of SRAM macros, skipping config generation...",rad_gen_log_fd)
+                    continue
+                
+                for ret_str in create_bordered_str(f"Generating files required for design: {mod_mem_params[0]['name']}"):
+                    rad_gen_log(ret_str,rad_gen_log_fd)                        
+                
+                # Modify the mem_params.json file with the parameters specified in the design sweep config file
+                mem_params_json_fpath = os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0]+f'_{mod_mem_params[0]["name"]}.json'
+                with open(os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0]+f'_{mod_mem_params[0]["name"]}.json', 'w') as fd:
+                    json.dump(mod_mem_params, fd, sort_keys=False)
+                rad_gen_log(f"INFO: Writing memory params to {mem_params_json_fpath}",rad_gen_log_fd)
+                
+                """ MODIFIYING SRAM RTL"""
+                # Get just the filename of the sram sv file and append the new dims to it
+                mod_rtl_fname = os.path.splitext(sanitized_design["base_rtl_path"].split("/")[-1])[0]+f'_{mod_mem_params[0]["name"]}.sv'
+                # Modify the parameters for SRAM_ADDR_W and SRAM_DATA_W and create a copy of the base sram 
+                # TODO find a better way to do this rather than just creating a ton of files, the only thing I'm changing are 2 parameters in rtl
+                with open(sanitized_design["base_rtl_path"], 'r') as fd:
+                    base_rtl = fd.read()
+                mod_sram_rtl = base_rtl
+                # Modify the parameters in rtl and create new dir for the sram
+                # Regex looks for parameters and will replace whole line
+                edit_param_re = re.compile(f"parameter\s+SRAM_ADDR_W.*",re.MULTILINE)
+                # Replace the whole line with the new parameter (log2 of depth fior SRAM_ADDR_W)
+                mod_sram_rtl = edit_param_re.sub(f"parameter SRAM_ADDR_W = {int(math.log2(depth))};",base_rtl)
+                
+                edit_param_re = re.compile(f"parameter\s+SRAM_DATA_W.*",re.MULTILINE)
+                # Replace the whole line with the new parameter (log2 of depth fior SRAM_ADDR_W)
+                mod_sram_rtl = edit_param_re.sub(f"parameter SRAM_DATA_W = {int(width)};",mod_sram_rtl)
+                if rw_port == 2:
+                    mod_sram_rtl = f"`define DUAL_PORT\n" + mod_sram_rtl
+                # Look for the SRAM instantiation and replace the name of the sram macro, the below regex uses the comments in the rtl file to find the instantiation
+                # Inst starts with "START SRAM INST" and ends with "END SRAM INST"
+                port_str = "1PORT" if rw_port == 1 else "2PORT"
+                edit_sram_inst_re = re.compile(f"^\s+//\s+START\sSRAM\s{port_str}\sINST.*END\sSRAM\s{port_str}",re.MULTILINE|re.DOTALL)
+
+                sram_inst_rtl = edit_sram_inst_re.search(mod_sram_rtl).group(0)
+                edit_sram_macro_name = re.compile(f"SRAM{rw_port}RW.*\s")
+                edit_sram_inst = edit_sram_macro_name.sub(f'{mod_mem_params[0]["name"]} mem_0_0(\n',sram_inst_rtl)
+                # The correct RTL for the sram inst is in the edit_sram_inst string so we now will replace the previous sram inst with the new one
+                mod_sram_rtl = edit_sram_inst_re.sub(edit_sram_inst,mod_sram_rtl)
+                
+                base_rtl_dir = os.path.split(sanitized_design["base_rtl_path"])[0]
+                # Create a new dir for the modified sram
+                mod_rtl_dir = os.path.join(base_rtl_dir,f'{mod_mem_params[0]["name"]}')
+                
+                sp.call("mkdir -p " + mod_rtl_dir,shell=True)
+            
+                modified_sram_rtl_path = os.path.join(sanitized_design["rtl_dir_path"],mod_rtl_dir.split("/")[-1],mod_rtl_fname)
+                with open(modified_sram_rtl_path, 'w') as fd:
+                    fd.write(mod_sram_rtl)
+                rad_gen_log(f"INFO: Writing sram rtl to {modified_sram_rtl_path}",rad_gen_log_fd)
+                """ MODIFYING HAMMER CONFIG YAML FILES """
+                m_sizes = get_sram_macro_sizes(mod_mem_params[0]["name"])
+                # Now we need to modify the base_config file to use the correct sram macro
+                
+                macro_init = 15 if rw_port == 1 else 30
+                macro_extra_logic_spacing = 15 if rw_port == 1 else 30
+                for pc_idx, pc in enumerate(base_config["vlsi.inputs"]["placement_constraints"]):
+                    # TODO this requires "SRAM" to be in the macro name which is possibly dangerous
+                    if pc["type"] == "hardmacro" and "SRAM" in pc["master"]:
+                        mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["master"] = mod_mem_params[0]["name"]
+                        mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["x"] = macro_init
+                        mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["y"] = macro_init
+                    elif pc["type"] == "toplevel":
+                        mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["width"] = m_sizes[0] + macro_extra_logic_spacing
+                        mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["height"] = m_sizes[1] + macro_extra_logic_spacing
+                
+
+
+                # Find design files in newly created rtl dir
+                design_files, design_dirs = rec_get_flist_of_ext(mod_rtl_dir,['.v','.sv','.vhd',".vhdl"])
+                mod_base_config["synthesis"]["inputs.input_files"] = design_files
+                mod_base_config["synthesis"]["inputs.hdl_search_paths"] = design_dirs
+                mod_base_config["vlsi.inputs"]["sram_parameters"] = os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0] + f'_{mod_mem_params[0]["name"]}.json'
+                # Write the modified base_config file to a new file
+                modified_config_path = os.path.splitext(sanitized_design["base_config_path"])[0]+f'_{mod_mem_params[0]["name"]}.yaml'
+                with open(modified_config_path, 'w') as fd:
+                    yaml.safe_dump(mod_base_config, fd, sort_keys=False)    
+                rad_gen_log(f"INFO: Writing rad_gen yml config to {modified_config_path}",rad_gen_log_fd)
+                rad_gen_log(get_rad_gen_flow_cmd(modified_config_path,sram_flag=True),rad_gen_log_fd)
 
 def main():
     global cur_env
@@ -1902,10 +2059,8 @@ def main():
     parser.add_argument('-l', '--use_latest_obj_dir', help="uses latest obj dir found in rad_gen dir", action='store_true') 
     parser.add_argument('-o', '--manual_obj_dir', help="uses user specified obj dir", type=str, default='')
     
-
     parser.add_argument('-s', '--design_sweep_config_file', help="path to config file containing design sweep parameters",  type=str, default='')
     parser.add_argument('-c', '--compile_results', help="path to dir", action='store_true') 
-    parser.add_argument('-j', '--result_parse_config_file', help="path to config file containing design sweep parameters",  type=str, default='')
 
 
     parser.add_argument('-syn', '--synthesis', help="path to dir", action='store_true') 
@@ -1943,10 +2098,8 @@ def main():
         sys.exit(1)
 
     cur_env = os.environ.copy()
-    
     # Convert from cli args into rad_gen_flow_settings for a particular flow run    
     rad_gen_flow_settings = vars(args)
-
     if args.compile_results and args.design_sweep_config_file != '':
         # read in the result config file
         report_search_dir = os.path.expanduser("~/rad_gen")
@@ -1986,58 +2139,8 @@ def main():
                     csv_lines.append(report_to_csv)
         csv_fname = os.path.splitext(os.path.basename(args.design_sweep_config_file))[0]
         write_dict_to_csv(csv_lines,csv_fname)
-        sys.exit(1)
-        
-        """
-        # SRAM REPORT PARSING 
-        rad_gen_log(f"Parsing results of parameter sweep using parameters in {args.design_sweep_config_file}",rad_gen_log_fd)
-        design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
-        # USED FOR PARSING SRAM REPORTS
-        csv_lines = []
-        for design in design_sweep_config["designs"]:
-            for mem in design["mems"]:
-                mem_top_lvl_name = f"sram_macro_map_{mem['rw_ports']}x{mem['w']}x{mem['d']}"
-                reports = gen_parse_reports(report_search_dir,mem_top_lvl_name)
-                for report in reports:
-                    report_to_csv = gen_report_to_csv(report)
-                    if len(report_to_csv) > 0:
-                        csv_lines.append(report_to_csv)
-            
-        csv_fd = open("area_csv.csv","w")
-        writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
-        writer.writeheader()
-        for line in csv_lines:
-            writer.writerow(line)
-        csv_fd.close()
-        sys.exit(1)            
-        """
-        """ ORIGINAL NOC RESULT PARSING CODE """
-        rad_gen_log(f"Parsing results of parameter sweep using parameters in {args.design_sweep_config_file}",rad_gen_log_fd)
-        design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
-        # TODO fix to support multiple designs through a single param sweep file, below break only allows for one
-        for design in design_sweep_config["designs"]:
-            reports = parse_reports(report_search_dir,design["params"].keys(),design["top_level_module"])
-            # TODO fix to support multiple designs through a single param sweep file, below break only allows for one
-            break        
-        
-        """ OUTPUTTING REPORTS FOR THE NOC SWEEP VALUES TODO MAKE LESS DESIGN SPECIFIC """
-        csv_lines = []
-        for report in reports:
-            report_to_csv = noc_prse_area_brkdwn(report)            
-            csv_lines.append(report_to_csv)
-
-        csv_fd = open("area_csv.csv","w")
-        writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
-        writer.writeheader()
-        for line in csv_lines:
-            writer.writerow(line)
-        csv_fd.close()
-        sys.exit(1)
     # If a design sweep config file is specified, modify the flow settings for each design in sweep
     elif args.design_sweep_config_file != '':
-        # Vars for storing the values initialized in the loops for base configuration params of sweep file
-        base_config_dir = ""
-        base_rtl_dir = ""
         # Starting with just SRAM configurations for a single rtl file (changing parameters in header file)
         rad_gen_log(f"Running design sweep from config file {args.design_sweep_config_file}",rad_gen_log_fd)
         design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
@@ -2045,7 +2148,6 @@ def main():
             """ General flow for all designs in sweep config """
             # Load in the base configuration file for the design
             sanitized_design = sanitize_config(design)
-            base_config_dir = os.path.split(sanitized_design["base_config_path"])[0]
             base_config = yaml.safe_load(open(sanitized_design["base_config_path"]))
             
             """ Currently only can sweep either vlsi params or rtl params not both """
@@ -2063,141 +2165,11 @@ def main():
                             # print(modified_config_path)
             # TODO This wont work for multiple SRAMs in a single design, simply to evaluate individual SRAMs
             elif sanitized_design["type"] == "sram":      
-                # This is where we will send the output sram macros
-                sram_out_path = os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
-                if not os.path.isdir(sram_out_path):
-                    os.mkdir(sram_out_path)
-                for mem in sanitized_design["mems"]:
-                    mapping = sram_compiler.compile(mem["rw_ports"],mem["w"],mem["d"],"asap7")
-                    sram_map_info, rtl_outpath = sram_compiler.write_rtl_from_mapping(mapping,sanitized_design["base_rtl_path"],sram_out_path)
-                    sram_map_info = sram_compiler.translate_logical_to_phsical(sram_map_info)
-                    config_path = mod_rad_gen_config_from_rtl(base_config, sram_map_info, rtl_outpath)
-                    rad_gen_log(get_rad_gen_flow_cmd(config_path,sram_flag=True),rad_gen_log_fd)
-                    # get mapping and find the macro in lib, instantiate that many and
-                sys.exit(1)        
-                # load in the mem_params.json file            
-                with open(base_config["vlsi.inputs"]["sram_parameters"], 'r') as fd:
-                    mem_params = json.load(fd)
-                # List of available SRAM macros
-                sram_macros = os.listdir(os.path.join(sanitized_design["sram_memory_path"],"lef"))
-                # Sweep over all widths and depths for SRAMs in the sweep config file                
-                for depth in sanitized_design["depths"]:
-                    """ MODIFIYING MEM CONFIG JSON FILES """
-                    # If we want to iterate through and keep an original reference set of configs we need to use deepcopy on the dict
-                    # This concept is very annoying as when assigning any variable to a dict you are actually just creating a reference to the dict (Very unlike C) :(
-                    mod_mem_params = copy.deepcopy(mem_params)
-                    # All mem_params are indexed to 0 since we are only sweeping over a single SRAM TODO
-                    mod_mem_params[0]["depth"] = str(depth)
-                    for width in sanitized_design["widths"]:
-                        # Create copies of each configs s.t they can be modified without affecting the original
-                        mod_base_config = copy.deepcopy(base_config)
-
-                        mod_mem_params[0]["width"] = str(width)
-                        # Defines naming convension of SRAM macros TODO
-                        mod_mem_params[0]["name"] = f"SRAM1RW{depth}x{width}"
-                        # Make sure that the SRAM macro exists in the list of SRAM macros
-                        if not any(mod_mem_params[0]["name"] in macro for macro in sram_macros):
-                            rad_gen_log(f"WARNING: {mod_mem_params[0]['name']} not found in list of SRAM macros, skipping config generation...",rad_gen_log_fd)
-                            continue
-                        
-                        for ret_str in create_bordered_str(f"Generating files required for design: {mod_mem_params[0]['name']}"):
-                            rad_gen_log(ret_str,rad_gen_log_fd)                        
-                        
-                        # Modify the mem_params.json file with the parameters specified in the design sweep config file
-                        mem_params_json_fpath = os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0]+f'_{mod_mem_params[0]["name"]}.json'
-                        with open(os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0]+f'_{mod_mem_params[0]["name"]}.json', 'w') as fd:
-                            json.dump(mod_mem_params, fd, sort_keys=False)
-                        rad_gen_log(f"INFO: Writing memory params to {mem_params_json_fpath}",rad_gen_log_fd)
-                        
-                        """ MODIFIYING SRAM RTL"""
-                        # Get just the filename of the sram sv file and append the new dims to it
-                        mod_rtl_fname = os.path.splitext(sanitized_design["base_rtl_path"].split("/")[-1])[0]+f'_{mod_mem_params[0]["name"]}.sv'
-                        # Modify the parameters for SRAM_ADDR_W and SRAM_DATA_W and create a copy of the base sram 
-                        # TODO find a better way to do this rather than just creating a ton of files, the only thing I'm changing are 2 parameters in rtl
-                        with open(sanitized_design["base_rtl_path"], 'r') as fd:
-                            base_rtl = fd.read()
-                        mod_sram_rtl = base_rtl
-                        # Modify the parameters in rtl and create new dir for the sram
-                        # Regex looks for parameters and will replace whole line
-                        edit_param_re = re.compile(f"parameter\s+SRAM_ADDR_W.*",re.MULTILINE)
-                        # Replace the whole line with the new parameter (log2 of depth fior SRAM_ADDR_W)
-                        mod_sram_rtl = edit_param_re.sub(f"parameter SRAM_ADDR_W = {int(math.log2(depth))};",base_rtl)
-                        
-                        edit_param_re = re.compile(f"parameter\s+SRAM_DATA_W.*",re.MULTILINE)
-                        # Replace the whole line with the new parameter (log2 of depth fior SRAM_ADDR_W)
-                        mod_sram_rtl = edit_param_re.sub(f"parameter SRAM_DATA_W = {int(width)};",mod_sram_rtl)
-                        # Look for the SRAM instantiation and replace the name of the sram macro, the below regex uses the comments in the rtl file to find the instantiation
-                        # Inst starts with "START SRAM INST" and ends with "END SRAM INST"
-                        edit_sram_inst_re = re.compile(f"^\s+//\s+START\sSRAM\sINST.*END\sSRAM\sINST",re.MULTILINE|re.DOTALL)
-
-                        sram_inst_rtl = edit_sram_inst_re.search(mod_sram_rtl).group(0)
-                        edit_sram_macro_name = re.compile(f"SRAM1RW.*\s")
-                        edit_sram_inst = edit_sram_macro_name.sub(f'{mod_mem_params[0]["name"]} mem_0_0(\n',sram_inst_rtl)
-                        # The correct RTL for the sram inst is in the edit_sram_inst string so we now will replace the previous sram inst with the new one
-                        mod_sram_rtl = edit_sram_inst_re.sub(edit_sram_inst,mod_sram_rtl)
-                        
-                        base_rtl_dir = os.path.split(sanitized_design["base_rtl_path"])[0]
-                        # Create a new dir for the modified sram
-                        mod_rtl_dir = os.path.join(base_rtl_dir,f'{mod_mem_params[0]["name"]}')
-                        
-                        sp.call("mkdir -p " + mod_rtl_dir,shell=True)
-                    
-                        modified_sram_rtl_path = os.path.join(sanitized_design["rtl_dir_path"],mod_rtl_dir.split("/")[-1],mod_rtl_fname)
-                        with open(modified_sram_rtl_path, 'w') as fd:
-                            fd.write(mod_sram_rtl)
-                        rad_gen_log(f"INFO: Writing sram rtl to {modified_sram_rtl_path}",rad_gen_log_fd)
-                        
-                        """ MODIFYING HAMMER CONFIG YAML FILES """
-                        # Now we need to modify the base_config file to use the correct sram macro
-                        for pc_idx, pc in enumerate(base_config["vlsi.inputs"]["placement_constraints"]):
-                            # TODO this requires "SRAM" to be in the macro name which is possibly dangerous
-                            if pc["type"] == "hardmacro" and "SRAM" in pc["master"]:
-                                mod_base_config["vlsi.inputs"]["placement_constraints"][pc_idx]["master"] = mod_mem_params[0]["name"]
-
-                        # Find design files in newly created rtl dir
-                        design_files, design_dirs = rec_get_flist_of_ext(mod_rtl_dir,['.v','.sv','.vhd',".vhdl"])
-                        mod_base_config["synthesis"]["inputs.input_files"] = design_files
-                        mod_base_config["synthesis"]["inputs.hdl_search_paths"] = design_dirs
-                        mod_base_config["vlsi.inputs"]["sram_parameters"] = os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0] + f'_{mod_mem_params[0]["name"]}.json'
-                        # Write the modified base_config file to a new file
-                        modified_config_path = os.path.splitext(sanitized_design["base_config_path"])[0]+f'_{mod_mem_params[0]["name"]}.yaml'
-                        with open(modified_config_path, 'w') as fd:
-                            yaml.safe_dump(mod_base_config, fd, sort_keys=False)    
-                        rad_gen_log(f"INFO: Writing rad_gen yml config to {modified_config_path}",rad_gen_log_fd)
-                # Accessing variables declared outside and initized in the loop
-                # Compare generated RTL files to configs that exist and run all configs with paths to the generated RTL        
-                run_configs = []
-                for file in os.listdir(base_config_dir):
-                    # TODO fix the below line, it only looks for if the SRAM keyword is contained in the file
-                    if file.endswith(".yaml") and "SRAM" in file:
-                        run_configs.append(os.path.join(base_config_dir,file))
-                """ rad_gen flow settings are equal to the command line args typically expected in rad_gen """
-                """
-                for config in run_configs:
-                    # below are the only flow settings which we actually need to run hammer 
-                    sw_flow_settings = {
-                        "top_level": "sram_wrapper",
-                        "env_path" : args.env_path,
-                        # We want a new obj dir for each run
-                        "use_latest_obj_dir" : False,
-                        "config_path" : config,
-                    }
-                    # TODO fix Hardcoded for now to run full flow
-                    sw_run_stages = {
-                        "sram" : True,
-                        "syn" : True,
-                        "par" : True,
-                        "pt" : True
-                    }
-                    #Run the flow for each config
-                    #rad_gen_flow(sw_flow_settings,sw_run_stages,[config])     
-                    break     
-                """  
+                sram_sweep_gen(base_config,sanitized_design)                
             # TODO make this more general but for now this is ok
             # the below case should deal with any asic_param sweep we want to perform
             elif sanitized_design["type"] == 'rtl_params':
                 mod_param_hdr_paths, mod_config_paths = edit_rtl_proj_params(sanitized_design["params"], sanitized_design["rtl_dir_path"], sanitized_design["base_param_hdr_path"],sanitized_design["base_config_path"])
-                # read_in_rtl_proj_params(sanitized_design["params"],sanitized_design["top_level_module"],sanitized_design["rtl_dir_path"])
                 for hdr_path, config_path in zip(mod_param_hdr_paths, mod_config_paths):
                 # for hdr_path in mod_param_hdr_paths:
                     rad_gen_log(f"PARAMS FOR PATH {hdr_path}",rad_gen_log_fd)
@@ -2206,7 +2178,6 @@ def main():
                     """ We shouldn't need to edit the values of params/defines which are operations or values set to other params/defines """
                     """ EDIT PARAMS/DEFINES IN THE SWEEP FILE """
                     # TODO this assumes parameter sweep vars arent kept over multiple files
-                    # copy original parameter file containing sweep vars
     else:
         """ USED FOR THE SRAM SWEEP RUN, I THINK THIS IS UNSAFE TO USE TODO REMOVE THIS"""
         # If the args for top level and rtl path are not set, we will use values from the config file
