@@ -162,7 +162,8 @@ def translate_logical_to_phsical(mapping_dict) -> dict:
     # sq_val = float(cur_w / cur_d) if cur_w > cur_d else float(cur_d / cur_w) 
     sq_val = float(cur_w / cur_d) if cur_w > cur_d else float(cur_d / cur_w) 
     # stops at an aspect ratio of 2
-    while sq_val >= 2.0:
+    # while sq_val >= 2.0:
+    while sq_val > 2.0:
         aspect_ratio = cur_w / cur_d
         # check to see if some threshold of squareness has been met
         if aspect_ratio > 1.0:
