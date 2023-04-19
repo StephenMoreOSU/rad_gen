@@ -1314,7 +1314,6 @@ def gen_report_to_csv(report: dict):
 
     # This is where if there are empty reports for a particular 
     # flow stages are in order of fidelity
-    
     # TIMING
     for flow_stage in ["pt", "par", "syn"]:
         if "timing" in report[flow_stage]:
@@ -1381,20 +1380,13 @@ def gen_report_to_csv(report: dict):
 def noc_prse_area_brkdwn(report):
     report_to_csv = {}
 
-    print(report["obj_dir"])
+    # print(report["obj_dir"])
     report_to_csv["Obj Dir"] = report["obj_dir"]
 
-    print(report["rtl_params"])
+    # print(report["rtl_params"])
     for p in report["rtl_params"]:
         for k,v in p.items():
             report_to_csv[k] = v
-
-
-    # print(report["rtl_param"])
-    # 
-    # for k,v in report["rtl_param"].items():
-        # report_to_csv["param_key"] = k
-        # report_to_csv["param_val"] = v
 
     total_area = float(report["par"]["area"][0]["Total Area"])
     print(f'Total Area: {total_area}')
@@ -1773,7 +1765,11 @@ def rad_gen_flow(flow_settings: dict, config_paths: list) -> None:
 
     rad_gen_log(f"Using obj_dir: {obj_dir_path}",rad_gen_log_fd)
 
-    flow_report = {}
+    flow_report = {
+        "syn" : None,
+        "par" : None,
+        "pt" : None
+    }
     # Check to see if design has an SRAM configuration
     if asic_flow_settings.run_sram:
         sram_config, sram_stdout, sram_stderr = run_hammer_stage("sram_generator", config_paths)
@@ -1909,7 +1905,7 @@ def init_structs_from_cli(args):
         rad_gen_settings.design_output_path = os.path.join(rad_gen_settings.rad_gen_home_path, "output_designs")
         rad_gen_settings.env_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["env_config_path"])
     else:
-        rad_gen_log("ERROR: No mode of operation specified", rad_gen_log_fd)
+        rad_gen_log("ERROR: High level RAD-Gen config file not provided", rad_gen_log_fd)
         sys.exit(1)
     # determine mode of operation of RAD-Gen
     tool_mode = None
