@@ -1316,7 +1316,7 @@ def gen_report_to_csv(report: dict):
     # flow stages are in order of fidelity
     # TIMING
     for flow_stage in ["pt", "par", "syn"]:
-        if "timing" in report[flow_stage]:
+        if report[flow_stage] != None and "timing" in report[flow_stage]:
             if len(report[flow_stage]["timing"]) > 0:
                 if "Slack" in report[flow_stage]["timing"][0]:
                     report_to_csv["Slack"] = float(report[flow_stage]["timing"][0]["Slack"])
@@ -1328,7 +1328,7 @@ def gen_report_to_csv(report: dict):
             break
     # AREA
     for flow_stage in ["pt", "par", "syn"]:
-        if "area" in report[flow_stage]:
+        if report[flow_stage] != None and "area" in report[flow_stage]:
             if len(report[flow_stage]["area"]) > 0:
                 if "Hinst Name" in report[flow_stage]["area"][0]:
                     report_to_csv["Top Level Inst"] = report[flow_stage]["area"][0]["Hinst Name"]
@@ -1339,7 +1339,7 @@ def gen_report_to_csv(report: dict):
             break
     # POWER
     for flow_stage in ["pt", "par", "syn"]:
-        if "power" in report[flow_stage]:
+        if report[flow_stage] != None and "power" in report[flow_stage]:
             if len(report[flow_stage]["power"]) > 0:
                 if "Total" in report[flow_stage]["power"][0]:
                     report_to_csv["Total Power"] = float(report[flow_stage]["power"][0]["Total"])
