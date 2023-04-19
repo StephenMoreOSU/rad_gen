@@ -28,6 +28,7 @@ from typing import Pattern
 import datetime
 
 from dataclasses import field
+
 ########################################## DATA STRUCTURES  ###########################################
 
 @dataclass 
@@ -78,7 +79,6 @@ class MultiDesign_settings:
      - Using the SRAM mapper
     """
     sweep_config_path: str = ""
-    result_config_path: str = ""
     # path which will look for obj files to be parsed
     result_search_path: str = ""
 
@@ -177,6 +177,16 @@ class Script_info:
 @dataclass
 class Report_info:
     gds_area_fname : str = "gds_area.rpt"
+    power_lookup : dict = field(default_factory = lambda: {
+        "W": float(1),
+        "mW": float(1e-3),
+        "uW": float(1e-6),
+        "nW": float(1e-9),
+        "pW": float(1e-12)
+    })
+    power_display_unit = "mW"
+    timing_display_unt = "ps"
+    area_display_unit = "um^2"
 
 
 
@@ -1108,14 +1118,14 @@ def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param
 
 
 def parse_report_c(top_level_mod, report_path, rep_type, flow_stage: dict, summarize=False):
-    print( report_path )
-    pwr_lookup ={
-        "W": float(1),
-        "mW": float(1e-3),
-        "uW": float(1e-6),
-        "nW": float(1e-9),
-        "pW": float(1e-12)
-    }
+    # print( report_path )
+    # pwr_lookup ={
+    #     "W": float(1),
+    #     "mW": float(1e-3),
+    #     "uW": float(1e-6),
+    #     "nW": float(1e-9),
+    #     "pW": float(1e-12)
+    # }
     
     # wspace_re = re.compile("\s+", re.MULTILINE)
     # decimal_re = re.compile("\d+\.{0,1}\d*",re.MULTILINE)
@@ -1139,7 +1149,7 @@ def parse_report_c(top_level_mod, report_path, rep_type, flow_stage: dict, summa
     cadence_timing_grab_re = re.compile("Path(.*?#-+){3}",re.MULTILINE|re.DOTALL)
     cadence_timing_setup_re = re.compile("Setup:-.*$",re.MULTILINE)
     
-    unit_re_str = "(" + "|".join([f"({unit})" for unit in pwr_lookup.keys()]) + ")"                  
+    unit_re_str = "(" + "|".join([f"({unit})" for unit in report_info.power_lookup.keys()]) + ")"                  
     
     grab_val_re_str = f"\d+\.{{0,1}}\d*.*?{unit_re_str}"
     synopsys_grab_pwr_val_re = re.compile(grab_val_re_str)
@@ -1210,9 +1220,9 @@ def parse_report_c(top_level_mod, report_path, rep_type, flow_stage: dict, summa
             power_dict = {}
             for line in power_rpt_text.split("\n"):
                 if "Total Dynamic Power" in line:
-                    for unit in pwr_lookup.keys():
+                    for unit in report_info.power_lookup.keys():
                         if f" {unit} " in line or f" {unit}" in line:
-                            units = pwr_lookup[unit]
+                            units = report_info.power_lookup[unit]
                             break
                     power_dict["Dynamic"] = float(res.decimal_re.findall(line)[0]) * units
                     # Check to make sure that the total has multiple values associated with it
@@ -1221,9 +1231,9 @@ def parse_report_c(top_level_mod, report_path, rep_type, flow_stage: dict, summa
                     pwr_vals_line = line
                     while synopsys_grab_pwr_val_re.search(pwr_vals_line):
                         pwr_val = synopsys_grab_pwr_val_re.search(pwr_vals_line).group(0)
-                        for unit in pwr_lookup.keys():
+                        for unit in report_info.power_lookup.keys():
                             if f" {unit} " in pwr_val or f" {unit}" in pwr_val:
-                                units = pwr_lookup[unit]
+                                units = report_info.power_lookup[unit]
                                 break
                         pwr_total = float(res.wspace_re.split(pwr_val)[0]) * units
                         pwr_totals.append(pwr_total)
@@ -1234,9 +1244,9 @@ def parse_report_c(top_level_mod, report_path, rep_type, flow_stage: dict, summa
             power_dict = {}
             for line in power_rpt_text.split("\n"):
                 if "Power Unit" in line:
-                    for unit in pwr_lookup.keys():
+                    for unit in report_info.power_lookup.keys():
                         if unit in line:
-                            units = pwr_lookup[unit]
+                            units = report_info.power_lookup[unit]
                             break
                 if flow_stage["name"] == "par":
                     if "Total Internal Power:" in line:
@@ -1270,7 +1280,7 @@ def get_report_results(top_level_mod: str, report_dir_path: str, flow_stage: dic
                     elif("power" in file): 
                         results["power"] = parse_report_c(top_level_mod, os.path.join(report_dir_path, file), "power", flow_stage, summarize=False)
     else:
-        rad_gen_log("Warning: Synthesis report path does not exist", rad_gen_log_fd)
+        rad_gen_log(f"Warning: {flow_stage['name']} report path does not exist", rad_gen_log_fd)
     return results 
 
 def parse_output(top_level_mod, output_path):
@@ -1281,28 +1291,9 @@ def parse_output(top_level_mod, output_path):
     syn_report_path = os.path.join(output_path,syn_dir,"reports")
     par_report_path = os.path.join(output_path,par_dir)
     pt_report_path = os.path.join(output_path,pt_dir,"reports")
-    syn_results = {}
-    par_results = {}
-    pt_results = {}
-    if os.path.isdir(syn_report_path):
-        for file in os.listdir(syn_report_path):
-            if("area" in file):
-                syn_results["area"] = parse_report_c(top_level_mod,os.path.join(syn_report_path,file),"area","syn","cadence",summarize=False)
-            elif("time" in file or "timing" in file):
-                syn_results["timing"] = parse_report_c(top_level_mod,os.path.join(syn_report_path,file),"timing","syn","cadence",summarize=False)
-    if os.path.isdir(par_report_path):
-        for file in os.listdir(par_report_path):
-            if(file == "area.rpt"):
-                par_results["area"] = parse_report_c(top_level_mod,os.path.join(par_report_path,file),"area","par","cadence",summarize=False)
-            elif(file == "timing.rpt"):
-                par_results["timing"] = parse_report_c(top_level_mod,os.path.join(par_report_path,file),"timing","par","cadence",summarize=False)
-    if os.path.isdir(pt_report_path):
-        for file in os.listdir(pt_report_path):
-            if("timing" in file):
-                pt_results["timing"] = parse_report_c(top_level_mod,os.path.join(pt_report_path,file),"timing","pt","synopsys",summarize=False)
-            elif ("power" in file):
-                pt_results["power"] = parse_report_c(top_level_mod,os.path.join(pt_report_path,file),"power","pt","synopsys",summarize=False)
-
+    syn_results = get_report_results(top_level_mod, syn_report_path, asic_flow_settings.flow_stages["syn"])
+    par_results = get_report_results(top_level_mod, par_report_path, asic_flow_settings.flow_stages["par"])
+    pt_results = get_report_results(top_level_mod, pt_report_path, asic_flow_settings.flow_stages["pt"])
     return syn_results, par_results, pt_results
 
 
@@ -1314,86 +1305,76 @@ def get_gds_area_from_rpt(obj_dir_fpath):
                 area = float(res.decimal_re.findall(line)[-1]) 
     return area
 
-# def parse_reports(report_search_dir: str, param_search_list: list, top_level_mod: str):
-#     reports = []
-#     for dir in os.listdir(report_search_dir):
-#         # If the object directories start with top level module or top level module in search path
-#         if os.path.isdir(dir) and dir.startswith(top_level_mod):
-#             report_dict = {}
-#             # print(f"Parsing results for {dir}")
-#             syn_rpts, par_rpts, pt_rpts = parse_output(top_level_mod,dir)
-#             report_dict["syn"] = syn_rpts
-#             report_dict["par"] = par_rpts
-#             report_dict["pt"] = pt_rpts
-#             report_dict["obj_dir"] = dir
-#             # We need to get parameter values associated with this report dict
-#             # Currently using the value in the hdl_search_path to determine the specific parameters TODO fix this in the future
-#             # Using the synthesis generated output file to get this value, if this file does not exist, synthesis was not run and will return invalid tag for the directory
-#             if(os.path.isfile(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json"))):
-#                 syn_out_config = json.load(open(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json")))
-#                 #design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
-#                 # TODO fix the specific config path being looked up (if hammer changes so could this)
-#                 for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
-#                     # This expects there to only be one path which contains param sweep header 
-#                     if "param_sweep_headers" in path:
-#                         param_dir_name = os.path.basename(path)
-#                         # TODO fix this to not just use the first design in the sweep file
-#                         for param in param_search_list:
-#                             if param in param_dir_name:
-#                                 param_grab_re = re.compile(f"{param}_\d+")
-#                                 # This only works if the param name is seperated by a "_"
-#                                 param_val = param_grab_re.search(param_dir_name).group(0).split("_")[-1]
-#                                 report_dict["rtl_param"] = { param : param_val }
-                                
-#                                 # Add the gds areas to the report
-#                                 gds_file = os.path.join(report_search_dir,dir,"par-rundir",f"{top_level_mod}_drc.gds")
-#                                 if os.path.isfile(gds_file):
-#                                     write_virtuoso_gds_to_area_script(gds_file)
-#                                     for ext in ["csh","sh"]:
-#                                         permission_cmd = "chmod +x " +  os.path.join(tech_info.pdk_rundir,f'{script_info.gds_to_area_fname}.{ext}')
-#                                         run_shell_cmd_no_logs(permission_cmd)
-#                                     # run_shell_cmd_no_logs(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.sh"))
-#                                     if not os.path.exists(os.path.join(report_search_dir,dir,report_info.gds_area_fname)):
-#                                         run_csh_cmd(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.csh"))
-#                                         report_dict["gds_area"] = parse_gds_to_area_output(os.path.join(report_search_dir,dir))
-#                                     else:
-#                                         report_dict["gds_area"] = get_gds_area_from_rpt(os.path.join(report_search_dir,dir))
-#                                 if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
-#                                     reports.append(report_dict)
-#                                 break
-
-#     return reports
-
-
-def gen_report_to_csv(report):
+def gen_report_to_csv(report: dict):
+    """
+        Takes report which is a complete or incomplete asic flow run and will take the highest fidelity results and return it to a dict that can be used to write to a csv
+    """
     report_to_csv = {}
-    # print(report["obj_dir"])
-    # print(report["par"]["timing"])
-    # print(report["pt"])
-    if "timing" in report["par"] and "area" in report["par"]:
-        # print(report["par"]["timing"])
-        report_to_csv["Top Level Inst"] = report["par"]["area"][0]["Hinst Name"]
-        report_to_csv["Total Area"] = float(report["par"]["area"][0]["Total Area"])
-        if "timing" in report["pt"] and ("Slack" in report["pt"]["timing"][0] or "Delay" in report["pt"]["timing"][0]):
-            report_to_csv["Slack"] = float(report["pt"]["timing"][0]["Slack"])
-            report_to_csv["Delay"] = float(report["pt"]["timing"][0]["Delay"])
-            report_to_csv["Timing SRC"] = "pt"
-        else:
-            report_to_csv["Slack"] = float(report["par"]["timing"][0]["Slack"])
-            report_to_csv["Delay"] = float(report["par"]["timing"][0]["Delay"])
-            report_to_csv["Timing SRC"] = "par"
 
+    # This is where if there are empty reports for a particular 
+    # flow stages are in order of fidelity
+    
+    # TIMING
+    for flow_stage in ["pt", "par", "syn"]:
+        if "timing" in report[flow_stage]:
+            if len(report[flow_stage]["timing"]) > 0:
+                if "Slack" in report[flow_stage]["timing"][0]:
+                    report_to_csv["Slack"] = float(report[flow_stage]["timing"][0]["Slack"])
+                if "Delay" in report[flow_stage]["timing"][0]:
+                    report_to_csv["Delay"] = float(report[flow_stage]["timing"][0]["Delay"])
+                report_to_csv["Timing SRC"] = flow_stage
+        # For the first flow stage which has timing results, we can break out of the loop
+        if "Slack" and "Delay" in report_to_csv:
+            break
+    # AREA
+    for flow_stage in ["pt", "par", "syn"]:
+        if "area" in report[flow_stage]:
+            if len(report[flow_stage]["area"]) > 0:
+                if "Hinst Name" in report[flow_stage]["area"][0]:
+                    report_to_csv["Top Level Inst"] = report[flow_stage]["area"][0]["Hinst Name"]
+                if "Total Area" in report[flow_stage]["area"][0]:
+                    report_to_csv["Total Area"] = float(report[flow_stage]["area"][0]["Total Area"])
+                report_to_csv["Area SRC"] = flow_stage
+        if "Top Level Inst" and "Total Area" in report_to_csv:
+            break
+    # POWER
+    for flow_stage in ["pt", "par", "syn"]:
+        if "power" in report[flow_stage]:
+            if len(report[flow_stage]["power"]) > 0:
+                if "Total" in report[flow_stage]["power"][0]:
+                    report_to_csv["Total Power"] = float(report[flow_stage]["power"][0]["Total"])
+                report_to_csv["Power SRC"] = flow_stage
+        if "Total Power" in report_to_csv:
+            break
+    
+
+
+    # if "timing" in report["par"] and "area" in report["par"]:
+    #     # print(report["par"]["timing"])
+    #     report_to_csv["Top Level Inst"] = report["par"]["area"][0]["Hinst Name"]
+    #     report_to_csv["Total Area"] = float(report["par"]["area"][0]["Total Area"])
+        
+    #     if "timing" in report["pt"] and ("Slack" in report["pt"]["timing"][0] or "Delay" in report["pt"]["timing"][0]):
+    #         report_to_csv["Slack"] = float(report["pt"]["timing"][0]["Slack"])
+    #         report_to_csv["Delay"] = float(report["pt"]["timing"][0]["Delay"])
+    #         report_to_csv["Timing SRC"] = "pt"
+    #     else:
+    #         report_to_csv["Slack"] = float(report["par"]["timing"][0]["Slack"])
+    #         report_to_csv["Delay"] = float(report["par"]["timing"][0]["Delay"])
+    #         report_to_csv["Timing SRC"] = "par"
+    
+
+    if "gds_area" in report:
         report_to_csv["GDS Area"] = float(report["gds_area"])
+    if "obj_dir" in report:
         report_to_csv["Obj Dir"] = report["obj_dir"]
+    if "sram_macros" in report:
+        report_to_csv["SRAM Macros"] = report["sram_macros"]
+    if "sram_macro_lef_areas" in report:
+        report_to_csv["SRAM LEF Areas"] = report["sram_macro_lef_areas"]
+    if "num_macros" in report:
+        report_to_csv["Num Macros"] = report["num_macros"]
 
-        if "sram_macros" in report:
-            report_to_csv["SRAM Macros"] = report["sram_macros"]
-        if "sram_macro_lef_areas" in report:
-            report_to_csv["SRAM LEF Areas"] = report["sram_macro_lef_areas"]
-        if "num_macros" in report:
-            report_to_csv["Num Macros"] = report["num_macros"]
-        # report_to_csv["obj_dir"] = report["obj_dir"]
-    # report_to_csv["Power"] = float(report["pt"]["power"][0]["Total Power"])
     return report_to_csv
 
 def noc_prse_area_brkdwn(report):
@@ -1751,7 +1732,6 @@ def write_lc_lib_to_db_script (in_libs_paths):
     return os.path.abspath(lc_script_path)
 
 
-
 def pretty(d, indent=0):
    for key, value in d.items():
       print('\t' * indent + str(key))
@@ -1792,6 +1772,7 @@ def rad_gen_flow(flow_settings: dict, config_paths: list) -> None:
 
     rad_gen_log(f"Using obj_dir: {obj_dir_path}",rad_gen_log_fd)
 
+    flow_report = {}
     # Check to see if design has an SRAM configuration
     if asic_flow_settings.run_sram:
         sram_config, sram_stdout, sram_stderr = run_hammer_stage("sram_generator", config_paths)
@@ -1807,19 +1788,19 @@ def rad_gen_flow(flow_settings: dict, config_paths: list) -> None:
         # """
 
 
-        # syn_config, syn_stdout, syn_stderr = run_hammer_stage("syn", config_paths)
+        syn_config, syn_stdout, syn_stderr = run_hammer_stage("syn", config_paths)
         syn_reports_path = os.path.join(asic_flow_settings.obj_dir_path, "syn-rundir", "reports")
         syn_report = get_report_results(asic_flow_settings.top_level_module, syn_reports_path, asic_flow_settings.flow_stages["syn"])
-        pretty(syn_report)
+        flow_report["syn"] = syn_report
         # get_hammer_config("syn-to-par", flow_settings)
     if asic_flow_settings.run_par:
         syn_to_par_config = get_hammer_config("syn-to-par")
         config_paths.append(syn_to_par_config)
-        # par_out_config, par_stdout, par_stderr = run_hammer_stage("par", config_paths)
+        par_out_config, par_stdout, par_stderr = run_hammer_stage("par", config_paths)
         par_reports_path = os.path.join(asic_flow_settings.obj_dir_path, "par-rundir")
         par_report = get_report_results(asic_flow_settings.top_level_module, par_reports_path, asic_flow_settings.flow_stages["par"])
-        pretty(par_report)
-    if asic_flow_settings.run_pt:    
+        flow_report["par"] = par_report
+    if asic_flow_settings.run_pt:
         par_to_power_config = get_hammer_config("par-to-power")
         #get params from par-to-power.json file
         json_fd = open(os.path.join(obj_dir_path,f'{flow_settings["top_level"]}-par-to-power.json'),"r")
@@ -1870,7 +1851,7 @@ def rad_gen_flow(flow_settings: dict, config_paths: list) -> None:
         
         pt_reports_path = os.path.join(asic_flow_settings.obj_dir_path, "pt-rundir", "reports")
         pt_report = get_report_results(asic_flow_settings.top_level_module, pt_reports_path, asic_flow_settings.flow_stages["pt"])
-        pretty(pt_report)
+        flow_report["pt"] = pt_report
 
         # copy the run dir to a new directory to save results
         #sp.run(["cp", "-r", flow_stage_rundir_path_src,flow_stage_rundir_path_dest])
@@ -1879,6 +1860,11 @@ def rad_gen_flow(flow_settings: dict, config_paths: list) -> None:
         # for lib_file in os.listdir(asap7_std_cell_lib_cache):
         #     sp.run(["gunzip",os.path.join(asap7_std_cell_lib_cache,lib_file)])
         ################################ LIB TO DB CONVERSION ################################
+    # Now that we have all the reports, we can generate the final report
+    report_to_csv = gen_report_to_csv(flow_report)
+    df = pd.DataFrame.from_dict(report_to_csv, orient='index').T
+    rad_gen_log('\n'.join(create_bordered_str(f"'{asic_flow_settings.top_level_module}' ASIC FLOW REPORT")), rad_gen_log_fd)
+    rad_gen_log(df, rad_gen_log_fd)
 ##########################################   RAD GEN FLOW   ############################################
 
 
@@ -1906,7 +1892,7 @@ def check_for_valid_path(path):
         rad_gen_log(f"ERROR: {path} does not exist", rad_gen_log_fd)
     return ret_val
 
-def handle_error(fn, expected_vals: set):
+def handle_error(fn, expected_vals: set=None):
     # for fn in funcs:
     if not fn():
         sys.exit(1)
@@ -1917,9 +1903,12 @@ def init_structs_from_cli(args):
     tool_mode = None
     if args.config_path != "":
         tool_mode = "vlsi"
+    elif args.compile_results and args.design_sweep_config_file != '':
+        tool_mode = "gen_results"
+    elif args.design_sweep_config_file != '' and not args.compile_results:
+        tool_mode = "design_sweep"
     
     rad_gen_mode.tool_mode = tool_mode
-    
     if tool_mode == None:
         rad_gen_log("ERROR: No mode of operation specified", rad_gen_log_fd)
         sys.exit(1)
@@ -1951,6 +1940,9 @@ def init_structs_from_cli(args):
         asic_flow_settings.run_pt = args.primetime or run_all_flow
         # If user wants to use the latest generated obj dir for the design
         asic_flow_settings.use_latest_obj_dir = args.use_latest_obj_dir
+    elif tool_mode == "gen_results" or tool_mode == "design_sweep":
+        handle_error(lambda: check_for_valid_path(args.design_sweep_config_file), {True : None})
+        multi_design_settings.sweep_config_path = os.path.realpath(args.design_sweep_config_file)
     
 
 def sort_by_params(reports, result_parse_config):
@@ -2243,8 +2235,8 @@ def compile_results(args):
 
 def design_sweep(args):
     # Starting with just SRAM configurations for a single rtl file (changing parameters in header file)
-    rad_gen_log(f"Running design sweep from config file {args.design_sweep_config_file}",rad_gen_log_fd)
-    design_sweep_config = yaml.safe_load(open(args.design_sweep_config_file))
+    rad_gen_log(f"Running design sweep from config file {multi_design_settings.sweep_config_path}",rad_gen_log_fd)
+    design_sweep_config = yaml.safe_load(open(multi_design_settings.sweep_config_path))
     for design in design_sweep_config["designs"]:
         """ General flow for all designs in sweep config """
         # Load in the base configuration file for the design
@@ -2285,12 +2277,12 @@ def run_asic_flow(args):
     rad_gen_flow_settings = vars(args)
     """ USED FOR THE SRAM SWEEP RUN, I THINK THIS IS UNSAFE TO USE TODO REMOVE THIS"""
     # If the args for top level and rtl path are not set, we will use values from the config file
-    if rad_gen_flow_settings["top_level"] == '' or rad_gen_flow_settings["hdl_path"] == '':
-        design_config = yaml.safe_load(open(rad_gen_flow_settings["config_path"]))
+    if rad_gen_mode.vlsi_flow.config_reuse == False:
+        design_config = yaml.safe_load(open(asic_flow_settings.config_path))
         # Assuming that the top level module and input files are set in the config file
         # Add additional input files which may exist in the module rtl_dir
         rad_gen_flow_settings["top_level"] = design_config["synthesis"]["inputs.top_module"]
-        config_paths = [rad_gen_flow_settings["config_path"]]
+        config_paths = [asic_flow_settings.config_path]
     else:
     # Edit the config file with cli args
         """ Check to make sure all parameters are assigned and modify if required to"""
@@ -2299,7 +2291,7 @@ def run_asic_flow(args):
     
     # Run the flow
     rad_gen_flow(rad_gen_flow_settings, config_paths)
-    rad_gen_log("Done!",rad_gen_log_fd)
+    rad_gen_log("Done!", rad_gen_log_fd)
     sys.exit()    
 
 def main():
