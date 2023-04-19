@@ -1,0 +1,3 @@
+[submodule "hammer"]
+	path = hammer
+	url = git@github.com:StephenMoreOSU/hammer.git
