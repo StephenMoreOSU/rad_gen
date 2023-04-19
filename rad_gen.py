@@ -1860,8 +1860,22 @@ def rad_gen_flow(flow_settings: dict, config_paths: list) -> None:
     # Now that we have all the reports, we can generate the final report
     report_to_csv = gen_report_to_csv(flow_report)
     df = pd.DataFrame.from_dict(report_to_csv, orient='index').T
+
+    # Set separator format
+    separator = "+".join(["-"*15]*9)
+
     rad_gen_log('\n'.join(create_bordered_str(f"'{asic_flow_settings.top_level_module}' ASIC FLOW REPORT")), rad_gen_log_fd)
-    rad_gen_log(df, rad_gen_log_fd)
+
+    # Print formatted dataframe
+    rad_gen_log(separator,rad_gen_log_fd)
+    rad_gen_log("|".join(["{:^15}" for _ in range(len(df.columns))]).format(*df.columns),rad_gen_log_fd)
+    rad_gen_log(separator,rad_gen_log_fd)
+    for i, row in df.iterrows():
+        rad_gen_log("|".join(["{:^15}" for _ in range(len(df.columns))]).format(*row.values),rad_gen_log_fd)
+        rad_gen_log(separator,rad_gen_log_fd)
+
+    # rad_gen_log('\n'.join(create_bordered_str(f"'{asic_flow_settings.top_level_module}' ASIC FLOW REPORT")), rad_gen_log_fd)
+    # rad_gen_log(df, rad_gen_log_fd)
 ##########################################   RAD GEN FLOW   ############################################
 
 
