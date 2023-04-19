@@ -1907,6 +1907,7 @@ def init_structs_from_cli(args):
             rad_gen_config = yaml.safe_load(yml_file)
         rad_gen_settings.rad_gen_home_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"])
         rad_gen_settings.design_output_path = os.path.join(rad_gen_settings.rad_gen_home_path, "output_designs")
+        rad_gen_settings.env_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["env_config_path"])
     else:
         rad_gen_log("ERROR: No mode of operation specified", rad_gen_log_fd)
         sys.exit(1)
@@ -1938,7 +1939,7 @@ def init_structs_from_cli(args):
             # This means that the config file the user passed into the tool is expected to be valid
             rad_gen_mode.vlsi_flow.config_reuse = False
         
-        rad_gen_settings.env_path = os.path.realpath(args.env_path)
+        # rad_gen_settings.env_path = os.path.realpath(args.env_path)
 
         handle_error(lambda: check_for_valid_path(os.path.realpath(args.config_path)), {True : None})
         asic_flow_settings.config_path = os.path.realpath(args.config_path)
@@ -2183,25 +2184,23 @@ def sram_sweep_gen(base_config, sanitized_design):
 
 def parse_cli_args() -> tuple:
     parser = argparse.ArgumentParser()
-    # parser.add_argument('-m', '--tool_mode', help="name of top level design in HDL", type=str, default='')
     parser.add_argument('-t', '--top_level', help="name of top level design in HDL", type=str, default='')
     parser.add_argument('-v', '--hdl_path', help="path to directory containing HDL files", type=str, default='')
-    parser.add_argument('-e', '--env_path', help="path to hammer env.yaml file", type=str, default='')
     parser.add_argument('-p', '--config_path', help="path to hammer design specific config.yaml file", type=str, default='')
-    parser.add_argument('-r', '--openram_config_dir', help="path to dir", type=str, default='')
+    # parser.add_argument('-r', '--openram_config_dir', help="path to dir (TODO)", type=str, default='')
     parser.add_argument('-l', '--use_latest_obj_dir', help="uses latest obj dir found in rad_gen dir", action='store_true') 
     parser.add_argument('-o', '--manual_obj_dir', help="uses user specified obj dir", type=str, default='')
     
 
-    parser.add_argument('-h', '--high_lvl_rad_gen_config_file', help="path to config file containing design sweep parameters",  type=str, default='')
+    parser.add_argument('-e', '--high_lvl_rad_gen_config_file', help="path to high level config file",  type=str, default='')
     parser.add_argument('-s', '--design_sweep_config_file', help="path to config file containing design sweep parameters",  type=str, default='')
     parser.add_argument('-c', '--compile_results', help="path to dir", action='store_true') 
 
 
-    parser.add_argument('-syn', '--synthesis', help="path to dir", action='store_true') 
-    parser.add_argument('-par', '--place_n_route', help="path to dir", action='store_true') 
-    parser.add_argument('-pt', '--primetime', help="path to dir", action='store_true') 
-    parser.add_argument('-sram', '--sram_compiler', help="path to dir", action='store_true') 
+    parser.add_argument('-syn', '--synthesis', help="flag runs synthesis on specified design", action='store_true') 
+    parser.add_argument('-par', '--place_n_route', help="flag runs place & route on specified design", action='store_true') 
+    parser.add_argument('-pt', '--primetime', help="flag runs primetime on specified design", action='store_true') 
+    parser.add_argument('-sram', '--sram_compiler', help="flag enables srams to be run in design", action='store_true') 
     # parser.add_argument('-sim', '--sram_compiler', help="path to dir", action='store_true') 
     args = parser.parse_args()
     
@@ -2356,9 +2355,9 @@ def main():
     # Parse command line arguments
     args = parse_cli_args()
 
-    if(not args.openram_config_dir == ''):
-        rad_gen_log(f"Using OpenRam to generate SRAMs in {args.openram_config_dir}",rad_gen_log_fd)
-        sys.exit(0)
+    # if(not args.openram_config_dir == ''):
+    #     rad_gen_log(f"Using OpenRam to generate SRAMs in {args.openram_config_dir}",rad_gen_log_fd)
+    #     sys.exit(0)
 
     init_structs_from_cli(args)
 

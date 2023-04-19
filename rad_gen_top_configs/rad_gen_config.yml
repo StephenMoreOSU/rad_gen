@@ -1,0 +1,3 @@
+rad_gen_settings:
+  rad_gen_home_path: ~/rad_gen
+  env_config_path: ~/rad_gen/input_hammer_configs/env.yaml
