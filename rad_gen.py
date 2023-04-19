@@ -1900,6 +1900,16 @@ def handle_error(fn, expected_vals: set=None):
 
 def init_structs_from_cli(args):
     init_globals()
+
+    if args.high_lvl_rad_gen_config_file != "":
+        handle_error(lambda: check_for_valid_path(args.high_lvl_rad_gen_config_file), {True : None})
+        with open(args.high_lvl_rad_gen_config_file, 'r') as yml_file:
+            rad_gen_config = yaml.safe_load(yml_file)
+        rad_gen_settings.rad_gen_home_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"])
+        rad_gen_settings.design_output_path = os.path.join(rad_gen_settings.rad_gen_home_path, "output_designs")
+    else:
+        rad_gen_log("ERROR: No mode of operation specified", rad_gen_log_fd)
+        sys.exit(1)
     # determine mode of operation of RAD-Gen
     tool_mode = None
     if args.config_path != "":
@@ -1944,6 +1954,9 @@ def init_structs_from_cli(args):
     elif tool_mode == "gen_results" or tool_mode == "design_sweep":
         handle_error(lambda: check_for_valid_path(args.design_sweep_config_file), {True : None})
         multi_design_settings.sweep_config_path = os.path.realpath(args.design_sweep_config_file)
+        sram_compiler_settings.rtl_out = os.path.join(rad_gen_settings.rad_gen_home_path,"input_designs","sram","rtl","compiler_outputs")
+        sram_compiler_settings.config_out = os.path.join(rad_gen_settings.rad_gen_home_path,"input_designs","sram","configs","compiler_outputs")
+
     
 
 def sort_by_params(reports, result_parse_config):
@@ -2179,6 +2192,8 @@ def parse_cli_args() -> tuple:
     parser.add_argument('-l', '--use_latest_obj_dir', help="uses latest obj dir found in rad_gen dir", action='store_true') 
     parser.add_argument('-o', '--manual_obj_dir', help="uses user specified obj dir", type=str, default='')
     
+
+    parser.add_argument('-h', '--high_lvl_rad_gen_config_file', help="path to config file containing design sweep parameters",  type=str, default='')
     parser.add_argument('-s', '--design_sweep_config_file', help="path to config file containing design sweep parameters",  type=str, default='')
     parser.add_argument('-c', '--compile_results', help="path to dir", action='store_true') 
 
@@ -2195,7 +2210,7 @@ def parse_cli_args() -> tuple:
 
 def compile_results(args):
     # read in the result config file
-    report_search_dir = os.path.expanduser("~/rad_gen")
+    report_search_dir = os.path.expanduser(rad_gen_settings.rad_gen_home_path)
     design_sweep_config = sanitize_config(yaml.safe_load(open(args.design_sweep_config_file)))
     csv_lines = []
     reports = []
