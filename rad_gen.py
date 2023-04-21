@@ -114,6 +114,7 @@ class RADGen_settings:
     rad_gen_home_path: str = os.path.expanduser("~/rad_gen")
     # default obj output directory
     design_output_path: str = os.path.join(rad_gen_home_path, "output_designs")
+    top_level_rad_gen_config_path: str = None
 
 @dataclass
 class VLSI_mode:
@@ -1348,22 +1349,6 @@ def gen_report_to_csv(report: dict):
             break
     
 
-
-    # if "timing" in report["par"] and "area" in report["par"]:
-    #     # print(report["par"]["timing"])
-    #     report_to_csv["Top Level Inst"] = report["par"]["area"][0]["Hinst Name"]
-    #     report_to_csv["Total Area"] = float(report["par"]["area"][0]["Total Area"])
-        
-    #     if "timing" in report["pt"] and ("Slack" in report["pt"]["timing"][0] or "Delay" in report["pt"]["timing"][0]):
-    #         report_to_csv["Slack"] = float(report["pt"]["timing"][0]["Slack"])
-    #         report_to_csv["Delay"] = float(report["pt"]["timing"][0]["Delay"])
-    #         report_to_csv["Timing SRC"] = "pt"
-    #     else:
-    #         report_to_csv["Slack"] = float(report["par"]["timing"][0]["Slack"])
-    #         report_to_csv["Delay"] = float(report["par"]["timing"][0]["Delay"])
-    #         report_to_csv["Timing SRC"] = "par"
-    
-
     if "gds_area" in report:
         report_to_csv["GDS Area"] = float(report["gds_area"])
     if "obj_dir" in report:
@@ -1380,10 +1365,8 @@ def gen_report_to_csv(report: dict):
 def noc_prse_area_brkdwn(report):
     report_to_csv = {}
 
-    # print(report["obj_dir"])
     report_to_csv["Obj Dir"] = report["obj_dir"]
 
-    # print(report["rtl_params"])
     for p in report["rtl_params"]:
         for k,v in p.items():
             report_to_csv[k] = v
@@ -1490,9 +1473,6 @@ def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path
     if not os.path.exists(config_out_path):
         os.mkdir(config_out_path)
 
-
-    digit_re = re.compile("\d+")
-    decimal_re = re.compile("\d+\.\d+")
     # create a copy which will be modified of the sram base config (hammer config)
     mod_base_config = copy.deepcopy(base_config)
     """ WRITING MEM PARAMS JSON FILES """
@@ -1624,9 +1604,9 @@ def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path
 
 def get_rad_gen_flow_cmd(config_path, sram_flag=False, top_level_mod=None, hdl_path=None):
     if top_level_mod is None and hdl_path is None:
-        cmd = f'python3 rad_gen.py -e input_hammer_configs/env.yaml -p {config_path}'
+        cmd = f'python3 rad_gen.py -e {rad_gen_settings.top_level_rad_gen_config_path} -p {config_path}'
     else:
-        cmd = f'python3 rad_gen.py -e input_hammer_configs/env.yaml -p {config_path} -t {top_level_mod} -v {hdl_path}'
+        cmd = f'python3 rad_gen.py -e {rad_gen_settings.top_level_rad_gen_config_path} -p {config_path} -t {top_level_mod} -v {hdl_path}'
 
     if sram_flag:
         cmd = cmd + " -sram"
@@ -1784,7 +1764,6 @@ def rad_gen_flow(flow_settings: dict, config_paths: list) -> None:
         #         read_in_rtl_proj_params_all(config_settings["synthesis"]["inputs.top_module"],config_settings["synthesis"]["inputs.hdl_search_paths"])
         # """
 
-
         syn_config, syn_stdout, syn_stderr = run_hammer_stage("syn", config_paths)
         syn_reports_path = os.path.join(asic_flow_settings.obj_dir_path, "syn-rundir", "reports")
         syn_report = get_report_results(asic_flow_settings.top_level_module, syn_reports_path, asic_flow_settings.flow_stages["syn"])
@@ -1915,6 +1894,7 @@ def init_structs_from_cli(args):
         handle_error(lambda: check_for_valid_path(args.high_lvl_rad_gen_config_file), {True : None})
         with open(args.high_lvl_rad_gen_config_file, 'r') as yml_file:
             rad_gen_config = yaml.safe_load(yml_file)
+        rad_gen_settings.top_level_rad_gen_config_path = os.path.realpath(args.high_lvl_rad_gen_config_file)
         rad_gen_settings.rad_gen_home_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"])
         rad_gen_settings.design_output_path = os.path.join(rad_gen_settings.rad_gen_home_path, "output_designs")
         rad_gen_settings.env_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["env_config_path"])
