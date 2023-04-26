@@ -197,8 +197,8 @@ res = Regexes()
 
 tech_info = Tech_info(
         lib="asap7",
-        sram_lib_path=os.path.expanduser("~/hammer/src/hammer-vlsi/technology/asap7/sram_compiler/memories"),
-        pdk_rundir=os.path.expanduser("~/ASAP_7_IC/asap7_rundir"),
+        # sram_lib_path=os.path.expanduser("~/hammer/src/hammer-vlsi/technology/asap7/sram_compiler/memories"),
+        # pdk_rundir=os.path.expanduser("~/ASAP_7_IC/asap7_rundir"),
         cds_lib="asap7_TechLib"
     )
 
@@ -1860,10 +1860,16 @@ def init_structs_from_cli(args):
         handle_error(lambda: check_for_valid_path(args.high_lvl_rad_gen_config_file), {True : None})
         with open(args.high_lvl_rad_gen_config_file, 'r') as yml_file:
             rad_gen_config = yaml.safe_load(yml_file)
+        rad_gen_settings.hammer_home_path = os.path.join(os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"]),"hammer")
         rad_gen_settings.top_level_rad_gen_config_path = os.path.realpath(args.high_lvl_rad_gen_config_file)
         rad_gen_settings.rad_gen_home_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"])
         rad_gen_settings.design_output_path = os.path.join(rad_gen_settings.rad_gen_home_path, "output_designs")
         rad_gen_settings.env_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["env_config_path"])
+        # init tech info settings
+        tech_info.pdk_rundir = os.path.expanduser(rad_gen_config["rad_gen_settings"]["asap7"]["rundir_path"])
+        tech_info.sram_lib_path = os.path.join(rad_gen_settings.hammer_home_path,"src","hammer-vlsi","technology","asap7","sram_compiler","memories")
+
+
     else:
         rad_gen_log("ERROR: High level RAD-Gen config file not provided", rad_gen_log_fd)
         sys.exit(1)
