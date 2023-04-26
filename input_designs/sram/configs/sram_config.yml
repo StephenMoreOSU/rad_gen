@@ -10,6 +10,7 @@ vlsi.core:
   sram_generator_tool_path_meta: "append"
   #technology
   technology: asap7
+  max_threads: 14
 
 
 # synthesis settings
@@ -29,7 +30,7 @@ vlsi.inputs:
   power_spec_type: "cpf"
   clocks : [
     {
-      name: "RW0_clk",
+      name: "clk",
       period: "0.0 ns",
     }
   ]
@@ -38,8 +39,8 @@ vlsi.inputs:
     type: toplevel
     x: 0
     y: 0
-    width: 400
-    height: 400
+    width: 500
+    height: 500
     margins:
       left: 0
       right: 0
@@ -89,6 +90,6 @@ vlsi.inputs:
   pin_mode: generated
   pin.generate_mode: semi_auto
   pin.assignments: [
-    {pins: "*", layers: ["M7", "M9"] ,side: "bottom"}
+    {pins: "*", layers: ["M7", "M9"] ,side: "left"}
   ]
 
