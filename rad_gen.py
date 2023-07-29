@@ -116,6 +116,17 @@ class RADGen_settings:
     # default obj output directory
     design_output_path: str = os.path.join(rad_gen_home_path, "output_designs")
     top_level_rad_gen_config_path: str = None
+    # input design structure
+    input_design_dir_structure: dict = field(default_factory = lambda: {
+        "configs": {
+            "gen" : {}
+        },
+        "rtl" : {
+            "src" : {},
+            "verif" : {},
+            "build" : {},
+        }
+    })
 
 @dataclass
 class VLSI_mode:
@@ -1324,7 +1335,7 @@ def gen_report_to_csv(report: dict):
     # This is where if there are empty reports for a particular 
     # flow stages are in order of fidelity
     # General input parameters
-    if "target_freq":
+    if "target_freq" in report:
         report_to_csv["Target Freq"] = report["target_freq"]
     # TIMING
     for flow_stage in ["pt", "par", "syn"]:
@@ -1374,9 +1385,9 @@ def gen_report_to_csv(report: dict):
     for key,val in report_to_csv.items():
         if isinstance(val,float):
             if "e" in str(val):
-                report_to_csv[key] = '{0:3e}'.format(val)
+                report_to_csv[key] = '{0:7e}'.format(val)
             else:
-                report_to_csv[key] = round(val,3)
+                report_to_csv[key] = round(val,7)
 
     return report_to_csv
 
@@ -1572,64 +1583,67 @@ def get_rad_gen_flow_cmd(config_path, sram_flag=False, top_level_mod=None, hdl_p
 def gen_parse_reports(report_search_dir,top_level_mod, design_config: dict = None, sram_num_bits: int = None):
     reports = []
     for dir in os.listdir(report_search_dir):
-        if os.path.isdir(dir) and dir.startswith(top_level_mod):
-            print(f"Parsing results for {dir}")
-        #if os.path.isdir(dir) and top_level_mod in dir:
-            report_dict = {}
-            # print(f"Parsing results for {dir}")
-            syn_rpts, par_rpts, pt_rpts = parse_output(top_level_mod,dir)
-            report_dict["syn"] = syn_rpts
-            report_dict["par"] = par_rpts
-            report_dict["pt"] = pt_rpts
-            report_dict["obj_dir"] = dir
-            # checks to see if initial run was even valid
-            """ Looking for SRAM Macros """
-            sram_macros = []
-            macro_lef_areas = []
-            if os.path.isfile(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json")):
-                syn_out_config = json.load(open(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json")))
-                if "vlsi.inputs.sram_parameters" in syn_out_config.keys():
-                    for sram in syn_out_config["vlsi.inputs.sram_parameters"]:
-                        sram_macros.append(sram["name"])
-                        m_sizes = get_sram_macro_sizes(sram["name"])
-                        macro_lef_areas.append(m_sizes[0]*m_sizes[1])
-                        if sram_num_bits is not None:
-                            num_macros = sram_num_bits // (int(sram['width'])*int(sram['depth']))
-                            report_dict["num_macros"] = num_macros
+        design_out_dir = os.path.join(report_search_dir,dir)
+        for r_dir in os.listdir(design_out_dir):
+            report_dir = os.path.join(design_out_dir, r_dir)
+            if os.path.isdir(report_dir) and dir.startswith(top_level_mod):
+                print(f"Parsing results for {report_dir}")
+            #if os.path.isdir(dir) and top_level_mod in dir:
+                report_dict = {}
+                # print(f"Parsing results for {dir}")
+                syn_rpts, par_rpts, pt_rpts = parse_output(top_level_mod,report_dir)
+                report_dict["syn"] = syn_rpts
+                report_dict["par"] = par_rpts
+                report_dict["pt"] = pt_rpts
+                report_dict["obj_dir"] = report_dir
+                # checks to see if initial run was even valid
+                """ Looking for SRAM Macros """
+                sram_macros = []
+                macro_lef_areas = []
+                if os.path.isfile(os.path.join(report_dir,"syn-rundir","syn-output-full.json")):
+                    syn_out_config = json.load(open(os.path.join(report_dir,"syn-rundir","syn-output-full.json")))
+                    if "vlsi.inputs.sram_parameters" in syn_out_config.keys():
+                        for sram in syn_out_config["vlsi.inputs.sram_parameters"]:
+                            sram_macros.append(sram["name"])
+                            m_sizes = get_sram_macro_sizes(sram["name"])
+                            macro_lef_areas.append(m_sizes[0]*m_sizes[1])
+                            if sram_num_bits is not None:
+                                num_macros = sram_num_bits // (int(sram['width'])*int(sram['depth']))
+                                report_dict["num_macros"] = num_macros
 
-                report_dict["sram_macros"] = ", ".join(sram_macros)
-                report_dict["sram_macro_lef_areas"] = ", ".join([str(x) for x in macro_lef_areas])
-            # Add the gds areas to the report
-            gds_file = os.path.join(report_search_dir,dir,"par-rundir",f"{top_level_mod}_drc.gds")
-            if os.path.isfile(gds_file):
-                write_virtuoso_gds_to_area_script(gds_file)
-                for ext in ["csh","sh"]:
-                    permission_cmd = "chmod +x " +  os.path.join(tech_info.pdk_rundir,f'{script_info.gds_to_area_fname}.{ext}')
-                    run_shell_cmd_no_logs(permission_cmd)
-                # run_shell_cmd_no_logs(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.sh"))
-                if not os.path.exists(os.path.join(report_search_dir,dir,report_info.gds_area_fname)):
-                    run_csh_cmd(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.csh"))
-                    report_dict["gds_area"] = parse_gds_to_area_output(os.path.join(report_search_dir,dir))
-                else:
-                    report_dict["gds_area"] = get_gds_area_from_rpt(os.path.join(report_search_dir,dir))
-                # report_dict["gds_area"] = parse_gds_to_area_output(os.path.join(report_search_dir,dir))
-            # RTL Parameter section
-            if design_config is not None and design_config["type"] == "rtl_params":
-                # Using the output syn directory to find parameters in hdl search paths
-                if(os.path.isfile(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json"))):
-                    syn_out_config = json.load(open(os.path.join(report_search_dir,dir,"syn-rundir","syn-output-full.json")))
-                    # looping through hdl search paths
-                    for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
-                        if sweep_settings.param_sweep_hdr_dir_name in path:
-                            param_hdr_name = os.path.basename(design_config["base_param_hdr_path"])
-                            params = read_in_rtl_proj_params(design_config["params"], top_level_mod, design_config["rtl_dir_path"],os.path.join(path,param_hdr_name))
-                            report_dict["rtl_params"] = params
-                            break                      
-                if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0 and "rtl_params" in report_dict:
-                    reports.append(report_dict)
-            else: 
-                if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
-                    reports.append(report_dict)
+                    report_dict["sram_macros"] = ", ".join(sram_macros)
+                    report_dict["sram_macro_lef_areas"] = ", ".join([str(x) for x in macro_lef_areas])
+                # Add the gds areas to the report
+                gds_file = os.path.join(report_dir,"par-rundir",f"{top_level_mod}_drc.gds")
+                if os.path.isfile(gds_file):
+                    write_virtuoso_gds_to_area_script(gds_file)
+                    for ext in ["csh","sh"]:
+                        permission_cmd = "chmod +x " +  os.path.join(tech_info.pdk_rundir,f'{script_info.gds_to_area_fname}.{ext}')
+                        run_shell_cmd_no_logs(permission_cmd)
+                    # run_shell_cmd_no_logs(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.sh"))
+                    if not os.path.exists(os.path.join(report_dir,report_info.gds_area_fname)):
+                        run_csh_cmd(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.csh"))
+                        report_dict["gds_area"] = parse_gds_to_area_output(report_dir)
+                    else:
+                        report_dict["gds_area"] = get_gds_area_from_rpt(report_dir)
+                    # report_dict["gds_area"] = parse_gds_to_area_output(os.path.join(report_search_dir,dir))
+                # RTL Parameter section
+                if design_config is not None and design_config["type"] == "rtl_params":
+                    # Using the output syn directory to find parameters in hdl search paths
+                    if(os.path.isfile(os.path.join(report_dir,"syn-rundir","syn-output-full.json"))):
+                        syn_out_config = json.load(open(os.path.join(report_dir,"syn-rundir","syn-output-full.json")))
+                        # looping through hdl search paths
+                        for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
+                            if sweep_settings.param_sweep_hdr_dir_name in path:
+                                param_hdr_name = os.path.basename(design_config["base_param_hdr_path"])
+                                params = read_in_rtl_proj_params(design_config["params"], top_level_mod, design_config["rtl_dir_path"],os.path.join(path,param_hdr_name))
+                                report_dict["rtl_params"] = params
+                                break                      
+                    if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0 and "rtl_params" in report_dict:
+                        reports.append(report_dict)
+                else: 
+                    if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
+                        reports.append(report_dict)
     return reports
 ########################################## RAD GEN UTILITIES ##########################################
 ##########################################   RAD GEN FLOW   ############################################
@@ -1860,6 +1874,7 @@ def init_structs_from_cli(args):
         handle_error(lambda: check_for_valid_path(args.high_lvl_rad_gen_config_file), {True : None})
         with open(args.high_lvl_rad_gen_config_file, 'r') as yml_file:
             rad_gen_config = yaml.safe_load(yml_file)
+        # pretty(rad_gen_config)
         rad_gen_settings.hammer_home_path = os.path.join(os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"]),"hammer")
         rad_gen_settings.top_level_rad_gen_config_path = os.path.realpath(args.high_lvl_rad_gen_config_file)
         rad_gen_settings.rad_gen_home_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"])
@@ -1893,7 +1908,8 @@ def init_structs_from_cli(args):
         # If the user specified a top level module and hdl path, then we can reuse a config file with the correct VLSI settings
         if args.manual_obj_dir != "":
             asic_flow_settings.manual_obj_dir = os.path.realpath(args.manual_obj_dir)
-            handle_error(lambda: check_for_valid_path(asic_flow_settings.manual_obj_dir), {True : None})
+            # if os.path.exists
+            # handle_error(lambda: check_for_valid_path(asic_flow_settings.manual_obj_dir), {True : None})
 
         if args.top_level != "" and args.hdl_path != "":
             rad_gen_mode.vlsi_flow.config_reuse = True
@@ -2175,7 +2191,8 @@ def parse_cli_args() -> tuple:
 
 def compile_results(args):
     # read in the result config file
-    report_search_dir = os.path.expanduser(rad_gen_settings.rad_gen_home_path)
+    # report_search_dir = os.path.expanduser(rad_gen_settings.rad_gen_home_path)
+    report_search_dir = rad_gen_settings.design_output_path
     design_sweep_config = sanitize_config(yaml.safe_load(open(args.design_sweep_config_file)))
     csv_lines = []
     reports = []
