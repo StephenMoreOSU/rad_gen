@@ -1,0 +1,6 @@
+designs:
+  [
+    {
+      top_level_module: sram_wrapper
+    }
+  ]
