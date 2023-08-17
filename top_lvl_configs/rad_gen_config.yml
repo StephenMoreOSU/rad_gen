@@ -1,0 +1,12 @@
+rad_gen_home_path: ~/rad_gen
+hammer_home_path: ~/rad_gen/hammer
+env_path: ~/rad_gen/rad_gen_top_configs/env.yaml
+
+
+# design_output_path: ~/rad_gen/output_designs
+# design_input_path: ~/rad_gen/input_designs
+
+tech_info:
+  name: asap7
+  rundir_path: ~/ASAP_7_IC/asap7_rundir
+  

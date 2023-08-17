@@ -1,6 +1,0 @@
-rad_gen_settings:
-  rad_gen_home_path: ~/rad_gen
-  env_config_path: ~/rad_gen/rad_gen_top_configs/env.yaml
-  asap7:
-    rundir_path: ~/ASAP_7_IC/asap7_rundir
-    pdk_path: ~/ASAP_7_IC/asap7PDK_r1p7

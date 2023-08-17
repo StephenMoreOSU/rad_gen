@@ -111,8 +111,8 @@ class DesignSweepInfo:
     top_lvl_module: str # top level module of design
     base_config_path: str # path to hammer config of design
     rtl_dir_path: str # path to directory containing rtl files for design, files can be in subdirectories
-    flow_threads: int # number of vlsi runs which will be executed in parallel (in terms of sweep parameters)
-    sweep_type: str # options are "sram", "rtl_params" or "vlsi_params" TODO this could be instead determined by searching through parameters acceptable to hammer IR
+    type: str = None # options are "sram", "rtl_params" or "vlsi_params" TODO this could be instead determined by searching through parameters acceptable to hammer IR
+    flow_threads: int = 1 # number of vlsi runs which will be executed in parallel (in terms of sweep parameters)
     type_info: Any = None # contains either RTLSweepInfo or SRAMSweepInfo depending on sweep type
 
 
@@ -132,19 +132,19 @@ class ASICFlowSettings:
         - paths
         - flow stage information
     """
-    design_config : Dict[str, Any] # Hammer IR parsable configuration info
+    design_config : Dict[str, Any] = None # Hammer IR parsable configuration info
     # Paths
-    hdl_path: str # path to directory containing hdl files
-    config_path: str # path to hammer IR parsable configuration file
-    top_lvl_module: str # top level module of design
-    obj_dir_path: str # hammer object directory containing subdir for each flow stage
+    hdl_path: str = None # path to directory containing hdl files
+    config_path: str = None # path to hammer IR parsable configuration file
+    top_lvl_module: str = None # top level module of design
+    obj_dir_path: str = None # hammer object directory containing subdir for each flow stage
     # use_latest_obj_dir: bool # looks for the most recently created obj directory associated with design (TODO & design parameters) and use this for the asic run
     # manual_obj_dir: str # specify a specific obj directory to use for the asic run (existing or non-existing)
     # Stages being run
-    run_sram: bool
-    run_syn: bool
-    run_par: bool
-    run_pt: bool
+    run_sram: bool = False
+    run_syn: bool = False
+    run_par: bool = False
+    run_pt: bool = False
     # flow stages
     flow_stages: dict = field(default_factory = lambda: {
         "sram": {
@@ -236,6 +236,9 @@ class EnvSettings:
     # Top level input
     top_lvl_config_path: str = None # high level rad gen configuration file path
     
+    # Name of directory which stores parameter sweep headers
+    # param_sweep_hdr_dir: str = "param_sweep_hdrs" TODO remove this and use input_dir_structure defined below (gen)
+    
     # Verbosity level
     # 0 - Brief output
     # 1 - Brief output + I/O + command line access
@@ -273,8 +276,11 @@ class EnvSettings:
     report_info: ReportInfo = field(default_factory = ReportInfo)
 
     def __post_init__(self):
-        self.design_input_path = os.path.join(self.rad_gen_home_path, "input_designs") 
-        self.design_output_path = os.path.join(self.rad_gen_home_path, "output_designs")
+        # Assign defaults for input and output design dir
+        if self.design_input_path is None:
+            self.design_input_path = os.path.join(self.rad_gen_home_path, "input_designs") 
+        if self.design_output_path is None:
+            self.design_output_path = os.path.join(self.rad_gen_home_path, "output_designs")
 
 
 @dataclass
@@ -293,7 +299,7 @@ class HighLvlSettings:
     result_search_path: str = None # path which will look for various output obj directories to parse results from
     #param_sweep_hdr_dir: str = None # directory containing RTL header files for parameter sweeping
     asic_flow_settings: ASICFlowSettings = None # asic flow settings for single design
-    design_sweep_info: DesignSweepInfo = None # sweep specific information for a single design
+    design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
     sram_compiler_settings: SRAMCompilerSettings = field(default_factory = SRAMCompilerSettings)
 
 

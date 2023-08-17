@@ -33,7 +33,7 @@ import datetime
 
 from dataclasses import dataclass
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Type
 # from typing import Pattern
 
 from dataclasses import field
@@ -164,7 +164,7 @@ def sanitize_config(config_dict) -> dict:
     """    
     for param, value in config_dict.copy().items():
         if("path" in param):
-            config_dict[param] = os.path.expanduser(value)
+            config_dict[param] = os.path.realpath(os.path.expanduser(value))
     return config_dict
 
 ########################################## GENERAL UTILITIES ##########################################
@@ -796,14 +796,14 @@ def read_in_rtl_proj_params_all(top_level, hdl_search_paths):
 
 
 
-def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param_inc_path=False):
-    wspace_re = re.compile(r"\s+")
-    # Now that we have a mem_params.json and sram_config.yaml file for each design, we can run the flow for each design in parallel (up to user defined amount)
-    find_params_re = re.compile(f"parameter\s+\w+(\s|=)+.*;")
-    find_defines_re = re.compile(f"`define\s+\w+\s+.*")
-    grab_bw_soft_bkt = re.compile(f"\(.*\)")
+def read_in_rtl_proj_params(rad_gen_settings: rg.HighLvlSettings, rtl_params, top_level_mod, rtl_dir_path, sweep_param_inc_path=False):
+    # wspace_re = re.compile(r"\s+")
+    ## Now that we have a mem_params.json and sram_config.yaml file for each design, we can run the flow for each design in parallel (up to user defined amount)
+    # find_params_re = re.compile(f"parameter\s+\w+(\s|=)+.*;")
+    # find_defines_re = re.compile(f"`define\s+\w+\s+.*")
+    # grab_bw_soft_bkt = re.compile(f"\(.*\)")
     
-    find_localparam_re = re.compile(f"localparam\s+\w+(\s|=)+.*?;",re.MULTILINE|re.DOTALL)
+    # find_localparam_re = re.compile(f"localparam\s+\w+(\s|=)+.*?;",re.MULTILINE|re.DOTALL)
 
     # Find all parameters which will be used in the design (ie find top level module rtl, parse include files top to bottom and get those values )
     """ FIND TOP LEVEL MODULE IN RTL FILES """
@@ -847,9 +847,9 @@ def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param
             for inc_line in clean_include_rtl.split("\n"):
                 
                 # Look for parameters
-                if find_params_re.search(inc_line):
+                if rad_gen_settings.env_settings.res.find_params_re.search(inc_line):
                     # TODO this parameter re will not work if no whitespace between params
-                    clean_line = " ".join(wspace_re.split(inc_line)[1:]).replace(";","")
+                    clean_line = " ".join(rad_gen_settings.env_settings.res.wspace_re.split(inc_line)[1:]).replace(";","")
                     # Get the parameter name and value
                     param_name = clean_line.split("=")[0].replace(" ","")
                     param_val = clean_line.split("=")[1].replace(" ","").replace("`","")
@@ -864,15 +864,15 @@ def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param
                     #rtl_preproc["params"][param_name] = str(param_val)
                     rtl_preproc["vals"].append({"name" : param_name, "value" : str(param_val),"type": "param","line_idx": global_line_idx})
 
-                elif find_defines_re.search(inc_line):
+                elif rad_gen_settings.env_settings.res.find_defines_re.search(inc_line):
                     # TODO this define re will not work if no whitespace between params
-                    clean_line = " ".join(wspace_re.split(inc_line)[1:])
+                    clean_line = " ".join(rad_gen_settings.env_settings.res.wspace_re.split(inc_line)[1:])
                     # Get the define name and value
-                    define_name = wspace_re.split(clean_line)[0]
-                    if grab_bw_soft_bkt.search(clean_line):
-                        define_val = grab_bw_soft_bkt.search(clean_line).group(0)
+                    define_name = rad_gen_settings.env_settings.res.wspace_re.split(clean_line)[0]
+                    if rad_gen_settings.env_settings.res.grab_bw_soft_bkt.search(clean_line):
+                        define_val = rad_gen_settings.env_settings.res.grab_bw_soft_bkt.search(clean_line).group(0)
                     else:
-                        define_val = wspace_re.split(clean_line)[1].replace("`","")
+                        define_val = rad_gen_settings.env_settings.res.wspace_re.split(clean_line)[1].replace("`","")
                     # create dep list for defines
                     for i in range(len(rtl_preproc["vals"])):
                         if rtl_preproc["vals"][i]["name"] in define_val:
@@ -888,8 +888,8 @@ def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param
     tmp_top_lvl_rtl = clean_top_lvl_rtl
     local_param_matches = []
     # Searching through the text in this way preserves initialization order
-    while find_localparam_re.search(tmp_top_lvl_rtl):
-        local_param = find_localparam_re.search(tmp_top_lvl_rtl).group(0)
+    while rad_gen_settings.env_settings.res.find_localparam_re.search(tmp_top_lvl_rtl):
+        local_param = rad_gen_settings.env_settings.res.find_localparam_re.search(tmp_top_lvl_rtl).group(0)
         local_param_matches.append(local_param)
         tmp_top_lvl_rtl = tmp_top_lvl_rtl.replace(local_param,"")
     """ EVALUATING BOOLEANS FOR LOCAL PARAMS W PARAMS AND DEFINES """
@@ -971,7 +971,7 @@ def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param
     main_fd.close()
     # This runs the c file which prints out evaluated parameter values set in the verilog
     gcc_out = sp.run(["/usr/bin/gcc",f"{rtl_preproc_fname}.h",f"{rtl_preproc_fname}.c"],stderr=sp.PIPE,stdout=sp.PIPE,stdin=sp.PIPE)#,"-o",f'{os.path.join(tmp_dir,"print_params")}'])
-    param_print_stdout = sp.run(["a.out"],stderr=sp.PIPE,stdout=sp.PIPE,stdin=sp.PIPE)
+    param_print_stdout = sp.run([os.path.join(os.getcwd(),"a.out")],stderr=sp.PIPE,stdout=sp.PIPE,stdin=sp.PIPE)
     rad_gen_log(param_print_stdout.stdout.decode("utf-8"),rad_gen_log_fd)
     sp.run(["rm","a.out"])
 
@@ -979,7 +979,7 @@ def read_in_rtl_proj_params(rtl_params, top_level_mod, rtl_dir_path, sweep_param
     params = []
     for line in param_print_stdout.split("\n"):
         if line != "":
-            x = res.wspace_re.sub(repl="",string=line).split(":")
+            x = rad_gen_settings.env_settings.res.wspace_re.sub(repl="",string=line).split(":")
             p_dict = {x[0]:x[1]}
             params.append(p_dict)
 
@@ -1152,7 +1152,7 @@ def get_report_results(rad_gen_settings: rg.HighLvlSettings, top_level_mod: str,
         rad_gen_log(f"Warning: {flow_stage['name']} report path does not exist", rad_gen_log_fd)
     return results 
 
-def parse_output(top_level_mod, output_path):
+def parse_output(rad_gen_settings: rg.HighLvlSettings,top_level_mod: str, output_path: str):
     syn_dir = "syn-rundir"
     par_dir = "par-rundir"
     pt_dir = "pt-rundir"
@@ -1160,9 +1160,9 @@ def parse_output(top_level_mod, output_path):
     syn_report_path = os.path.join(output_path,syn_dir,"reports")
     par_report_path = os.path.join(output_path,par_dir)
     pt_report_path = os.path.join(output_path,pt_dir,"reports")
-    syn_results = get_report_results(top_level_mod, syn_report_path, asic_flow_settings.flow_stages["syn"])
-    par_results = get_report_results(top_level_mod, par_report_path, asic_flow_settings.flow_stages["par"])
-    pt_results = get_report_results(top_level_mod, pt_report_path, asic_flow_settings.flow_stages["pt"])
+    syn_results = get_report_results(rad_gen_settings, top_level_mod, syn_report_path, rad_gen_settings.asic_flow_settings.flow_stages["syn"])
+    par_results = get_report_results(rad_gen_settings, top_level_mod, par_report_path, rad_gen_settings.asic_flow_settings.flow_stages["par"])
+    pt_results = get_report_results(rad_gen_settings, top_level_mod, pt_report_path, rad_gen_settings.asic_flow_settings.flow_stages["pt"])
     return syn_results, par_results, pt_results
 
 
@@ -1248,63 +1248,64 @@ def noc_prse_area_brkdwn(report):
         for k,v in p.items():
             report_to_csv[k] = v
 
-    total_area = float(report["par"]["area"][0]["Total Area"])
-    print(f'Total Area: {total_area}')
-    report_to_csv["Total Area"] = total_area
+    if len(report["par"]) > 0:
+        total_area = float(report["par"]["area"][0]["Total Area"])
+        # print(f'Total Area: {total_area}')
+        report_to_csv["Total Area"] = total_area
 
-    gds_area = float(report["gds_area"])
-    report_to_csv["GDS Area"] = gds_area
-    print(f'GDS Area: {gds_area}')
-    # input modules
-    num_ports_param_idx = next(( index for (index, d) in enumerate(report["rtl_params"]) if "num_ports" in d.keys()), None)
-    if(num_ports_param_idx != None): 
-        num_ports = int(report["rtl_params"][num_ports_param_idx]["num_ports"]) 
-    else:
-        num_ports = 5
+        gds_area = float(report["gds_area"])
+        report_to_csv["GDS Area"] = gds_area
+        # print(f'GDS Area: {gds_area}')
+        # input modules
+        num_ports_param_idx = next(( index for (index, d) in enumerate(report["rtl_params"]) if "num_ports" in d.keys()), None)
+        if(num_ports_param_idx != None): 
+            num_ports = int(report["rtl_params"][num_ports_param_idx]["num_ports"]) 
+        else:
+            num_ports = 5
 
-    input_channel_area = float(0)
-    for i in range(num_ports):
-        ipc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == f"genblk1.vcr/ips[{i}].ipc"), None)
-        input_channel_area += float(report["par"]["area"][ipc_alloc_idx]["Total Area"])
-        # print(report["par"]["area"][ipc_alloc_idx])
-    print(f'Input Module Area: {input_channel_area} : {input_channel_area/total_area}')
-    report_to_csv["Input Module Area"] = input_channel_area
-    report_to_csv["Input Module Area Percentage"] = input_channel_area/total_area
+        input_channel_area = float(0)
+        for i in range(num_ports):
+            ipc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == f"genblk1.vcr/ips[{i}].ipc"), None)
+            input_channel_area += float(report["par"]["area"][ipc_alloc_idx]["Total Area"])
+            # print(report["par"]["area"][ipc_alloc_idx])
+        # print(f'Input Module Area: {input_channel_area} : {input_channel_area/total_area}')
+        report_to_csv["Input Module Area"] = input_channel_area
+        report_to_csv["Input Module Area Percentage"] = input_channel_area/total_area
 
-    # xbr
-    xbr_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/xbr"), None)
-    xbr_area = float(report["par"]["area"][xbr_idx]["Total Area"])
-    print(f'XBR Area: {xbr_area} : {xbr_area/total_area}')
-    report_to_csv["XBR Area"] = xbr_area
-    report_to_csv["XBR Area Percentage"] = xbr_area/total_area
-    # sw allocator
-    sw_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/alo/genblk2.sw_core_sep_if"), None)
-    sw_alloc_area = float(report["par"]["area"][sw_alloc_idx]["Total Area"])
-    print(f'SW Alloc Area: {sw_alloc_area} : {sw_alloc_area/total_area}')
-    report_to_csv["SW Alloc Area"] = sw_alloc_area
-    report_to_csv["SW Alloc Area Percentage"] = sw_alloc_area/total_area
-    # vc allocator
-    vc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/alo/genblk1.vc_core_sep_if"), None)
-    vc_alloc_area = float(report["par"]["area"][vc_alloc_idx]["Total Area"])
-    print(f'VC Alloc Area: {vc_alloc_area} : {vc_alloc_area/total_area}')
-    report_to_csv["VC Alloc Area"] = vc_alloc_area
-    report_to_csv["VC Alloc Area Percentage"] = vc_alloc_area/total_area
-    # output modules
-    output_channel_area = float(0)
-    for i in range(num_ports):
-        opc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == f"genblk1.vcr/ops[{i}].opc"), None)
-        output_channel_area += float(report["par"]["area"][opc_alloc_idx]["Total Area"])
-    print(f'Output Module Area: {output_channel_area} : {output_channel_area/total_area}')
+        # xbr
+        xbr_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/xbr"), None)
+        xbr_area = float(report["par"]["area"][xbr_idx]["Total Area"])
+        # print(f'XBR Area: {xbr_area} : {xbr_area/total_area}')
+        report_to_csv["XBR Area"] = xbr_area
+        report_to_csv["XBR Area Percentage"] = xbr_area/total_area
+        # sw allocator
+        sw_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/alo/genblk2.sw_core_sep_if"), None)
+        sw_alloc_area = float(report["par"]["area"][sw_alloc_idx]["Total Area"])
+        # print(f'SW Alloc Area: {sw_alloc_area} : {sw_alloc_area/total_area}')
+        report_to_csv["SW Alloc Area"] = sw_alloc_area
+        report_to_csv["SW Alloc Area Percentage"] = sw_alloc_area/total_area
+        # vc allocator
+        vc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == "genblk1.vcr/alo/genblk1.vc_core_sep_if"), None)
+        vc_alloc_area = float(report["par"]["area"][vc_alloc_idx]["Total Area"])
+        # print(f'VC Alloc Area: {vc_alloc_area} : {vc_alloc_area/total_area}')
+        report_to_csv["VC Alloc Area"] = vc_alloc_area
+        report_to_csv["VC Alloc Area Percentage"] = vc_alloc_area/total_area
+        # output modules
+        output_channel_area = float(0)
+        for i in range(num_ports):
+            opc_alloc_idx = next(( index for (index, d) in enumerate(report["par"]["area"]) if d["Hinst Name"] == f"genblk1.vcr/ops[{i}].opc"), None)
+            output_channel_area += float(report["par"]["area"][opc_alloc_idx]["Total Area"])
+        # print(f'Output Module Area: {output_channel_area} : {output_channel_area/total_area}')
 
-    report_to_csv["Output Module Area"] = output_channel_area
-    report_to_csv["Output Module Area Percentage"] = output_channel_area/total_area
+        report_to_csv["Output Module Area"] = output_channel_area
+        report_to_csv["Output Module Area Percentage"] = output_channel_area/total_area
     
-    if "timing" in report["pt"].keys():
-        report_to_csv["Slack"] = float(report["pt"]["timing"][0]["Slack"])
-        report_to_csv["Timing Src"] = "pt"
-    else:
-        report_to_csv["Slack"] = float(report["par"]["timing"][0]["Slack"])
-        report_to_csv["Timing Src"] = "par"
+    # TIMING
+    for flow_tag in ["pt", "par", "syn"]:
+        if len(report[flow_tag]) > 0:
+            if "timing" in report[flow_tag]:
+                report_to_csv["Slack"] = float(report[flow_tag]["timing"][0]["Slack"])
+                report_to_csv["Timing Src"] = flow_tag
 
     return report_to_csv
 
@@ -1328,23 +1329,23 @@ def create_bordered_str(text: str = "", border_char: str = "#", total_len: int =
 #         sys.exit(1)
 #     sys.exit(1)
 
-def get_sram_macro_sizes(macro_fname: str) -> list:
-    for file in os.listdir(os.path.join(tech_info.sram_lib_path,"lef")):
+def get_sram_macro_sizes(rad_gen_settings: rg.HighLvlSettings, macro_fname: str) -> list:
+    for file in os.listdir(os.path.join(rad_gen_settings.tech_info.sram_lib_path,"lef")):
         m_sizes = []
         if macro_fname in file:
             # TODO fix the way that the size of macro is being searched for this way would not work in all cases
-            lef_text = open(os.path.join(tech_info.sram_lib_path,"lef",file), "r").read()
+            lef_text = open(os.path.join(rad_gen_settings.tech_info.sram_lib_path,"lef",file), "r").read()
             for line in lef_text.split("\n"):
                 if "SIZE" in line:
                     # This also assumes the symmetry in the lef is X Y rather than searching for it TODO
-                    m_sizes = [float(s) for s in line.split(" ") if res.decimal_re.match(s)]
+                    m_sizes = [float(s) for s in line.split(" ") if rad_gen_settings.env_settings.res.decimal_re.match(s)]
                     break
         if len(m_sizes) > 0:
             break
     return m_sizes
         
-def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path: str) -> dict:
-    config_out_path = sram_compiler_settings.config_out
+def mod_rad_gen_config_from_rtl(rad_gen_settings: rg.HighLvlSettings, base_config: dict, sram_map_info: dict, rtl_path: str) -> dict:
+    config_out_path = rad_gen_settings.sram_compiler_settings.config_out_path
     if not os.path.exists(config_out_path):
         os.mkdir(config_out_path)
 
@@ -1363,7 +1364,7 @@ def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path
     # Defines naming convension of SRAM macros TODO
     """ MODIFYING AND WRITING HAMMER CONFIG YAML FILES """
     
-    m_sizes = get_sram_macro_sizes(sram_map_info["macro"])
+    m_sizes = get_sram_macro_sizes(rad_gen_settings, sram_map_info["macro"])
     
     # origin in um from the 0,0 point of the design
     sram_pcs = []
@@ -1417,81 +1418,99 @@ def mod_rad_gen_config_from_rtl(base_config: dict, sram_map_info: dict, rtl_path
         yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
     return modified_config_path
 
-def get_rad_gen_flow_cmd(config_path, sram_flag=False, top_level_mod=None, hdl_path=None):
+def get_rad_gen_flow_cmd(rad_gen_settings: rg.HighLvlSettings, config_path: str, sram_flag = False, top_level_mod = None, hdl_path = None):
     if top_level_mod is None and hdl_path is None:
-        cmd = f'python3 rad_gen.py -e {rad_gen_settings.top_level_rad_gen_config_path} -p {config_path}'
+        cmd = f'python3 rad_gen.py -e {rad_gen_settings.env_settings.top_lvl_config_path} -p {config_path}'
     else:
-        cmd = f'python3 rad_gen.py -e {rad_gen_settings.top_level_rad_gen_config_path} -p {config_path} -t {top_level_mod} -v {hdl_path}'
+        cmd = f'python3 rad_gen.py -e {rad_gen_settings.env_settings.top_lvl_config_path} -p {config_path} -t {top_level_mod} -v {hdl_path}'
 
     if sram_flag:
         cmd = cmd + " -sram"
     return cmd
 
 
-def gen_parse_reports(report_search_dir,top_level_mod, design_config: dict = None, sram_num_bits: int = None):
+def gen_reports(rad_gen_settings: rg.HighLvlSettings, design: rg.DesignSweepInfo , top_level_mod: str, report_dir: str, sram_num_bits: int = None):
+    """
+        Generates reports and runs post processing scripts to generate csv files containing final values for a design point
+        Takes a hammer generated obj directory as its input report dir 
+    """
+    retval = None
+    report_dict = {}
+    # print(f"Parsing results for {dir}")
+    syn_rpts, par_rpts, pt_rpts = parse_output(rad_gen_settings, top_level_mod, report_dir)
+    report_dict["syn"] = syn_rpts
+    report_dict["par"] = par_rpts
+    report_dict["pt"] = pt_rpts
+    report_dict["obj_dir"] = report_dir
+    # checks to see if initial run was even valid
+    """ Looking for SRAM Macros """
+    sram_macros = []
+    macro_lef_areas = []
+    if os.path.isfile(os.path.join(report_dir,"syn-rundir","syn-output-full.json")):
+        syn_out_config = json.load(open(os.path.join(report_dir,"syn-rundir","syn-output-full.json")))
+        if "vlsi.inputs.sram_parameters" in syn_out_config.keys():
+            for sram in syn_out_config["vlsi.inputs.sram_parameters"]:
+                sram_macros.append(sram["name"])
+                m_sizes = get_sram_macro_sizes(rad_gen_settings, sram["name"])
+                macro_lef_areas.append(m_sizes[0]*m_sizes[1])
+                if sram_num_bits is not None:
+                    num_macros = sram_num_bits // (int(sram['width'])*int(sram['depth']))
+                    report_dict["num_macros"] = num_macros
+
+        report_dict["sram_macros"] = ", ".join(sram_macros)
+        report_dict["sram_macro_lef_areas"] = ", ".join([str(x) for x in macro_lef_areas])
+    # Add the gds areas to the report
+    gds_file = os.path.join(report_dir,"par-rundir",f"{top_level_mod}_drc.gds")
+    if os.path.isfile(gds_file):
+        write_virtuoso_gds_to_area_script(gds_file)
+        for ext in ["csh","sh"]:
+            permission_cmd = "chmod +x " +  os.path.join(rad_gen_settings.tech_info.pdk_rundir,f'{rad_gen_settings.env_settings.scripts_info.gds_to_area_fname}.{ext}')
+            run_shell_cmd_no_logs(permission_cmd)
+        # run_shell_cmd_no_logs(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.sh"))
+        if not os.path.exists(os.path.join(report_dir,rad_gen_settings.env_settings.report_info.gds_area_fname)):
+            run_csh_cmd(os.path.join(rad_gen_settings.tech_info.pdk_rundir,f"{rad_gen_settings.env_settings.scripts_info.gds_to_area_fname}.csh"))
+            report_dict["gds_area"] = parse_gds_to_area_output(report_dir)
+        else:
+            report_dict["gds_area"] = get_gds_area_from_rpt(report_dir)
+        # report_dict["gds_area"] = parse_gds_to_area_output(os.path.join(report_search_dir,dir))
+    # RTL Parameter section
+    if design is not None and design.type == "rtl_params":
+        # Using the output syn directory to find parameters in hdl search paths
+        if(os.path.isfile(os.path.join(report_dir,"syn-rundir","syn-output-full.json"))):
+            syn_out_config = json.load(open(os.path.join(report_dir,"syn-rundir","syn-output-full.json")))
+            # looping through hdl search paths
+            for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
+                if "param_sweep_headers" in path:
+                    param_hdr_name = os.path.basename(design.type_info.base_header_path)
+                    params = read_in_rtl_proj_params(rad_gen_settings, design.type_info.params, top_level_mod, design.rtl_dir_path, os.path.join(path, param_hdr_name))
+                    report_dict["rtl_params"] = params
+                    break                      
+    # Not sure why this is needed
+    #     if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0 and "rtl_params" in report_dict:
+    #         retval = report_dict
+    # else: 
+    #     if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
+    #         retval = report_dict
+    return report_dict
+
+
+def gen_parse_reports(rad_gen_settings: rg.HighLvlSettings, report_search_dir: str, top_level_mod: str, design: rg.DesignSweepInfo = None, sram_num_bits: int = None):
+    """
+        Searches through the specified search directory and will compile a list of all reports from specified design
+        TODO allow for users to more easily parse reports from multiple designs or design points ie specify filter for designs users would like to parse
+    """
     reports = []
     for dir in os.listdir(report_search_dir):
         design_out_dir = os.path.join(report_search_dir,dir)
         for r_dir in os.listdir(design_out_dir):
             report_dir = os.path.join(design_out_dir, r_dir)
-            if os.path.isdir(report_dir) and dir.startswith(top_level_mod):
+            # only check to determine validity of output dir
+            if os.path.isdir(report_dir) and r_dir.startswith(top_level_mod):
                 print(f"Parsing results for {report_dir}")
-            #if os.path.isdir(dir) and top_level_mod in dir:
-                report_dict = {}
-                # print(f"Parsing results for {dir}")
-                syn_rpts, par_rpts, pt_rpts = parse_output(top_level_mod,report_dir)
-                report_dict["syn"] = syn_rpts
-                report_dict["par"] = par_rpts
-                report_dict["pt"] = pt_rpts
-                report_dict["obj_dir"] = report_dir
-                # checks to see if initial run was even valid
-                """ Looking for SRAM Macros """
-                sram_macros = []
-                macro_lef_areas = []
-                if os.path.isfile(os.path.join(report_dir,"syn-rundir","syn-output-full.json")):
-                    syn_out_config = json.load(open(os.path.join(report_dir,"syn-rundir","syn-output-full.json")))
-                    if "vlsi.inputs.sram_parameters" in syn_out_config.keys():
-                        for sram in syn_out_config["vlsi.inputs.sram_parameters"]:
-                            sram_macros.append(sram["name"])
-                            m_sizes = get_sram_macro_sizes(sram["name"])
-                            macro_lef_areas.append(m_sizes[0]*m_sizes[1])
-                            if sram_num_bits is not None:
-                                num_macros = sram_num_bits // (int(sram['width'])*int(sram['depth']))
-                                report_dict["num_macros"] = num_macros
-
-                    report_dict["sram_macros"] = ", ".join(sram_macros)
-                    report_dict["sram_macro_lef_areas"] = ", ".join([str(x) for x in macro_lef_areas])
-                # Add the gds areas to the report
-                gds_file = os.path.join(report_dir,"par-rundir",f"{top_level_mod}_drc.gds")
-                if os.path.isfile(gds_file):
-                    write_virtuoso_gds_to_area_script(gds_file)
-                    for ext in ["csh","sh"]:
-                        permission_cmd = "chmod +x " +  os.path.join(tech_info.pdk_rundir,f'{script_info.gds_to_area_fname}.{ext}')
-                        run_shell_cmd_no_logs(permission_cmd)
-                    # run_shell_cmd_no_logs(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.sh"))
-                    if not os.path.exists(os.path.join(report_dir,report_info.gds_area_fname)):
-                        run_csh_cmd(os.path.join(tech_info.pdk_rundir,f"{script_info.gds_to_area_fname}.csh"))
-                        report_dict["gds_area"] = parse_gds_to_area_output(report_dir)
-                    else:
-                        report_dict["gds_area"] = get_gds_area_from_rpt(report_dir)
-                    # report_dict["gds_area"] = parse_gds_to_area_output(os.path.join(report_search_dir,dir))
-                # RTL Parameter section
-                if design_config is not None and design_config["type"] == "rtl_params":
-                    # Using the output syn directory to find parameters in hdl search paths
-                    if(os.path.isfile(os.path.join(report_dir,"syn-rundir","syn-output-full.json"))):
-                        syn_out_config = json.load(open(os.path.join(report_dir,"syn-rundir","syn-output-full.json")))
-                        # looping through hdl search paths
-                        for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
-                            if sweep_settings.param_sweep_hdr_dir_name in path:
-                                param_hdr_name = os.path.basename(design_config["base_param_hdr_path"])
-                                params = read_in_rtl_proj_params(design_config["params"], top_level_mod, design_config["rtl_dir_path"],os.path.join(path,param_hdr_name))
-                                report_dict["rtl_params"] = params
-                                break                      
-                    if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0 and "rtl_params" in report_dict:
-                        reports.append(report_dict)
-                else: 
-                    if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
-                        reports.append(report_dict)
+                report = gen_reports(rad_gen_settings, design, top_level_mod, report_dir, sram_num_bits)
+                if report != None:
+                    reports.append(report)
+                
     return reports
 ########################################## RAD GEN UTILITIES ##########################################
 ##########################################   RAD GEN FLOW   ############################################
@@ -1724,91 +1743,91 @@ def handle_error(fn, expected_vals: set=None):
     if not fn():
         sys.exit(1)
 
-def init_structs_from_cli(args):
-    init_globals()
+# def init_structs_from_cli(args):
+#     init_globals()
 
-    if args.high_lvl_rad_gen_config_file != "":
-        handle_error(lambda: check_for_valid_path(args.high_lvl_rad_gen_config_file), {True : None})
-        with open(args.high_lvl_rad_gen_config_file, 'r') as yml_file:
-            rad_gen_config = yaml.safe_load(yml_file)
-        # pretty(rad_gen_config)
-        rad_gen_settings.hammer_home_path = os.path.join(os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"]),"hammer")
-        rad_gen_settings.top_level_rad_gen_config_path = os.path.realpath(args.high_lvl_rad_gen_config_file)
-        rad_gen_settings.rad_gen_home_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"])
-        rad_gen_settings.design_output_path = os.path.join(rad_gen_settings.rad_gen_home_path, "output_designs")
-        rad_gen_settings.env_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["env_config_path"])
-        # init tech info settings
-        tech_info.pdk_rundir = os.path.expanduser(rad_gen_config["rad_gen_settings"]["asap7"]["rundir_path"])
-        tech_info.sram_lib_path = os.path.join(rad_gen_settings.hammer_home_path,"src","hammer-vlsi","technology","asap7","sram_compiler","memories")
+#     if args.high_lvl_rad_gen_config_file != "":
+#         handle_error(lambda: check_for_valid_path(args.high_lvl_rad_gen_config_file), {True : None})
+#         with open(args.high_lvl_rad_gen_config_file, 'r') as yml_file:
+#             rad_gen_config = yaml.safe_load(yml_file)
+#         # pretty(rad_gen_config)
+#         rad_gen_settings.hammer_home_path = os.path.join(os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"]),"hammer")
+#         rad_gen_settings.top_level_rad_gen_config_path = os.path.realpath(args.high_lvl_rad_gen_config_file)
+#         rad_gen_settings.rad_gen_home_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["rad_gen_home_path"])
+#         rad_gen_settings.design_output_path = os.path.join(rad_gen_settings.rad_gen_home_path, "output_designs")
+#         rad_gen_settings.env_path = os.path.expanduser(rad_gen_config["rad_gen_settings"]["env_config_path"])
+#         # init tech info settings
+#         tech_info.pdk_rundir = os.path.expanduser(rad_gen_config["rad_gen_settings"]["asap7"]["rundir_path"])
+#         tech_info.sram_lib_path = os.path.join(rad_gen_settings.hammer_home_path,"src","hammer-vlsi","technology","asap7","sram_compiler","memories")
 
 
-    else:
-        rad_gen_log("ERROR: High level RAD-Gen config file not provided", rad_gen_log_fd)
-        sys.exit(1)
-    # determine mode of operation of RAD-Gen
-    tool_mode = None
-    if args.config_path != "":
-        tool_mode = "vlsi"
-    elif args.compile_results and args.design_sweep_config_file != '':
-        tool_mode = "gen_results"
-    elif args.design_sweep_config_file != '' and not args.compile_results:
-        tool_mode = "design_sweep"
+#     else:
+#         rad_gen_log("ERROR: High level RAD-Gen config file not provided", rad_gen_log_fd)
+#         sys.exit(1)
+#     # determine mode of operation of RAD-Gen
+#     tool_mode = None
+#     if args.config_path != "":
+#         tool_mode = "vlsi"
+#     elif args.compile_results and args.design_sweep_config_file != '':
+#         tool_mode = "gen_results"
+#     elif args.design_sweep_config_file != '' and not args.compile_results:
+#         tool_mode = "design_sweep"
     
-    rad_gen_mode.tool_mode = tool_mode
-    if tool_mode == None:
-        rad_gen_log("ERROR: No mode of operation specified", rad_gen_log_fd)
-        sys.exit(1)
+#     rad_gen_mode.tool_mode = tool_mode
+#     if tool_mode == None:
+#         rad_gen_log("ERROR: No mode of operation specified", rad_gen_log_fd)
+#         sys.exit(1)
 
-    """ Settings required when running in VLSI flow mode """
-    if tool_mode == "vlsi":
-        rad_gen_mode.vlsi_flow.enable = True
-        # If the user specified a top level module and hdl path, then we can reuse a config file with the correct VLSI settings
-        if args.manual_obj_dir != "":
-            asic_flow_settings.manual_obj_dir = os.path.realpath(args.manual_obj_dir)
-            # if os.path.exists
-            # handle_error(lambda: check_for_valid_path(asic_flow_settings.manual_obj_dir), {True : None})
+#     """ Settings required when running in VLSI flow mode """
+#     if tool_mode == "vlsi":
+#         rad_gen_mode.vlsi_flow.enable = True
+#         # If the user specified a top level module and hdl path, then we can reuse a config file with the correct VLSI settings
+#         if args.manual_obj_dir != "":
+#             asic_flow_settings.manual_obj_dir = os.path.realpath(args.manual_obj_dir)
+#             # if os.path.exists
+#             # handle_error(lambda: check_for_valid_path(asic_flow_settings.manual_obj_dir), {True : None})
 
-        if args.top_level != "" and args.hdl_path != "":
-            rad_gen_mode.vlsi_flow.config_reuse = True
-            asic_flow_settings.top_level_module = args.top_level
-            asic_flow_settings.hdl_path = os.path.realpath(args.hdl_path)
-            # If path is invalid, exit with error handler
-            handle_error(lambda: check_for_valid_path(asic_flow_settings.hdl_path), {True : None})
-        else:
-            # This means that the config file the user passed into the tool is expected to be valid
-            rad_gen_mode.vlsi_flow.config_reuse = False
+#         if args.top_level != "" and args.hdl_path != "":
+#             rad_gen_mode.vlsi_flow.config_reuse = True
+#             asic_flow_settings.top_level_module = args.top_level
+#             asic_flow_settings.hdl_path = os.path.realpath(args.hdl_path)
+#             # If path is invalid, exit with error handler
+#             handle_error(lambda: check_for_valid_path(asic_flow_settings.hdl_path), {True : None})
+#         else:
+#             # This means that the config file the user passed into the tool is expected to be valid
+#             rad_gen_mode.vlsi_flow.config_reuse = False
         
-        # rad_gen_settings.env_path = os.path.realpath(args.env_path)
+#         # rad_gen_settings.env_path = os.path.realpath(args.env_path)
 
-        asic_flow_settings.config_path = os.path.realpath(args.config_path)
-        handle_error(lambda: check_for_valid_path(asic_flow_settings.config_path), {True : None})
+#         asic_flow_settings.config_path = os.path.realpath(args.config_path)
+#         handle_error(lambda: check_for_valid_path(asic_flow_settings.config_path), {True : None})
         
-        # if not specified the flow will run all the stages by defualt
-        run_all_flow = not (args.synthesis or args.place_n_route or args.primetime)
-        asic_flow_settings.run_sram = args.sram_compiler and not args.compile_results
-        asic_flow_settings.run_syn = args.synthesis or run_all_flow and not args.compile_results
-        asic_flow_settings.run_par = args.place_n_route or run_all_flow and not args.compile_results
-        asic_flow_settings.run_pt = args.primetime or run_all_flow and not args.compile_results
-        # If user wants to use the latest generated obj dir for the design
-        asic_flow_settings.use_latest_obj_dir = args.use_latest_obj_dir
-    elif tool_mode == "gen_results" or tool_mode == "design_sweep":
-        handle_error(lambda: check_for_valid_path(args.design_sweep_config_file), {True : None})
-        multi_design_settings.sweep_config_path = os.path.realpath(args.design_sweep_config_file)
-        sram_compiler_settings.rtl_out = os.path.join(rad_gen_settings.rad_gen_home_path,"input_designs","sram","rtl","compiler_outputs")
-        sram_compiler_settings.config_out = os.path.join(rad_gen_settings.rad_gen_home_path,"input_designs","sram","configs","compiler_outputs")
+#         # if not specified the flow will run all the stages by defualt
+#         run_all_flow = not (args.synthesis or args.place_n_route or args.primetime)
+#         asic_flow_settings.run_sram = args.sram_compiler and not args.compile_results
+#         asic_flow_settings.run_syn = args.synthesis or run_all_flow and not args.compile_results
+#         asic_flow_settings.run_par = args.place_n_route or run_all_flow and not args.compile_results
+#         asic_flow_settings.run_pt = args.primetime or run_all_flow and not args.compile_results
+#         # If user wants to use the latest generated obj dir for the design
+#         asic_flow_settings.use_latest_obj_dir = args.use_latest_obj_dir
+#     elif tool_mode == "gen_results" or tool_mode == "design_sweep":
+#         handle_error(lambda: check_for_valid_path(args.design_sweep_config_file), {True : None})
+#         multi_design_settings.sweep_config_path = os.path.realpath(args.design_sweep_config_file)
+#         sram_compiler_settings.rtl_out = os.path.join(rad_gen_settings.rad_gen_home_path,"input_designs","sram","rtl","compiler_outputs")
+#         sram_compiler_settings.config_out = os.path.join(rad_gen_settings.rad_gen_home_path,"input_designs","sram","configs","compiler_outputs")
 
     
 
-def sort_by_params(reports, result_parse_config):
-    # This directory is where a sucessful synthesis run will have a json file from which we can get the hdl search path of the design
-    # From the hdl search path we can find the parameters used for the run ...
-    config_search_dir = os.path.join("syn-rundir","syn-output-full.json")
-    syn_config_outpath = os.path.join(result_parse_config["report_search_path"],report["obj_dir"],config_search_dir)
-    for report in reports:
-        if os.path.isfile(syn_config_outpath):
-            syn_out_config = json.load(open(syn_config_outpath))
-            for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
-                print("test")
+# def sort_by_params(reports, result_parse_config):
+#     # This directory is where a sucessful synthesis run will have a json file from which we can get the hdl search path of the design
+#     # From the hdl search path we can find the parameters used for the run ...
+#     config_search_dir = os.path.join("syn-rundir","syn-output-full.json")
+#     syn_config_outpath = os.path.join(result_parse_config["report_search_path"],report["obj_dir"],config_search_dir)
+#     for report in reports:
+#         if os.path.isfile(syn_config_outpath):
+#             syn_out_config = json.load(open(syn_config_outpath))
+#             for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
+#                 print("test")
 
 
 def write_virtuoso_gds_to_area_script(gds_fpath):
@@ -1898,30 +1917,43 @@ def modify_mem_params(mem_params: dict, width: int, depth: int, num_ports: int) 
         mem_params[0]["ports"][1]["address port name"] = "A2"
         mem_params[0]["ports"][1]["address port polarity"] = "active high"
 
-def gen_compiled_srams(base_config, sanitized_design):
-    for mem in sanitized_design["mems"]:
-        mapping = sram_compiler.compile(mem["rw_ports"],mem["w"],mem["d"],"asap7")
-        sram_map_info, rtl_outpath = sram_compiler.write_rtl_from_mapping(mapping,sanitized_design["base_rtl_path"],sram_compiler_settings.rtl_out)
+def gen_compiled_srams(rad_gen_settings: rg.HighLvlSettings, design_id: int, base_config: dict):
+    cur_design = rad_gen_settings.design_sweep_infos[design_id]
+    for mem in cur_design.type_info.mems:
+        mapping = sram_compiler.compile(mem["rw_ports"], mem["w"], mem["d"], "asap7")
+        sram_map_info, rtl_outpath = sram_compiler.write_rtl_from_mapping(
+                                                    mapping,
+                                                    cur_design.type_info.base_rtl_path,
+                                                    rad_gen_settings.sram_compiler_settings.rtl_out_path)
         sram_map_info = sram_compiler.translate_logical_to_phsical(sram_map_info)
-        config_path = mod_rad_gen_config_from_rtl(base_config, sram_map_info, rtl_outpath)
-        rad_gen_log(get_rad_gen_flow_cmd(config_path,sram_flag=True),rad_gen_log_fd)
+        config_path = mod_rad_gen_config_from_rtl(
+                                            rad_gen_settings,
+                                            base_config,
+                                            sram_map_info,
+                                            rtl_outpath)
+        # Log out flow command
+        rad_gen_log(get_rad_gen_flow_cmd(rad_gen_settings = rad_gen_settings, config_path = config_path, sram_flag = True),rad_gen_log_fd)
+    # for mem in sanitized_design["mems"]:
+        
         # get mapping and find the macro in lib, instantiate that many and
 
-def sram_sweep_gen(base_config, sanitized_design):
+def sram_sweep_gen(rad_gen_settings: rg.HighLvlSettings, design_id: int):
+    # current design
+    cur_design = rad_gen_settings.design_sweep_infos[design_id]
+    base_config = sanitize_config(yaml.safe_load(open(cur_design.base_config_path,"r")))
     # This is where we will send the output sram macros
-    # sram_out_path = os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
-    if not os.path.isdir(sram_compiler_settings.rtl_out):
-        os.mkdir(sram_compiler_settings.rtl_out)
-    gen_compiled_srams(base_config, sanitized_design)
-    # load in the mem_params.json file            
+    if not os.path.isdir(rad_gen_settings.sram_compiler_settings.rtl_out_path):
+        os.makedirs(rad_gen_settings.sram_compiler_settings.rtl_out_path)
+    gen_compiled_srams(rad_gen_settings, design_id, base_config) #,base_config, sanitized_design)
+    # load in the mem_params.json file <TAG> <HAMMER-IR-PARSE TODO>     
     with open(base_config["vlsi.inputs"]["sram_parameters"], 'r') as fd:
         mem_params = json.load(fd)
     # List of available SRAM macros
-    sram_macro_lefs = os.listdir(os.path.join(tech_info.sram_lib_path,"lef"))
+    sram_macro_lefs = os.listdir(os.path.join(rad_gen_settings.tech_info.sram_lib_path, "lef"))
     # Sweep over all widths and depths for SRAMs in the sweep config file  
-    for rw_port in sanitized_design["rw_ports"]:         
-        for depth in sanitized_design["depths"]:
-            for width in sanitized_design["widths"]:
+    for rw_port in cur_design.type_info.rw_ports:         
+        for depth in cur_design.type_info.depths:
+            for width in cur_design.type_info.widths:
                 """ MODIFIYING MEM CONFIG JSON FILES """
                 # If we want to iterate through and keep an original reference set of configs we need to use deepcopy on the dict
                 # This concept is very annoying as when assigning any variable to a dict you are actually just creating a reference to the dict (Very unlike C) :(
@@ -1931,6 +1963,7 @@ def sram_sweep_gen(base_config, sanitized_design):
                 mod_mem_params = copy.deepcopy(mem_params)
                 modify_mem_params(mod_mem_params, width, depth, rw_port)
                 # Make sure that the SRAM macro exists in the list of SRAM macros
+                # <TAG> <HAMMER-IR-PARSE TODO>
                 if not any(mod_mem_params[0]["name"] in macro for macro in sram_macro_lefs):
                     rad_gen_log(f"WARNING: {mod_mem_params[0]['name']} not found in list of SRAM macros, skipping config generation...",rad_gen_log_fd)
                     continue
@@ -1946,10 +1979,10 @@ def sram_sweep_gen(base_config, sanitized_design):
                 
                 """ MODIFIYING SRAM RTL"""
                 # Get just the filename of the sram sv file and append the new dims to it
-                mod_rtl_fname = os.path.splitext(sanitized_design["base_rtl_path"].split("/")[-1])[0]+f'_{mod_mem_params[0]["name"]}.sv'
+                mod_rtl_fname = os.path.splitext(cur_design.type_info.base_rtl_path.split("/")[-1])[0]+f'_{mod_mem_params[0]["name"]}.sv'
                 # Modify the parameters for SRAM_ADDR_W and SRAM_DATA_W and create a copy of the base sram 
                 # TODO find a better way to do this rather than just creating a ton of files, the only thing I'm changing are 2 parameters in rtl
-                with open(sanitized_design["base_rtl_path"], 'r') as fd:
+                with open(cur_design.type_info.base_rtl_path, 'r') as fd:
                     base_rtl = fd.read()
                 mod_sram_rtl = base_rtl
                 # Modify the parameters in rtl and create new dir for the sram
@@ -1974,18 +2007,18 @@ def sram_sweep_gen(base_config, sanitized_design):
                 # The correct RTL for the sram inst is in the edit_sram_inst string so we now will replace the previous sram inst with the new one
                 mod_sram_rtl = edit_sram_inst_re.sub(edit_sram_inst,mod_sram_rtl)
                 
-                base_rtl_dir = os.path.split(sanitized_design["base_rtl_path"])[0]
+                base_rtl_dir = os.path.split(cur_design.type_info.base_rtl_path)[0]
                 # Create a new dir for the modified sram
                 mod_rtl_dir = os.path.join(base_rtl_dir,f'{mod_mem_params[0]["name"]}')
                 
                 sp.call("mkdir -p " + mod_rtl_dir,shell=True)
             
-                modified_sram_rtl_path = os.path.join(sanitized_design["rtl_dir_path"],mod_rtl_dir.split("/")[-1],mod_rtl_fname)
+                modified_sram_rtl_path = os.path.join(cur_design.rtl_dir_path, mod_rtl_dir.split("/")[-1], mod_rtl_fname)
                 with open(modified_sram_rtl_path, 'w') as fd:
                     fd.write(mod_sram_rtl)
                 rad_gen_log(f"INFO: Writing sram rtl to {modified_sram_rtl_path}",rad_gen_log_fd)
                 """ MODIFYING HAMMER CONFIG YAML FILES """
-                m_sizes = get_sram_macro_sizes(mod_mem_params[0]["name"])
+                m_sizes = get_sram_macro_sizes(rad_gen_settings, mod_mem_params[0]["name"])
                 # Now we need to modify the base_config file to use the correct sram macro
                 
                 macro_init = 15 if rw_port == 1 else 30
@@ -2006,122 +2039,142 @@ def sram_sweep_gen(base_config, sanitized_design):
                 else:
                     mod_base_config["vlsi.inputs"]["pin.assignments"][0]["side"] = "left"
 
-
-
                 # Find design files in newly created rtl dir
                 design_files, design_dirs = rec_get_flist_of_ext(mod_rtl_dir,['.v','.sv','.vhd',".vhdl"])
                 mod_base_config["synthesis"]["inputs.input_files"] = design_files
                 mod_base_config["synthesis"]["inputs.hdl_search_paths"] = design_dirs
                 mod_base_config["vlsi.inputs"]["sram_parameters"] = os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0] + f'_{mod_mem_params[0]["name"]}.json'
                 # Write the modified base_config file to a new file
-                modified_config_path = os.path.splitext(sanitized_design["base_config_path"])[0]+f'_{mod_mem_params[0]["name"]}.yaml'
+                modified_config_path = os.path.splitext(cur_design.base_config_path)[0]+f'_{mod_mem_params[0]["name"]}.yaml'
                 with open(modified_config_path, 'w') as fd:
                     yaml.safe_dump(mod_base_config, fd, sort_keys=False)    
                 rad_gen_log(f"INFO: Writing rad_gen yml config to {modified_config_path}",rad_gen_log_fd)
-                rad_gen_log(get_rad_gen_flow_cmd(modified_config_path,sram_flag=True),rad_gen_log_fd)
+                rad_gen_log(get_rad_gen_flow_cmd(rad_gen_settings, modified_config_path, sram_flag=True),rad_gen_log_fd)
 
 
 
 
 
-def compile_results(args):
+def compile_results(rad_gen_settings: rg.HighLvlSettings):
     # read in the result config file
     # report_search_dir = os.path.expanduser(rad_gen_settings.rad_gen_home_path)
-    report_search_dir = rad_gen_settings.design_output_path
-    design_sweep_config = sanitize_config(yaml.safe_load(open(args.design_sweep_config_file)))
+    report_search_dir = rad_gen_settings.env_settings.design_output_path
+    # design_sweep_config = sanitize_config(yaml.safe_load(open(args.design_sweep_config_file)))
     csv_lines = []
     reports = []
-    for design in design_sweep_config["designs"]:
-        design_config = sanitize_config(design)
-        if ("type" in design_config.keys()):
-            # This parses for sram or rtl param sweeps
-            if (design_config["type"] == "sram"):
-                rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {args.design_sweep_config_file}",rad_gen_log_fd)
+    # for design in design_sweep_config["designs"]:
+    for design in rad_gen_settings.design_sweep_infos:
+        # design_config = sanitize_config(design)
+        rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {rad_gen_settings.sweep_config_path}",rad_gen_log_fd)
+        if design.type != None:
+            if design.type == "sram":
                 for mem in design["mems"]:
                     mem_top_lvl_name = f"sram_macro_map_{mem['rw_ports']}x{mem['w']}x{mem['d']}"
                     num_bits = mem['w']*mem['d']
-                    reports += gen_parse_reports(report_search_dir, mem_top_lvl_name, design_config, num_bits)
-                reports += gen_parse_reports(report_search_dir, design_config['top_level_module'], design_config)
-
-            elif (design_config["type"] == "rtl_params"):
+                    reports += gen_parse_reports(rad_gen_settings, report_search_dir, mem_top_lvl_name, design, num_bits)
+                reports += gen_parse_reports(rad_gen_settings, report_search_dir, design.top_lvl_module, design)
+            elif design.type == "rtl_params":
                 """ Currently focused on NoC rtl params"""
-                rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {args.design_sweep_config_file}",rad_gen_log_fd)
-                reports = gen_parse_reports(report_search_dir,design_config["top_level_module"],design_config)
+                reports = gen_parse_reports(rad_gen_settings, report_search_dir, design.top_lvl_module, design)
             else:
-                rad_gen_log(f"Error: Unknown design type {design_config['type']} in {args.design_sweep_config_file}",rad_gen_log_fd)
+                rad_gen_log(f"Error: Unknown design type {design.type} in {rad_gen_settings.sweep_config_path}",rad_gen_log_fd)
                 sys.exit(1)
         else:
             # This parsing of reports just looks at top level and takes whatever is in the obj dir
-            rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {args.design_sweep_config_file}",rad_gen_log_fd)
-            reports = gen_parse_reports(report_search_dir,design_config["top_level_module"])
-            # General parsing of report to csv
+            reports = gen_parse_reports(rad_gen_settings, report_search_dir, design.top_lvl_module)
+                
+        # if ("type" in design_config.keys()):
+        #     # This parses for sram or rtl param sweeps
+        #     if (design_config["type"] == "sram"):
+        #         rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {args.design_sweep_config_file}",rad_gen_log_fd)
+        #         for mem in design["mems"]:
+        #             mem_top_lvl_name = f"sram_macro_map_{mem['rw_ports']}x{mem['w']}x{mem['d']}"
+        #             num_bits = mem['w']*mem['d']
+        #             reports += gen_parse_reports(report_search_dir, mem_top_lvl_name, design_config, num_bits)
+        #         reports += gen_parse_reports(report_search_dir, design_config['top_level_module'], design_config)
+
+        #     elif (design_config["type"] == "rtl_params"):
+        #         """ Currently focused on NoC rtl params"""
+        #         rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {args.design_sweep_config_file}",rad_gen_log_fd)
+        #         reports = gen_parse_reports(report_search_dir,design_config["top_level_module"],design_config)
+        #     else:
+        #         rad_gen_log(f"Error: Unknown design type {design_config['type']} in {args.design_sweep_config_file}",rad_gen_log_fd)
+        #         sys.exit(1)
+        # else:
+        #     # This parsing of reports just looks at top level and takes whatever is in the obj dir
+        #     rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {args.design_sweep_config_file}",rad_gen_log_fd)
+        #     reports = gen_parse_reports(report_search_dir,design_config["top_level_module"])
         
+        # General parsing of report to csv
         for report in reports:
-            if "type" in design_config.keys() and design_config["type"] == "rtl_params":
+            if design.type == "rtl_params":
                 report_to_csv = noc_prse_area_brkdwn(report)
             else:
                 report_to_csv = gen_report_to_csv(report)
             if len(report_to_csv) > 0:
                 csv_lines.append(report_to_csv)
-    csv_fname = os.path.splitext(os.path.basename(args.design_sweep_config_file))[0]
+    csv_fname = os.path.splitext(os.path.basename(rad_gen_settings.sweep_config_path))[0]
     write_dict_to_csv(csv_lines,csv_fname)
 
-def design_sweep(args):
+def design_sweep(rad_gen_settings: rg.HighLvlSettings):
     # Starting with just SRAM configurations for a single rtl file (changing parameters in header file)
-    rad_gen_log(f"Running design sweep from config file {multi_design_settings.sweep_config_path}",rad_gen_log_fd)
-    design_sweep_config = yaml.safe_load(open(multi_design_settings.sweep_config_path))
-    for design in design_sweep_config["designs"]:
+    rad_gen_log(f"Running design sweep from config file {rad_gen_settings.sweep_config_path}",rad_gen_log_fd)
+    # design_sweep_config = yaml.safe_load(open(rad_gen_settings.sweep_config_path))
+    for id, design_sweep in enumerate(rad_gen_settings.design_sweep_infos):
         """ General flow for all designs in sweep config """
         # Load in the base configuration file for the design
-        sanitized_design = sanitize_config(design)
-        base_config = yaml.safe_load(open(sanitized_design["base_config_path"]))
+        # sanitized_design = sanitize_config(design)
+        base_config = yaml.safe_load(open(design_sweep.base_config_path))
         
         """ Currently only can sweep either vlsi params or rtl params not both """
         sweep_script_lines = [
             "#!/bin/bash",
         ]
         # If there are vlsi parameters to sweep over
-        if sanitized_design["type"] == "vlsi_params":
+        if design_sweep.type == "vlsi_params":
             mod_base_config = copy.deepcopy(base_config)
             """ MODIFYING HAMMER CONFIG YAML FILES """
             sweep_idx = 1
-            for param_sweep_key, param_sweep_vals in sanitized_design["params"].items():
+            for param_sweep_key, param_sweep_vals in design_sweep.type_info.params.items():
+                # <TAG> <HAMMER-IR-PARSE TODO> , This is looking for the period in parameters and will set the associated hammer IR to that value 
                 if "period" in param_sweep_key:
-                    for period in sanitized_design["params"][param_sweep_key]:
+                    for period in design_sweep.type_info.params[param_sweep_key]:
                         mod_base_config["vlsi.inputs"]["clocks"][0]["period"] = f'{str(period)} ns'
-                        modified_config_path = os.path.splitext(sanitized_design["base_config_path"])[0]+f'_period_{str(period)}.yaml'
+                        modified_config_path = os.path.splitext(design_sweep.base_config_path)[0] + f'_period_{str(period)}.yaml'
                         with open(modified_config_path, 'w') as fd:
                             yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
 
-                        rad_gen_cmd_lines = [get_rad_gen_flow_cmd(modified_config_path,sram_flag=False,top_level_mod=sanitized_design["top_level_module"],hdl_path=sanitized_design["rtl_dir_path"]) + " &",
-                        "sleep 2",
+                        rad_gen_cmd_lines = [
+                            get_rad_gen_flow_cmd(rad_gen_settings, modified_config_path, sram_flag=False, top_level_mod=design_sweep.top_lvl_module, hdl_path=design_sweep.rtl_dir_path) + " &",
+                            "sleep 2",
                         ]
                         sweep_script_lines += rad_gen_cmd_lines
-                        if sweep_idx % sanitized_design["flow_threads"] == 0 and sweep_idx != 0:
+                        if sweep_idx % design_sweep.flow_threads == 0 and sweep_idx != 0:
                             sweep_script_lines.append("wait")
                         sweep_idx += 1
             rad_gen_log("\n".join(create_bordered_str("Autogenerated Sweep Script")),rad_gen_log_fd)
             rad_gen_log("\n".join(sweep_script_lines),rad_gen_log_fd)
         # TODO This wont work for multiple SRAMs in a single design, simply to evaluate individual SRAMs
-        elif sanitized_design["type"] == "sram":      
-            sram_sweep_gen(base_config,sanitized_design)                
+        elif design_sweep.type == "sram":      
+            sram_sweep_gen(rad_gen_settings, id)                
         # TODO make this more general but for now this is ok
         # the below case should deal with any asic_param sweep we want to perform
-        elif sanitized_design["type"] == 'rtl_params':
-            mod_param_hdr_paths, mod_config_paths = edit_rtl_proj_params(sanitized_design["params"], sanitized_design["rtl_dir_path"], sanitized_design["base_param_hdr_path"],sanitized_design["base_config_path"])
+        elif design_sweep.type == 'rtl_params':
+            mod_param_hdr_paths, mod_config_paths = edit_rtl_proj_params(design_sweep.type_info.params, design_sweep.rtl_dir_path, design_sweep.type_info.base_header_path, design_sweep.base_config_path)
             sweep_idx = 1
             for hdr_path, config_path in zip(mod_param_hdr_paths, mod_config_paths):
             # for hdr_path in mod_param_hdr_paths:
                 rad_gen_log(f"PARAMS FOR PATH {hdr_path}",rad_gen_log_fd)
-                rad_gen_cmd_lines = [get_rad_gen_flow_cmd(config_path,sram_flag=False,top_level_mod=sanitized_design["top_level_module"],hdl_path=sanitized_design["rtl_dir_path"]) + " &",
+                rad_gen_cmd_lines = [
+                    get_rad_gen_flow_cmd(rad_gen_settings, config_path, sram_flag=False, top_level_mod=design_sweep.top_lvl_module, hdl_path=design_sweep.rtl_dir_path) + " &",
                     "sleep 2",
                 ]
                 sweep_script_lines += rad_gen_cmd_lines
-                if sweep_idx % sanitized_design["flow_threads"] == 0 and sweep_idx != 0:
+                if sweep_idx % design_sweep.flow_threads == 0 and sweep_idx != 0:
                     sweep_script_lines.append("wait")
                 sweep_idx += 1
                 # rad_gen_log(get_rad_gen_flow_cmd(config_path,sram_flag=False,top_level_mod=sanitized_design["top_level_module"],hdl_path=sanitized_design["rtl_dir_path"]),rad_gen_log_fd)
-                read_in_rtl_proj_params(sanitized_design["params"],sanitized_design["top_level_module"],sanitized_design["rtl_dir_path"],hdr_path)
+                read_in_rtl_proj_params(rad_gen_settings, design_sweep.type_info.params, design_sweep.top_lvl_module, design_sweep.rtl_dir_path, hdr_path)
                 """ We shouldn't need to edit the values of params/defines which are operations or values set to other params/defines """
                 """ EDIT PARAMS/DEFINES IN THE SWEEP FILE """
                 # TODO this assumes parameter sweep vars arent kept over multiple files
@@ -2140,7 +2193,37 @@ def run_asic_flow(rad_gen_settings: rg.HighLvlSettings):
 
 
 
-def init_structs(args: argparse.Namespace):
+def init_dataclass(dataclass_type: Type, input_yaml_config: dict, add_arg_config: dict = {}) -> dict:
+    """
+        Initializes dictionary values for fields defined in input data structure, basically acts as sanitation for keywords defined in data class fields
+        Returns a instantiation of the dataclass
+    """
+    dataclass_inputs = {}
+    for field in dataclass_type.__dataclass_fields__:
+        # if the field is read in from input yaml file
+        if field in input_yaml_config.keys():
+            dataclass_inputs[field] = input_yaml_config[field]
+        # additional arg values for fields not defined in input yaml (defined in default_value_config[field])
+        elif field in add_arg_config.keys():
+            dataclass_inputs[field] = add_arg_config[field]
+        # Try and access the default value from the dataclass, if it exists include it for pre proc
+        # If None is returned it means that the field is defined in the __post_init__ function
+        # try:
+        #     dataclass_default = getattr(dataclass_type, field)
+        # except:
+        #     # use -1 instead of None, since dataclass default could fail on mandatory path field
+        #     dataclass_default = -1
+        # uses "path" keyword in field to check if the field is a path which needs relevant transformations
+        if "path" in field and field in dataclass_inputs:
+            dataclass_inputs[field] = os.path.realpath( os.path.expanduser(dataclass_inputs[field]) )
+            handle_error(lambda: check_for_valid_path(dataclass_inputs[field]), {True : None})
+    # return created dataclass instance
+    return dataclass_type(**dataclass_inputs)
+
+
+
+
+def init_structs(args: argparse.Namespace) -> rg.HighLvlSettings:
     """
        Initializes data structures containing information global to an invocation of RAD gen from the command line.
        - This is structured by using fields in the data structures defined in src/data_structs.py and mapping them to existing keys loaded from yamls
@@ -2157,43 +2240,25 @@ def init_structs(args: argparse.Namespace):
     # Sanitize config file 
     top_level_config = sanitize_config(top_level_config)
 
-    # Initialize data struct inputs from config file
-    env_inputs = {}
-    for field in rg.EnvSettings.__dataclass_fields__:
-        if field in top_level_config.keys():
-            env_inputs[field] = top_level_config[field]
-        # Transformations & defaults for data structure:
-        elif field == "top_lvl_config_path":
-            env_inputs["top_lvl_config_path"] = os.path.abspath(args.top_lvl_config)
 
-    # env_inputs["os_env"] = os.environ.copy()
-    # Check for invalid keys
-    # for key in env_inputs.keys:
-    #     if key not in rg.EnvSettings.__dataclass_fields__:
-    #         raise ValueError(f"Invalid key '{key}' found in top level config file")
-    env_settings = rg.EnvSettings(**env_inputs)
+    env_inputs = {
+        "top_lvl_config_path": args.top_lvl_config,
+    }
+    env_settings = init_dataclass(rg.EnvSettings, top_level_config, env_inputs)
+
+    tech_inputs = {
+       "sram_lib_path": os.path.join(env_settings.hammer_home_path, "src","hammer-vlsi","technology","asap7","sram_compiler","memories"),
+    }
+    tech_info = init_dataclass(rg.TechInfo, top_level_config["tech_info"], tech_inputs)
 
 
-
-
-    tech_inputs = {}
-    for field in rg.TechInfo.__dataclass_fields__:
-        # Looks for tech info elements in "tech_info" section of config file
-        if field in top_level_config["tech_info"]:
-            tech_inputs[field] = top_level_config["tech_info"][field]
-        # Transformations & defaults for data structure:
-        # If NOT in config file set default
-        elif field == "sram_lib_path":
-            tech_inputs["sram_lib_path"] = os.path.join(env_inputs["hammer_home_path"], "src","hammer-vlsi","technology","asap7","sram_compiler","memories")
-    
-    
     asic_flow_settings_input = {} # asic flow settings
     mode_inputs = {} # Set appropriate tool modes
     vlsi_mode_inputs = {} # vlsi flow modes
-    design_sweep_inputs = {} # parameters needed for all sweeps
-    sweep_type_inputs = {} # parameters for a specific type of sweep
     high_lvl_inputs = {} # high level setting parameters (associated with a single invocation of rad_gen from cmd line)
+    design_sweep_infos = [] # list of design sweep info objects
     if args.design_sweep_config != None:
+        asic_flow_settings = rg.ASICFlowSettings() 
         # If a sweep file is specified with result compile flag, results across sweep points will be compiled
         if not args.compile_results:
             mode_inputs["sweep_gen"] = True # generate config, rtl, etc related to sweep config
@@ -2203,28 +2268,21 @@ def init_structs(args: argparse.Namespace):
         with open(args.design_sweep_config, 'r') as yml_file:
             sweep_config = yaml.safe_load(yml_file)
         sweep_config = sanitize_config(sweep_config)
-        high_lvl_inputs["sweep_config_path"] = os.path.realpath(args.design_sweep_config)
-        high_lvl_inputs["result_search_path"] = env_inputs["design_output_path"]
+        high_lvl_inputs["sweep_config_path"] = args.design_sweep_config
+        high_lvl_inputs["result_search_path"] = env_settings.design_output_path
 
-        for field in rg.DesignSweepInfo.__dataclass_fields__:
-            if field in sweep_config.keys():
-                design_sweep_inputs[field] = sweep_config[field]
-        
-        # sweep type is used to determine what subclass to instantiate 
-        if design_sweep_inputs["sweep_type"] == "sram":
-            for field in rg.SRAMSweepInfo.__dataclass_fields__:
-                if field in sweep_config.keys():
-                    sweep_type_inputs[field] = sweep_config[field]
-            sweep_type_info = rg.SRAMSweepInfo(**sweep_type_inputs)
-        elif design_sweep_inputs["sweep_type"] == "rtl_params":
-            for field in rg.RTLSweepInfo.__dataclass_fields__:
-                if field in sweep_config.keys():
-                    sweep_type_inputs[field] = sweep_config[field]
-            sweep_type_info = rg.RTLSweepInfo(**sweep_type_inputs)            
-        # TODO put in VLSI parameters
-        design_sweep_info = rg.DesignSweepInfo(**design_sweep_inputs, type_info = sweep_type_info)
+        for design in sweep_config["designs"]:
+            sweep_type_inputs = {} # parameters for a specific type of sweep
+            if design["type"] == "sram":
+                sweep_type_info = init_dataclass(rg.SRAMSweepInfo, design, sweep_type_inputs)
+            elif design["type"] == "rtl_params":
+                sweep_type_info = init_dataclass(rg.RTLSweepInfo, design, sweep_type_inputs)
+            
+            design_inputs = {}
+            design_inputs["type_info"] = sweep_type_info
+            design_sweep_infos.append(init_dataclass(rg.DesignSweepInfo, design, design_inputs))
     else:
-        design_sweep_info = None
+        design_sweep_infos = None
         # Currently only enabling VLSI mode when other modes turned off
         if args.design_config != None:
             # check for valid path and parse values
@@ -2234,19 +2292,20 @@ def init_structs(args: argparse.Namespace):
             design_config = sanitize_config(design_config)
 
             asic_flow_settings_input["design_config"] = design_config
-            asic_flow_settings_input["config_path"] = os.path.realpath(args.design_config)
+            asic_flow_settings_input["config_path"] = args.design_config
 
             vlsi_mode_inputs["enable"] = True
             # if cli provides a top level module and hdl path, we will modify the provided design config file to use them
             if args.top_lvl_module != None and args.hdl_path != None:
                 vlsi_mode_inputs["config_pre_proc"] = True
                 asic_flow_settings_input["top_lvl_module"] = args.top_lvl_module
-                asic_flow_settings_input["hdl_path"] = os.path.realpath(args.hdl_path)
+                asic_flow_settings_input["hdl_path"] = args.hdl_path
             else:
                 vlsi_mode_inputs["config_pre_proc"] = False
                 # TODO these should be parsed with hammer IR parser s.t. they can be in its standard format rather just yaml parser
                 # <TAG> <HAMMER-IR-PARSE TODO>
                 asic_flow_settings_input["top_lvl_module"] = design_config["synthesis"]["inputs.top_module"]
+            
             # Create output directory for obj dirs to be created inside of
             out_dir = os.path.join(env_settings.design_output_path, asic_flow_settings_input["top_lvl_module"])
             obj_dir_fmt = f"{asic_flow_settings_input['top_lvl_module']}-{rg.create_timestamp()}"
@@ -2276,14 +2335,167 @@ def init_structs(args: argparse.Namespace):
             asic_flow_settings_input["run_par"] = args.place_n_route or run_all_flow
             asic_flow_settings_input["run_pt"] = args.primetime or run_all_flow
             # TODO implement "flow_stages" element of ASICFlowSettings struct
+            asic_flow_settings = init_dataclass(rg.ASICFlowSettings, asic_flow_settings_input, {})
 
+    vlsi_flow = init_dataclass(rg.VLSIMode, vlsi_mode_inputs, {})
+    rad_gen_mode = init_dataclass(rg.RADGenMode, mode_inputs, {"vlsi_flow" : vlsi_flow})
+    high_lvl_inputs = {
+        **high_lvl_inputs,
+        "mode": rad_gen_mode,
+        "tech_info": tech_info,
+        "design_sweep_infos": design_sweep_infos,
+        "asic_flow_settings": asic_flow_settings,
+        "env_settings": env_settings,
+    }
+    high_lvl_settings = init_dataclass(rg.HighLvlSettings, high_lvl_inputs, {})
+
+
+
+
+    # Initialize data struct inputs from config file
+    # env_inputs = {}
+    # for field in rg.EnvSettings.__dataclass_fields__:
+    #     if field in top_level_config.keys():
+    #         env_inputs[field] = top_level_config[field]
+    #     # Transformations & defaults for data structure:
+    #     elif field == "top_lvl_config_path":
+    #         env_inputs["top_lvl_config_path"] = os.path.realpath(args.top_lvl_config)
+
+    # env_inputs["os_env"] = os.environ.copy()
+    # Check for invalid keys
+    # for key in env_inputs.keys:
+    #     if key not in rg.EnvSettings.__dataclass_fields__:
+    #         raise ValueError(f"Invalid key '{key}' found in top level config file")
     
-    # Initialize data structs
-    tech_info = rg.TechInfo(**tech_inputs)
-    vlsi_mode_inputs = rg.VLSIMode(**vlsi_mode_inputs)
-    rad_gen_mode = rg.RADGenMode(**mode_inputs, vlsi_flow = vlsi_mode_inputs)
-    asic_flow_settings = rg.ASICFlowSettings(**asic_flow_settings_input)
-    high_lvl_settings = rg.HighLvlSettings(**high_lvl_inputs, mode=rad_gen_mode, tech_info=tech_info, design_sweep_info=design_sweep_info, asic_flow_settings=asic_flow_settings, env_settings=env_settings)
+    # env_settings = rg.EnvSettings(**env_inputs)
+
+
+
+
+    # tech_inputs = {}
+    # for field in rg.TechInfo.__dataclass_fields__:
+    #     # Looks for tech info elements in "tech_info" section of config file
+    #     if field in top_level_config["tech_info"]:
+    #         tech_inputs[field] = top_level_config["tech_info"][field]
+    #     # Transformations & defaults for data structure:
+    #     # If NOT in config file set default
+    #     elif field == "sram_lib_path":
+    #         tech_inputs["sram_lib_path"] = os.path.join(env_settings.hammer_home_path, "src","hammer-vlsi","technology","asap7","sram_compiler","memories")
+    
+    
+    # asic_flow_settings_input = {} # asic flow settings
+    # mode_inputs = {} # Set appropriate tool modes
+    # vlsi_mode_inputs = {} # vlsi flow modes
+    # # design_sweep_inputs = [] # parameters needed for each design sweep
+    # # design_sweep_inputs = {} # parameters needed for all sweeps
+    # sweep_type_inputs = {} # parameters for a specific type of sweep
+    # high_lvl_inputs = {} # high level setting parameters (associated with a single invocation of rad_gen from cmd line)
+    # design_sweep_infos = [] # list of design sweep info objects
+    # if args.design_sweep_config != None:
+    #     asic_flow_settings = None 
+    #     # If a sweep file is specified with result compile flag, results across sweep points will be compiled
+    #     if not args.compile_results:
+    #         mode_inputs["sweep_gen"] = True # generate config, rtl, etc related to sweep config
+    #     else:
+    #         mode_inputs["result_parse"] = True # parse results for each sweep point
+    #     handle_error(lambda: check_for_valid_path(args.design_sweep_config), {True : None})
+    #     with open(args.design_sweep_config, 'r') as yml_file:
+    #         sweep_config = yaml.safe_load(yml_file)
+    #     sweep_config = sanitize_config(sweep_config)
+    #     high_lvl_inputs["sweep_config_path"] = os.path.realpath(args.design_sweep_config)
+    #     high_lvl_inputs["result_search_path"] = env_settings.design_output_path
+
+    #     for design in sweep_config["designs"]:
+    #         design_inputs = {}
+    #         for field in rg.DesignSweepInfo.__dataclass_fields__:
+    #             if field in design.keys():
+    #                 if field == "base_config_path":
+    #                     # Check for valid path and then ge
+    #                     # TODO for paths check if there is a user tilde in it and expand user or expand to relative path if necessary
+    #                     design_inputs[field] = os.path.expanduser(design[field])
+    #                     handle_error(lambda: check_for_valid_path(design_inputs[field]), {True : None})
+    #                 else:
+    #                     design_inputs[field] = design[field]
+    #         # design_sweep_inputs.append(design_inputs)
+    #         # sweep type is used to determine what subclass to instantiate 
+    #         if design_inputs["type"] == "sram":
+    #             for field in rg.SRAMSweepInfo.__dataclass_fields__:
+    #                 if field in design.keys():
+    #                     if field == "base_rtl_path":
+    #                         # Check for valid path and expand user for paths
+    #                         sweep_type_inputs[field] = os.path.expanduser(design[field])
+    #                         handle_error(lambda: check_for_valid_path(sweep_type_inputs[field]), {True : None})
+    #                     else:
+    #                         sweep_type_inputs[field] = design[field]
+    #             sweep_type_info = rg.SRAMSweepInfo(**sweep_type_inputs)
+    #         elif design_inputs["type"] == "rtl_params":
+    #             for field in rg.RTLSweepInfo.__dataclass_fields__:
+    #                 if field in design.keys():
+    #                     sweep_type_inputs[field] = design[field]
+    #             sweep_type_info = rg.RTLSweepInfo(**sweep_type_inputs)  
+    #         design_sweep_infos.append(rg.DesignSweepInfo(**design_inputs, type_info = sweep_type_info))
+    #     # TODO put in VLSI parameters
+    #     # design_sweep_infos = [rg.DesignSweepInfo(**design_input, type_info = sweep_type_info) for design_input in design_inputs]
+    # else:
+    #     design_sweep_infos = None
+    #     # Currently only enabling VLSI mode when other modes turned off
+    #     if args.design_config != None:
+    #         # check for valid path and parse values
+    #         handle_error(lambda: check_for_valid_path(args.design_config), {True : None})
+    #         with open(args.design_config, 'r') as yml_file:
+    #             design_config = yaml.safe_load(yml_file)
+    #         design_config = sanitize_config(design_config)
+
+    #         asic_flow_settings_input["design_config"] = design_config
+    #         asic_flow_settings_input["config_path"] = os.path.realpath(args.design_config)
+
+    #         vlsi_mode_inputs["enable"] = True
+    #         # if cli provides a top level module and hdl path, we will modify the provided design config file to use them
+    #         if args.top_lvl_module != None and args.hdl_path != None:
+    #             vlsi_mode_inputs["config_pre_proc"] = True
+    #             asic_flow_settings_input["top_lvl_module"] = args.top_lvl_module
+    #             asic_flow_settings_input["hdl_path"] = os.path.realpath(args.hdl_path)
+    #         else:
+    #             vlsi_mode_inputs["config_pre_proc"] = False
+    #             # TODO these should be parsed with hammer IR parser s.t. they can be in its standard format rather just yaml parser
+    #             # <TAG> <HAMMER-IR-PARSE TODO>
+    #             asic_flow_settings_input["top_lvl_module"] = design_config["synthesis"]["inputs.top_module"]
+    #         # Create output directory for obj dirs to be created inside of
+    #         out_dir = os.path.join(env_settings.design_output_path, asic_flow_settings_input["top_lvl_module"])
+    #         obj_dir_fmt = f"{asic_flow_settings_input['top_lvl_module']}-{rg.create_timestamp()}"
+            
+    #         # TODO restrict input to only accept one of below two options
+    #         obj_dir_path = None
+    #         # Users can specify a specific obj directory
+    #         if args.manual_obj_dir != None:
+    #             obj_dir_path = os.path.realpath(args.manual_obj_dir)
+    #         # Or they can use the latest created obj dir
+    #         elif args.use_latest_obj_dir:
+    #             obj_dir_path = find_newest_obj_dir(search_dir = out_dir,obj_dir_fmt = f"{asic_flow_settings_input['top_lvl_module']}-{rg.create_timestamp(fmt_only_flag = True)}")
+    #         # If no value given or no obj dir found, we will create a new one
+    #         if obj_dir_path == None:
+    #             obj_dir_path = os.path.join(out_dir,obj_dir_fmt)
+
+    #         if not os.path.isdir(obj_dir_path):
+    #             os.makedirs(obj_dir_path)
+
+    #         rad_gen_log(f"Using obj_dir: {obj_dir_path}",rad_gen_log_fd)
+    #         asic_flow_settings_input["obj_dir_path"] = obj_dir_path
+
+    #         # if not specified the flow will run all the stages by defualt
+    #         run_all_flow = not (args.synthesis or args.place_n_route or args.primetime)
+    #         asic_flow_settings_input["run_sram"] = args.sram_compiler
+    #         asic_flow_settings_input["run_syn"] = args.synthesis or run_all_flow
+    #         asic_flow_settings_input["run_par"] = args.place_n_route or run_all_flow
+    #         asic_flow_settings_input["run_pt"] = args.primetime or run_all_flow
+    #         # TODO implement "flow_stages" element of ASICFlowSettings struct
+    #         asic_flow_settings = rg.ASICFlowSettings(**asic_flow_settings_input)
+
+    # # Initialize data structs
+    # tech_info = rg.TechInfo(**tech_inputs)
+    # vlsi_mode_inputs = rg.VLSIMode(**vlsi_mode_inputs)
+    # rad_gen_mode = rg.RADGenMode(**mode_inputs, vlsi_flow = vlsi_mode_inputs)
+    # high_lvl_settings = rg.HighLvlSettings(**high_lvl_inputs, mode=rad_gen_mode, tech_info=tech_info, design_sweep_infos = design_sweep_infos, asic_flow_settings=asic_flow_settings, env_settings=env_settings)
 
     return high_lvl_settings
     
@@ -2327,10 +2539,10 @@ def main():
 
     """ Ex. args python3 rad_gen.py -s param_sweep/configs/noc_sweep.yml -c """
     if rad_gen_settings.mode.result_parse:
-        compile_results(args)
+        compile_results(rad_gen_settings)
     # If a design sweep config file is specified, modify the flow settings for each design in sweep
     elif rad_gen_settings.mode.sweep_gen:
-        design_sweep(args)
+        design_sweep(rad_gen_settings)
     elif rad_gen_settings.mode.vlsi_flow.enable:
         run_asic_flow(rad_gen_settings)
     
