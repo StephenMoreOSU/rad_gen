@@ -108,6 +108,6 @@ designs:
         }
       ]
     # svh_header_path: ~/rad_gen/input_designs/sram/rtl/sram.svh  
-    rw_ports: [1,2]  
+    rw_ports: [1, 2]  
     depths: [16, 128, 256, 512, 1024, 2048, 4096]
     widths: [8, 16, 32, 64, 128]

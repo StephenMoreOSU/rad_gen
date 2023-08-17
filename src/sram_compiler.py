@@ -84,8 +84,9 @@ def compile(rw_ports,width,depth,pdk):
             #print(f"SRAM: {sram} Area Increase Factor {truncate((cur_compiled_depth * n_w_macros * width) / (width*depth),3)}")
     #print(f"Best SRAM: {macro_mapping} : req_size {width, depth} req_base_cost : {truncate(width * depth,3)}")
     # print(f'Best SRAM Mapping: {mapping_options[0]}')
-    for i in range(len(mapping_options)):
-        print(f'Best SRAM Mapping: {mapping_options[i]}')
+    # for i in range(len(mapping_options)):
+    #     print(f'Best SRAM Mapping: {mapping_options[i]}')
+    
     return mapping_options[0]
 
 
@@ -204,6 +205,7 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
     mapped_addr_w = int(math.log2(mapping_dict["depth"]))
     mapped_data_w = int(mapping_dict["width"])
     """
+        # I think this was previously used to modify the existing RTL rather than create new ones, but it makes more sense to just write new RTL
         base_sram_wrapper = open(base_sram_wrapper_path,"r").read()
         # Modify the parameters in rtl and create new dir for the sram
         # Regex looks for parameters and will replace whole line
