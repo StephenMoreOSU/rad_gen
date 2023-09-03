@@ -57,8 +57,8 @@ class SRAMCompilerSettings:
         Paths related to SRAM compiler outputs
         If not specified in the top level config file, will use default output structure (sent to rad gen input designs directory)
     """
-    rtl_out_path: str = os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
-    config_out_path: str = os.path.expanduser("~/rad_gen/input_designs/sram/configs/compiler_outputs")
+    rtl_out_path: str = None # os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
+    config_out_path: str = None #os.path.expanduser("~/rad_gen/input_designs/sram/configs/compiler_outputs")
     
 
 
@@ -71,7 +71,13 @@ class TechInfo:
     cds_lib: str = "asap7_TechLib" # name of technology library in cdslib directory, contains views for stdcells, etc needed in design
     sram_lib_path: str = None # path to PDK sram library containing sub dirs named lib, lef, gds with each SRAM.
     # Process settings in RADGen settings as we may need to perform post processing (ASAP7)
-    pdk_rundir: str = None # path to PDK run directory which allows Cadence Virtuoso to run in it
+    pdk_rundir_path: str = None # path to PDK run directory which allows Cadence Virtuoso to run in it
+
+
+@dataclass
+class VLSISweepInfo:
+    params: Dict #[Dict[str, Any]] 
+    
 
 @dataclass 
 class SRAMSweepInfo:
@@ -334,31 +340,15 @@ class HighLvlSettings:
     #param_sweep_hdr_dir: str = None # directory containing RTL header files for parameter sweeping
     asic_flow_settings: ASICFlowSettings = None # asic flow settings for single design
     design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
-    sram_compiler_settings: SRAMCompilerSettings = field(default_factory = SRAMCompilerSettings)
+    sram_compiler_settings: SRAMCompilerSettings = None
     def __post_init__(self):
         # Post inits required for structs that use other struct values as inputs and cannot be clearly defined
         self.tech_info.sram_lib_path = os.path.join(self.env_settings.hammer_tech_path, self.tech_info.name, "sram_compiler", "memories")
-
-# struct holding all regexes used in rad gen
-# res = Regexes()
-
-# tech_info = Tech_info(
-#         lib="asap7",
-#         # sram_lib_path=os.path.expanduser("~/hammer/src/hammer-vlsi/technology/asap7/sram_compiler/memories"),
-#         # pdk_rundir=os.path.expanduser("~/ASAP_7_IC/asap7_rundir"),
-#         cds_lib="asap7_TechLib"
-#     )
-
-
-# sram_compiler_settings = SRAM_compiler_settings()
-# script_info = Script_info()
-# report_info = Report_info()
-
-# Create the global variables which will be later modified
-# env_settings = Env_Settings()
-# asic_flow_settings = ASIC_flow_settings()
-# rad_gen_settings = RAD_Gen_Settings()
-
-# modes of operation for RAD Gen
-# rad_gen_mode = RADGen_mode()
-# vlsi_mode = VLSI_mode()
+        if self.sram_compiler_settings is None:
+            self.sram_compiler_settings = SRAMCompilerSettings()
+            self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
+            self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
+        elif self.sram_compiler_settings.config_out_path == None:
+            self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
+        elif self.sram_compiler_settings.rtl_out_path == None:
+            self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
