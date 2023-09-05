@@ -201,28 +201,6 @@ def get_df_output_lines(df: pd.DataFrame) -> List[str]:
     return df_output_lines
 ########################################## GENERAL UTILITIES ##########################################
 
-# def write_lib_to_db_script(obj_dir):
-#     # create PT run-dir
-#     pt_outpath = os.path.join(obj_dir,"pt-rundir")
-#     if not os.path.isdir(pt_outpath) :
-#         os.mkdir(pt_outpath)
-#     lib_dir = os.path.join(obj_dir,"tech-asap7-cache/LIB/NLDM")
-
-#     file_lines = ["enable_write_lib_mode"]
-#     for lib in os.listdir(lib_dir):
-#         read_lib_cmd = "read_lib " + f"{os.path.join(lib_dir,lib)}"
-#         write_lib_cmd = "write_lib " + f"{os.path.splitext(lib)[0]} " + "-f db " + "-o " f"{os.path.splitext(os.path.join(lib_dir,lib))[0]}.db"
-#         file_lines.append(read_lib_cmd)
-#         file_lines.append(write_lib_cmd)
-
-    
-#     fd = open(os.path.join(pt_outpath,"lib_to_db.tcl"),"w")
-#     for line in file_lines:
-#         file_write_ln(fd,line)
-#     file_write_ln(fd,"quit")
-#     fd.close()
-
-
 ########################################## PRIMETIME ##########################################
 
 def write_pt_sdc(hammer_driver: HammerDriver):
@@ -387,20 +365,6 @@ def write_pt_timing_script(rad_gen_settings: rg.HighLvlSettings):
     # <TAG> <MULTIMODAL-PWR-TIMING TODO>
     case_analysis_cmds = ["#MULTIMODAL ANALYSIS DISABLED"]
     
-    #get switching activity and toggle rates from power_constraints tcl file
-    # power_constraints_fd = open(os.path.join(pnr_design_outpath,f'{rad_gen_settings.asic_flow_settings.top_lvl_module}_power_constraints.tcl'),"r")
-    # power_constraints_lines = power_constraints_fd.readlines()
-    # toggle_rate_var = "seq_activity"
-    # grab_opt_val_re = re.compile(f"(?<={toggle_rate_var}\s).*")
-    # toggle_rate = ""
-    # for line in power_constraints_lines:
-    #     if "set_default_switching_activity" in line:
-    #         toggle_rate = str(grab_opt_val_re.search(line).group(0))
-    # power_constraints_fd.close()
-
-    # switching_activity_cmd = "set_switching_activity -static_probability " + switching_prob + " -toggle_rate " + toggle_rate + " -base_clock $my_clock_pin -type inputs"
-
-
     # access driver db to get required info
     top_mod = rad_gen_settings.asic_flow_settings.hammer_driver.database.get_setting("timing.inputs.top_module")
     # <TAG> <MULTI-CLOCK-TODO>
@@ -422,14 +386,7 @@ def write_pt_timing_script(rad_gen_settings: rg.HighLvlSettings):
         #set clock constraints (this can be done by defining a clock or specifying an .sdc file)
         #read constraints file
         f"read_sdc -echo {pt_outpath}/pt.sdc",
-        #Standard Parasitic Exchange Format. File format to save parasitic information extracted by the place and route tool.
-        # Just taking index 0 which is the 100C corner for case of high power
-        # "read_parasitics -increment " + power_in_json_data["power.inputs.spefs"][0],
         report_timing_cmd,
-        # "set power_enable_analysis TRUE",
-        # "set power_analysis_mode \"averaged\"",
-        # switching_activity_cmd,
-        # report_power_cmd,
         "quit",
     ]
     file_lines = flatten_mixed_list(file_lines)
@@ -515,19 +472,6 @@ def run_hammer_stage(asic_flow: rg.ASICFlowSettings, flow_stage: str, config_pat
 
     return ret_config_path, stdout, stderr
 ########################################## HAMMER UTILITIES ##########################################
-
-########################################## OPENRAM UTILITIES ##########################################
-# def check_openram_env():
-#     """
-#     Checks to make sure openram environment variables are set currently only supports freepdk45
-#     """
-#     if "OPENRAM_HOME" not in os.environ or "OPENRAM_TECH" not in os.environ or "FREEPDK45" not in os.environ:
-#         rad_gen_log("OPENRAM_HOME not set")
-#         sys.exit(1)
-
-# def run_openram (args):
-
-########################################## OPENRAM UTILITIES ##########################################
 
 ########################################## RAD GEN UTILITIES ##########################################
 
@@ -777,206 +721,7 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
 
     return mod_parameter_paths, mod_config_paths
 
-
-def search_path_list_for_file(path_list,fname):
-    found_file = False
-    file_path = ""
-    for path in path_list:
-        if(os.path.isfile(os.path.join(path,fname))):
-            if found_file == True:
-                rad_gen_log(f"WARNING: {fname} found in multiple paths",rad_gen_log_fd)
-            file_path = os.path.join(path,fname)
-    return file_path
-
-def get_params_and_defines_from_rtl(rtl_text, rtl_preproc_vals, param_define_deps):
-    for inc_line in rtl_text.split("\n"): 
-        # Look for parameters
-        if res.find_params_re.search(inc_line):
-            # TODO this parameter re will not work if no whitespace between params
-            clean_line = " ".join(res.wspace_re.split(inc_line)[1:]).replace(";","")
-            # Get the parameter name and value
-            param_name = clean_line.split("=")[0].replace(" ","")
-            param_val = clean_line.split("=")[1].replace(" ","").replace("`","")
-
-
-            # create dep list for params
-            for i in range(len(rtl_preproc_vals)):
-                if rtl_preproc_vals[i]["name"] in param_val:
-                    param_define_deps.append(rtl_preproc_vals[i]["name"])
-
-            # Add the parameter name and value to the design_params dict
-            #rtl_preproc["params"][param_name] = str(param_val)
-            rtl_preproc_vals.append({"name" : param_name, "value" : str(param_val),"type": "param"})
-
-        elif res.find_defines_re.search(inc_line):
-            # TODO this define re will not work if no whitespace between params
-            clean_line = " ".join(res.wspace_re.split(inc_line)[1:])
-            # Get the define name and value
-            define_name = res.wspace_re.split(clean_line)[0]
-            if res.grab_bw_soft_bkt.search(clean_line):
-                define_val = res.grab_bw_soft_bkt.search(clean_line).group(0)
-            else:
-                define_val = res.wspace_re.split(clean_line)[1].replace("`","")
-            # create dep list for defines
-            for i in range(len(rtl_preproc_vals)):
-                if rtl_preproc_vals[i]["name"] in define_val:
-                    param_define_deps.append(rtl_preproc_vals[i]["name"])
-            #rtl_preproc["defines"][define_name] = str(define_val)
-            rtl_preproc_vals.append({"name": define_name, "value" : str(define_val),"type": "define"})
-    return rtl_preproc_vals, param_define_deps
-
-# def get_functions_from_rtl(rtl_text):
-#     tmp_rtl_text = rtl_text
-#     while res.find_function_re.search(tmp_rtl_text):
-#         function_text = res.find_function_re.search(tmp_rtl_text).group(0)
-#         lines = function_text.split(";")
-#         top_line = lines[0]
-#         args = res.find_function_args_re.search(top_line).group(0).split(",")
-#         function_text = re.sub(pattern=",".join(args),string=function_text,repl="")
-#         fn_hdr = res.find_
-        
-#         tmp_rtl_text = res.find_function_re.sub(string=tmp_rtl_text,repl="",count=1)
-
-
-# def clogb(val):
-#     clogb = 0
-#     val = val - 1
-#     while val > 0:
-#         val >>= 1
-#         clogb +=1
-#     return clogb
-
-# def croot(val,base):
-#     croot = 0
-#     i = 0
-#     while i < val:hdl_path
-#         croot += 1
-#         i = 1
-#         for _ in range(base):
-#             i *= croot
-#     return croot
-
-def read_in_rtl_proj_params_all(top_level, hdl_search_paths):
-    init_globals()
-
-    top_lvl_re = re.compile(f"module\s+{top_level}",re.MULTILINE)
-    # Find all parameters which will be used in the design (ie find top level module rtl, parse include files top to bottom and get those values )
-    """ FIND TOP LEVEL MODULE IN RTL FILES """
-    top_lvl_match_found = False
-    top_lvl_rtl_text = ""
-    # creating another hdl paths var to deal with below TODO issue
-    new_hdl_paths = []
-    for path in hdl_search_paths:
-        # This is to fix the below TODO, I suppose its ok
-        cur_paths = res.wspace_re.split(path)
-        for c_path in cur_paths:
-            if os.path.isdir(c_path):
-                new_hdl_paths.append(c_path)
-                # TODO fix issue with the NoC sweeps in which the hdl search paths are set to two paths seperated with a space
-                # Ex. /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src/clib
-                for rtl_file in os.listdir(c_path):
-                    if rtl_file.endswith(".v") or rtl_file.endswith(".sv") or rtl_file.endswith(".vhd") or rtl_file.endswith(".vhdl") and os.path.isfile(os.path.join(c_path,rtl_file)):
-                        # read in the file with comments removed
-                        rtl_text = c_style_comment_rm(open(os.path.join(c_path,rtl_file)).read())
-                        if top_lvl_re.search(rtl_text):
-                            print(f"Found top level module {top_level} in {c_path}/{rtl_file}")
-                            if top_lvl_match_found == True:
-                                rad_gen_log(f"ERROR: Multiple top level modules found in rtl files",rad_gen_log_fd)
-                                sys.exit(1)
-                            top_lvl_match_found = True
-                            top_lvl_rtl_text = rtl_text
-    """ RTL TOP LEVEL FOUND AT THIS POINT"""
-    # lists which will hold parameters and a list of all required dependancies as we move through the includes
-    rtl_preproc_vals = []
-    param_define_deps = []
-    for line in top_lvl_rtl_text.split("\n"):
-        # Look for include statements
-        if "include" in line:
-            # Get the include file path
-            include_fname = res.wspace_re.split(line)[1].replace('"','')
-            fpath = search_path_list_for_file(new_hdl_paths,include_fname)
-            include_rtl = c_style_comment_rm(open(fpath).read())
-            rtl_preproc_vals, param_define_deps = get_params_and_defines_from_rtl(include_rtl,rtl_preproc_vals,param_define_deps)
-    """ NOW WE HAVE A LIST OF ALL PARAMS AND DEFINES IN THE RTL & THEIR DEPENDANCIES """
-    # remove duplicate dependancies
-    # Only using parsing technique of looking for semi colon in localparams as these are expected to have larger operations
-    # Not parsing lines as we need multiline capture w regex
-    tmp_top_lvl_rtl = top_lvl_rtl_text
-    local_param_matches = []
-    # TODO allow for parameters / defines to also be defined in the top level module (not just in the includes)
-    # Searching through the text in this way preserves initialization order
-    while res.find_localparam_re.search(tmp_top_lvl_rtl):
-        local_param = res.find_localparam_re.search(tmp_top_lvl_rtl).group(0)
-        local_param_matches.append(local_param)
-        tmp_top_lvl_rtl = tmp_top_lvl_rtl.replace(local_param,"")
-    """ NOW WE HAVE A LIST OF ALL LOCALPARAMS IN THE TOP LEVEL RTL """
-    """ EVALUATING BOOLEANS FOR LOCAL PARAMS W PARAMS AND DEFINES """
-    
-    # We are going to make .h and .c files which we can use the gcc preproc engine to evaluate the defines and local parameters
-    # Loop through all parameters and find its dependancies on other parameters
-    for local_param_str in local_param_matches:
-        """ CREATING LIST OF REQUIRED DEPENDANCIES FOR ALL PARAMS """
-        local_param_name = re.sub("localparam\s+",repl="",string=res.first_eq_re.split(local_param_str)[0]).replace(" ","").replace("\n","")
-        local_param_val = res.first_eq_re.split(local_param_str)[1]
-        rtl_preproc_vals.append({"name": local_param_name, "value": local_param_val, "type": "localparam"})
-
-    
-    """ CONVERT SV/V LOCALPARAMS TO C DEFINES """
-    # Write out localparams which need to be evaluated to a temp dir
-    tmp_dir = "/tmp/rad_gen_tmp"
-    if not os.path.exists(tmp_dir):
-        os.mkdir(tmp_dir)
-    rtl_preproc_fname = os.path.join(tmp_dir,"rtl_preproc_vals")
-    header_fd = open(rtl_preproc_fname + ".h","w")
-    main_fd = open(rtl_preproc_fname + ".c","w")
-    # init .c file containing main which will just print out the values of our params/defs/localparams
-    main_lines = [
-        f'#include "{rtl_preproc_fname}.h"',
-        f'#include <stdio.h>',
-        '',
-        '',
-        'int main(int argc, char argv [] ) {',
-        # CODE TO PRINT PARAMS GOES HERE
-    ]
-
-
-
-    # rtl_preproc_vals 
-    for val in rtl_preproc_vals:
-        clean_c_def_val = val["value"].replace("\n","").replace(";","").replace("`","")
-        c_def_str = "#define " + val["name"] + " (" + clean_c_def_val + ")"
-        print(c_def_str,file=header_fd)
-    header_fd.close()
-    sys.exit(1)
-    # Look through sweep param list in config file and match them to the ones found in design
-    for val in rtl_preproc_vals:
-        # If they match, write the c code which will print the parameter and its value
-        main_lines.append("\t" + f'printf("{val["name"]}: %d \n",{val["name"]});'.encode('unicode_escape').decode('utf-8'))
-                
-    for line in main_lines:
-        print(line,file=main_fd)
-    print("}",file=main_fd)
-    main_fd.close()
-    # This runs the c file which prints out evaluated parameter values set in the verilog
-    gcc_out = sp.run(["/usr/bin/gcc",f"{rtl_preproc_fname}.h",f"{rtl_preproc_fname}.c"],stderr=sp.PIPE,stdout=sp.PIPE,stdin=sp.PIPE)#,"-o",f'{os.path.join(tmp_dir,"print_params")}'])
-    sp.run(["a.out"])
-    sp.run(["rm","a.out"])
-    # Now we have a list of dictionaries containing the localparam string and thier dependancies
-
-    sys.exit(1)
-    # Found the file with the top level module
-
-
-
-
 def read_in_rtl_proj_params(rad_gen_settings: rg.HighLvlSettings, rtl_params, top_level_mod, rtl_dir_path, sweep_param_inc_path=False):
-    # wspace_re = re.compile(r"\s+")
-    ## Now that we have a mem_params.json and sram_config.yaml file for each design, we can run the flow for each design in parallel (up to user defined amount)
-    # find_params_re = re.compile(f"parameter\s+\w+(\s|=)+.*;")
-    # find_defines_re = re.compile(f"`define\s+\w+\s+.*")
-    # grab_bw_soft_bkt = re.compile(f"\(.*\)")
-    
-    # find_localparam_re = re.compile(f"localparam\s+\w+(\s|=)+.*?;",re.MULTILINE|re.DOTALL)
 
     # Find all parameters which will be used in the design (ie find top level module rtl, parse include files top to bottom and get those values )
     """ FIND TOP LEVEL MODULE IN RTL FILES """
@@ -1181,11 +926,6 @@ def parse_report_c(rad_gen_settings: rg.HighLvlSettings, top_level_mod: str, rep
         cadence_hdr_catagories = ["Hinst Name","Module Name","Inst Count","Total Area"]
         cadence_area_hdr_re = re.compile("^\s+Hinst\s+Name\s+Module\sName\s+Inst\sCount\s+Total\sArea.*", re.MULTILINE|re.DOTALL)
         cadence_arrival_time_re = re.compile("Arrival:=.*$",re.MULTILINE)
-
-    # Why is this here at all? TODO figure that out (or maybe just delete)
-    # if flow_stage["name"] == "syn":
-    #     if flow_stage["tool"] == "cadence":
-    #         cadence_hdr_catagories = ["Leakage","Internal","Switching","Total","Row%"]
 
     cadence_timing_grab_re = re.compile("Path(.*?#-+){3}",re.MULTILINE|re.DOTALL)
     cadence_timing_setup_re = re.compile("Setup:-.*$",re.MULTILINE)
@@ -1495,16 +1235,6 @@ def create_bordered_str(text: str = "", border_char: str = "#", total_len: int =
     border_size = (total_len - text_len) // 2
     return [ border_char * total_len, f"{border_char * border_size}{text}{border_char * border_size}", border_char * total_len]
 
-# def rtl_pre_process(design_config):
-#     top_mod_re = re.compile(f"module\s+{design_config['synthesis']['inputs.top_module']}",re.MULTILINE)
-#     # loop through all input files
-#     for f in design_config["synthesis"]["inputs.input_files"]:
-#         # TODO create instantiation tree s.t we can automate the creation of paths for sram macros
-#         # For now this will only work if sram macros are instatiated in the top level file
-#         rtl_text = open(f, "r").read()
-#         print(top_mod_re.search(rtl_text).group(0))
-#         sys.exit(1)
-#     sys.exit(1)
 
 def get_sram_macro_sizes(rad_gen_settings: rg.HighLvlSettings, macro_fname: str) -> list:
     for file in os.listdir(os.path.join(rad_gen_settings.tech_info.sram_lib_path,"lef")):
@@ -1649,7 +1379,6 @@ def gen_reports(rad_gen_settings: rg.HighLvlSettings, design: rg.DesignSweepInfo
             report_dict["gds_area"] = parse_gds_to_area_output(rad_gen_settings, report_dir)
         else:
             report_dict["gds_area"] = get_gds_area_from_rpt(rad_gen_settings, report_dir)
-        # report_dict["gds_area"] = parse_gds_to_area_output(os.path.join(report_search_dir,dir))
     # RTL Parameter section
     if design is not None and design.type == "rtl_params":
         # Using the output syn directory to find parameters in hdl search paths
@@ -1667,12 +1396,6 @@ def gen_reports(rad_gen_settings: rg.HighLvlSettings, design: rg.DesignSweepInfo
                     break         
         else:
             report_dict = None             
-    # Not sure why this is needed
-    #     if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0 and "rtl_params" in report_dict:
-    #         retval = report_dict
-    # else: 
-    #     if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0:
-    #         retval = report_dict
     return report_dict
 
 
@@ -1737,7 +1460,6 @@ def run_asap7_gds_scaling_scripts(rad_gen: rg.HighLvlSettings, obj_dir: str, top
             for ext in ["csh","sh"]:
                 permission_cmd = "chmod +x " +  os.path.join(rad_gen.tech_info.pdk_rundir_path,f'{rad_gen.env_settings.scripts_info.gds_to_area_fname}.{ext}')
                 run_shell_cmd_no_logs(permission_cmd)
-            # run_shell_cmd_no_logs(os.path.join(tech_info.pdk_rundir_path,f"{script_info.gds_to_area_fname}.sh"))
             run_csh_cmd(os.path.join(rad_gen.tech_info.pdk_rundir_path,f"{rad_gen.env_settings.scripts_info.gds_to_area_fname}.csh"))
             gds_area = parse_gds_to_area_output(rad_gen, obj_dir)
         else:
@@ -1789,7 +1511,6 @@ def rad_gen_flow(rad_gen_settings: rg.HighLvlSettings, config_paths: List[str]) 
     }
     # Add some items to flow report
     # <TAG> <HAMMER-IR-PARSE TODO> # TODO make freq calc rather than period
-    #flow_report["target_freq"] = rad_gen_settings.asic_flow_settings.design_config["vlsi.inputs"]["clocks"][0]["period"]
     flow_report["target_freq"] = rad_gen_settings.asic_flow_settings.hammer_driver.database.get_setting("vlsi.inputs.clocks")[0]["period"]
     
     # Create a list of config paths, this will start with the user defined design config and after each stage of hammer flow will be appended by the resulting config file
@@ -1825,17 +1546,6 @@ def rad_gen_flow(rad_gen_settings: rg.HighLvlSettings, config_paths: List[str]) 
     
     # Run hammer stages
     # Run synthesis
-    # if rad_gen_settings.asic_flow_settings.run_syn:
-        # """
-        # I THINK THIS WAS TO GET RTL PARAMS BEFORE RUNNING SYNTHESIS (but why tho?)
-        # for config in config_paths:
-        #     config_settings = yaml.safe_load(open(config, 'r'))
-        #     if "synthesis" in config_settings.keys():
-        #         read_in_rtl_proj_params_all(config_settings["synthesis"]["inputs.top_module"],config_settings["synthesis"]["inputs.hdl_search_paths"])
-        # """
-        # if rad_gen_settings.asic_flow_settings.make_build:
-        #     run_shell_cmd_no_logs("make syn")
-        # else:
     syn_config, syn_stdout, syn_stderr = run_hammer_stage(rad_gen_settings.asic_flow_settings, "syn", config_paths, update_db = True, execute_stage = rad_gen_settings.asic_flow_settings.run_syn)
     if os.path.exists(syn_config):
         config_paths.append(syn_config)
@@ -1957,7 +1667,6 @@ def parse_cli_args() -> tuple:
                         nargs="*",
                         type=str,
                         default=None)
-    # parser.add_argument('-r', '--openram_config_dir', help="path to dir (TODO)", type=str, default='')
     parser.add_argument('-l', '--use_latest_obj_dir', help="uses latest obj dir found in rad_gen dir", action='store_true') 
     parser.add_argument('-o', '--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
     parser.add_argument('-e', '--top_lvl_config', help="path to top level config file",  type=str, default=None)
@@ -1969,27 +1678,11 @@ def parse_cli_args() -> tuple:
     parser.add_argument('-sram', '--sram_compiler', help="flag enables srams to be run in design", action='store_true') 
     parser.add_argument('-make', '--make_build', help="flag enables make build system for asic flow", action='store_true') 
     
+    # parser.add_argument('-r', '--openram_config_dir', help="path to dir (TODO)", type=str, default='')
     # parser.add_argument('-sim', '--sram_compiler', help="path to dir", action='store_true') 
     args = parser.parse_args()
     
     return args
-
-
-def init_globals():
-    """ Initializes all global variables s.t functions can use them"""
-    global rad_gen_settings
-    global asic_flow_settings
-    global multi_design_settings
-    global sweep_settings
-    global rad_gen_mode
-    global vlsi_mode
-    global res
-    global tech_info
-    global report_info
-    global script_info
-    global sram_compiler_settings
-
-# def check_for_valid_input(data_struct):
 
 def check_for_valid_path(path):
     ret_val = False
@@ -2004,19 +1697,6 @@ def handle_error(fn, expected_vals: set=None):
     # for fn in funcs:
     if not fn() or (expected_vals is not None and fn() not in expected_vals):
         sys.exit(1)
-
-
-# def sort_by_params(reports, result_parse_config):
-#     # This directory is where a sucessful synthesis run will have a json file from which we can get the hdl search path of the design
-#     # From the hdl search path we can find the parameters used for the run ...
-#     config_search_dir = os.path.join("syn-rundir","syn-output-full.json")
-#     syn_config_outpath = os.path.join(result_parse_config["report_search_path"],report["obj_dir"],config_search_dir)
-#     for report in reports:
-#         if os.path.isfile(syn_config_outpath):
-#             syn_out_config = json.load(open(syn_config_outpath))
-#             for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
-#                 print("test")
-
 
 def write_virtuoso_gds_to_area_script(rad_gen_settings: rg.HighLvlSettings, gds_fpath: str):
     # skill_fname = "get_area.il"
@@ -2288,6 +1968,10 @@ def compile_results(rad_gen_settings: rg.HighLvlSettings):
 def design_sweep(rad_gen_settings: rg.HighLvlSettings):
     # Starting with just SRAM configurations for a single rtl file (changing parameters in header file)
     rad_gen_log(f"Running design sweep from config file {rad_gen_settings.sweep_config_path}",rad_gen_log_fd)
+    
+    scripts_outdir = os.path.join(rad_gen_settings.env_settings.design_output_path,"scripts")
+    if not os.path.isdir(scripts_outdir):
+        os.makedirs(scripts_outdir)
     # design_sweep_config = yaml.safe_load(open(rad_gen_settings.sweep_config_path))
     for id, design_sweep in enumerate(rad_gen_settings.design_sweep_infos):
         """ General flow for all designs in sweep config """
@@ -2323,6 +2007,13 @@ def design_sweep(rad_gen_settings: rg.HighLvlSettings):
                         sweep_idx += 1
             rad_gen_log("\n".join(create_bordered_str("Autogenerated Sweep Script")),rad_gen_log_fd)
             rad_gen_log("\n".join(sweep_script_lines),rad_gen_log_fd)
+            sweep_script_lines = create_bordered_str("Autogenerated Sweep Script") + sweep_script_lines
+            script_path = os.path.join(scripts_outdir, f"{design_sweep.top_lvl_module}_vlsi_sweep.sh")
+            for line in sweep_script_lines:
+                with open(script_path , "w") as fd:
+                    file_write_ln(fd, line)
+            permission_cmd = f"chmod +x {script_path}"
+            run_shell_cmd_no_logs(permission_cmd)
         # TODO This wont work for multiple SRAMs in a single design, simply to evaluate individual SRAMs
         elif design_sweep.type == "sram":      
             sram_sweep_gen(rad_gen_settings, id)                
@@ -2349,6 +2040,13 @@ def design_sweep(rad_gen_settings: rg.HighLvlSettings):
                 # TODO this assumes parameter sweep vars arent kept over multiple files
             rad_gen_log("\n".join(create_bordered_str("Autogenerated Sweep Script")),rad_gen_log_fd)
             rad_gen_log("\n".join(sweep_script_lines),rad_gen_log_fd)
+            sweep_script_lines = create_bordered_str("Autogenerated Sweep Script") + sweep_script_lines
+            script_path = os.path.join(scripts_outdir, f"{design_sweep.top_lvl_module}_rtl_sweep.sh")
+            for line in sweep_script_lines:
+                with open( script_path, "w") as fd:
+                    file_write_ln(fd, line)
+            permission_cmd = f"chmod +x {script_path}"
+            run_shell_cmd_no_logs(permission_cmd)
 
 def run_asic_flow(rad_gen_settings: rg.HighLvlSettings):
     # If the args for top level and rtl path are not set, we will use values from the config file
