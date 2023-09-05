@@ -1,0 +1,13 @@
+
+designs:
+  # base config is the hammer config file which is used as a template for designs which will be swept over
+  - base_config_path: ~/rad_gen/unit_tests/inputs/alu/configs/alu.yml
+    # These two args are required for each run of hammer flow
+    top_lvl_module: alu_ver
+    rtl_dir_path:  ~/rad_gen/input_designs/alu/rtl/src
+    type: "vlsi_params"
+    flow_threads: 2
+    params:
+      {
+        "clk_periods": [0.0, 2.0]
+      }

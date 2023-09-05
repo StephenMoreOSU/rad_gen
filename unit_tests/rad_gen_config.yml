@@ -1,0 +1,15 @@
+env:
+  rad_gen_home_path: ~/rad_gen
+  # Path to hammer github repo
+  hammer_home_path: ~/rad_gen/vlsi/hammer
+  # CAD tool related env vars (hammer format)
+  env_paths: [ ~/rad_gen/top_lvl_configs/env.yaml ]
+  design_input_path: ~/rad_gen/unit_tests/inputs
+  design_output_path: ~/rad_gen/unit_tests/outputs
+
+tech:
+  name: asap7
+  pdk_rundir_path: ~/ASAP_7_IC/asap7_rundir
+  
+scripts:
+  virtuoso_setup_path: ~/auto_asic_flow/setup_virtuoso_env.sh

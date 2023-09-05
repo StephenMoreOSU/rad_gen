@@ -287,7 +287,6 @@ def pt_init(rad_gen_settings: rg.HighLvlSettings) -> Tuple[str]:
 
     # get pnr output path (should be in this format)
     pnr_design_outpath = os.path.join(rad_gen_settings.asic_flow_settings.obj_dir_path,"par-rundir",f'{rad_gen_settings.asic_flow_settings.top_lvl_module}_FINAL')
-    print(pnr_design_outpath)
     if not os.path.isdir(pnr_design_outpath) :
         rad_gen_log("Couldn't find output of pnr stage, Exiting...",rad_gen_log_fd)
         sys.exit(1)
@@ -565,24 +564,24 @@ def modify_config_file(rad_gen: rg.HighLvlSettings):
     mod_config_outdir = None
     config_paths = rad_gen.asic_flow_settings.hammer_driver.options.project_configs
     for config_path in config_paths:
-        # This condition must be satisifed to continue, ie one of the input configs must come from the user specified "rad_gen.env_settings.design_input_path"
-        if os.path.basename(rad_gen.env_settings.design_input_path) in config_path:
+        # Read all configs and figure out which one contains the top level module info
+        config_str = Path(config_path).read_text()
+        is_yaml = config_path.endswith(".yml") or config_path.endswith(".yaml")
+        config_dict = hammer_config.load_config_from_string(config_str, is_yaml, str(Path(config_path).resolve().parent))
+        if "synthesis.inputs.top_module" in config_dict.keys():
             input_config_split = os.path.split(config_path)
             config_fname = os.path.splitext(os.path.basename(config_path))[0]
             mod_config_outdir = os.path.join(input_config_split[0], "gen")
-            #  f"{config_fname}_pre_procd.yml"         
+            modified_config_path = os.path.join(mod_config_outdir, f"{config_fname}_pre_proc.yml")
             break
     
+    # If it still can't find it, were just going to make the directory in the design input path with name of top level module
     if mod_config_outdir == None:
-        # print(f"config_path: {config_path}")
-        # print(f"rad_gen.env_settings.design_input_path: {rad_gen.env_settings.design_input_path}")
-        rad_gen_log("Error: no input config found in design input directory, Exiting...",rad_gen_log_fd)
+        rad_gen_log(f"ERROR: Can't find input design config, Exiting...")
         sys.exit(1)
 
     if not os.path.isdir( mod_config_outdir ):
         os.makedirs(mod_config_outdir)
-    
-    modified_config_path = os.path.join(mod_config_outdir, f"{config_fname}_pre_proc.yml")
     
     with open(modified_config_path, 'w') as yml_file:
         yaml.safe_dump(design_config, yml_file, sort_keys=False) 
@@ -596,6 +595,8 @@ def modify_config_file(rad_gen: rg.HighLvlSettings):
         config_str = Path(config).read_text()
         proj_config_dicts.append(hammer_config.load_config_from_string(config_str, is_yaml, str(Path(config).resolve().parent)))
     rad_gen.asic_flow_settings.hammer_driver.update_project_configs(proj_config_dicts)
+
+    return modified_config_path
 
 
 def find_newest_obj_dir(search_dir: str, obj_dir_fmt: str):
@@ -1013,6 +1014,9 @@ def read_in_rtl_proj_params(rad_gen_settings: rg.HighLvlSettings, rtl_params, to
             #     print("ERROR occured the script could not find an include file in the top level rtl and a backup was not specified")
             #     sys.exit(1)
 
+            if not os.path.exists(include_fpath):
+                rad_gen_log("WARNING: Could not find parameter header file, returning None ...", rad_gen_log_fd)
+                return None
             # Look in the include file path and grab all parameters and defines
             include_rtl = open(include_fpath).read()
             clean_include_rtl = c_style_comment_rm(include_rtl)
@@ -1630,8 +1634,8 @@ def gen_reports(rad_gen_settings: rg.HighLvlSettings, design: rg.DesignSweepInfo
                     num_macros = sram_num_bits // (int(sram['width'])*int(sram['depth']))
                     report_dict["num_macros"] = num_macros
 
-        report_dict["sram_macros"] = ", ".join(sram_macros)
-        report_dict["sram_macro_lef_areas"] = ", ".join([str(x) for x in macro_lef_areas])
+        report_dict["sram_macros"] = "\t ".join(sram_macros)
+        report_dict["sram_macro_lef_areas"] = "\t ".join([str(x) for x in macro_lef_areas])
     # Add the gds areas to the report
     gds_file = os.path.join(report_dir,"par-rundir",f"{top_level_mod}_drc.gds")
     if os.path.isfile(gds_file):
@@ -1656,8 +1660,13 @@ def gen_reports(rad_gen_settings: rg.HighLvlSettings, design: rg.DesignSweepInfo
                 if "param_sweep_headers" in path:
                     param_hdr_name = os.path.basename(design.type_info.base_header_path)
                     params = read_in_rtl_proj_params(rad_gen_settings, design.type_info.params, top_level_mod, design.rtl_dir_path, os.path.join(path, param_hdr_name))
-                    report_dict["rtl_params"] = params
-                    break                      
+                    if params != None and params != []:
+                        report_dict["rtl_params"] = params
+                    else:
+                        report_dict = None
+                    break         
+        else:
+            report_dict = None             
     # Not sure why this is needed
     #     if len(report_dict["syn"]) > 0 and len(report_dict["par"]) > 0 and "rtl_params" in report_dict:
     #         retval = report_dict
@@ -1753,12 +1762,12 @@ def get_macro_info(rad_gen: rg.HighLvlSettings, obj_dir: str, sram_num_bits: int
                     report_dict["num_macros"] = num_macros
 
         if len(sram_macros) > 0:
-            report_dict["sram_macros"] = ", ".join(sram_macros)
-            report_dict["sram_macro_lef_areas"] = ", ".join([str(x) for x in macro_lef_areas])            
+            report_dict["sram_macros"] = "\t ".join(sram_macros)
+            report_dict["sram_macro_lef_areas"] = "\t ".join([str(x) for x in macro_lef_areas])            
 
     return report_dict
 
-def rad_gen_flow(rad_gen_settings: rg.HighLvlSettings) -> None:
+def rad_gen_flow(rad_gen_settings: rg.HighLvlSettings, config_paths: List[str]) -> None:
     """
         This runs the entire RAD-Gen flow depending on user specified parameters, the following stages can be run in user specified combination:
         - SRAM generation (kinda)
@@ -1789,7 +1798,7 @@ def rad_gen_flow(rad_gen_settings: rg.HighLvlSettings) -> None:
     
     ## config_paths = [rad_gen_settings.asic_flow_settings.config_path]
     # TODO low priority -> see if theres a way to do this through hammer api
-    config_paths: List[str] = rad_gen_settings.asic_flow_settings.hammer_driver.options.project_configs
+    config_paths = rad_gen_settings.asic_flow_settings.hammer_driver.options.project_configs + config_paths
     
     
     # TODO get Makefile based build working (need to add support for SRAM generator stages)
@@ -2022,7 +2031,7 @@ def write_virtuoso_gds_to_area_script(rad_gen_settings: rg.HighLvlSettings, gds_
     # TODO remove abs paths
     csh_script_lines = [
         "#!/bin/csh",
-       f"source ~/auto_asic_flow/setup_virtuoso_env.sh && virtuoso -nograph -replay {skill_fpath} -log get_area.log {skill_fpath} -log {rad_gen_settings.env_settings.scripts_info.gds_to_area_fname}.log"
+       f"source {rad_gen_settings.env_settings.scripts_info.virtuoso_setup_path} && virtuoso -nograph -replay {skill_fpath} -log get_area.log {skill_fpath} -log {rad_gen_settings.env_settings.scripts_info.gds_to_area_fname}.log"
     ]
 
     fd = open(skill_fpath, 'w')
@@ -2245,7 +2254,7 @@ def compile_results(rad_gen_settings: rg.HighLvlSettings):
         rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {rad_gen_settings.sweep_config_path}",rad_gen_log_fd)
         if design.type != None:
             if design.type == "sram":
-                for mem in design["mems"]:
+                for mem in design.type_info.mems:
                     mem_top_lvl_name = f"sram_macro_map_{mem['rw_ports']}x{mem['w']}x{mem['d']}"
                     num_bits = mem['w']*mem['d']
                     reports += gen_parse_reports(rad_gen_settings, report_search_dir, mem_top_lvl_name, design, num_bits)
@@ -2262,13 +2271,18 @@ def compile_results(rad_gen_settings: rg.HighLvlSettings):
         
         # General parsing of report to csv
         for report in reports:
+            report_to_csv = {}
             if design.type == "rtl_params":
-                report_to_csv = noc_prse_area_brkdwn(report)
+                if "rtl_params" in report.keys():
+                    report_to_csv = noc_prse_area_brkdwn(report)
             else:
                 report_to_csv = gen_report_to_csv(report)
             if len(report_to_csv) > 0:
                 csv_lines.append(report_to_csv)
-    csv_fname = os.path.splitext(os.path.basename(rad_gen_settings.sweep_config_path))[0]
+    result_summary_outdir = os.path.join(rad_gen_settings.env_settings.design_output_path,"result_summaries")
+    if not os.path.isdir(result_summary_outdir):
+        os.makedirs(result_summary_outdir)
+    csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(rad_gen_settings.sweep_config_path))[0] )
     write_dict_to_csv(csv_lines,csv_fname)
 
 def design_sweep(rad_gen_settings: rg.HighLvlSettings):
@@ -2340,9 +2354,9 @@ def run_asic_flow(rad_gen_settings: rg.HighLvlSettings):
     # If the args for top level and rtl path are not set, we will use values from the config file
     if rad_gen_settings.mode.vlsi_flow.config_pre_proc:
         """ Check to make sure all parameters are assigned and modify if required to"""
-        modify_config_file(rad_gen_settings)
+        mod_config_file = modify_config_file(rad_gen_settings)
     # Run the flow
-    rad_gen_flow(rad_gen_settings)
+    rad_gen_flow(rad_gen_settings, [mod_config_file])
     rad_gen_log("Done!", rad_gen_log_fd)
     sys.exit()    
 
@@ -2395,9 +2409,13 @@ def init_structs(args: argparse.Namespace) -> rg.HighLvlSettings:
     # Sanitize config file 
     top_level_config = sanitize_config(top_level_config)
 
+
+    scripts_info = init_dataclass(rg.ScriptInfo, top_level_config["scripts"])
+
     # create additional dicts for argument passed information
     env_inputs = {
         "top_lvl_config_path": args.top_lvl_config,
+        "scripts_info": scripts_info,
     }
     env_settings = init_dataclass(rg.EnvSettings, top_level_config["env"], env_inputs)
 

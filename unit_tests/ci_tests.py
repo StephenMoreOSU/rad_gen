@@ -80,8 +80,8 @@ class TestSuite:
             self.sys_configs = [ os.path.expanduser(p) for p in sys_configs] 
         if self.alu_tests is None:
             self.alu_tests = []
-            alu_config = os.path.expanduser(f"{self.rad_gen_home}/input_designs/alu/configs/alu.yml")
             # ALU ASIC TEST [1]
+            alu_config = os.path.expanduser(f"{self.rad_gen_home}/input_designs/alu/configs/alu.yml")
             alu_test = RadGenCLI(
                 top_lvl_config=self.top_config_path,
                 design_configs= self.sys_configs + [alu_config],
@@ -135,34 +135,45 @@ class TestSuite:
                 design_configs = self.sys_configs + [noc_config],
                 top_lvl_module = "router_wrap_bk",
                 hdl_path = os.path.expanduser(f"{self.rad_gen_home}/input_designs/NoC/src"),
+                use_latest_obj_dir = True,
             )
             self.noc_tests.append(noc_sweep_test)
 
             
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="RADGen CI Test Suite")
+    parser.add_argument("-p", "--just_print",  help="Don't execute test just print commands to console", action='store_true')
+    return parser.parse_args()
+
 def main():
 
     cur_env = os.environ.copy()
+    
+    args = parse_args()
     test_suite = TestSuite()
     
 
-    # print("Running ALU tests")
-    # for idx, test in enumerate(test_suite.alu_tests):
-    #     cmd_str, sys_args = test.get_rad_gen_cli_cmd(test_suite.rad_gen_home)        
-    #     print(f"Running: {cmd_str}")        
-    #     sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"alu_unit_test_{idx}.log"]), env=cur_env, shell=True)
+    print("Running ALU tests")
+    for idx, test in enumerate(test_suite.alu_tests):
+        cmd_str, sys_args = test.get_rad_gen_cli_cmd(test_suite.rad_gen_home)        
+        print(f"Running: {cmd_str}")    
+        if not args.just_print:   
+            sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"alu_unit_test_{idx}.log"]), env=cur_env, shell=True)
     
     print("Running SRAM tests")
     for idx, test in enumerate(test_suite.sram_tests):
         cmd_str, sys_args = test.get_rad_gen_cli_cmd(test_suite.rad_gen_home)        
         print(f"Running: {cmd_str}")        
-        sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"sram_unit_test_{idx}.log"]), env=cur_env, shell=True)
+        if not args.just_print:   
+            sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"sram_unit_test_{idx}.log"]), env=cur_env, shell=True)
 
     print("Running NoC tests")
     for idx, test in enumerate(test_suite.noc_tests):
         cmd_str, sys_args = test.get_rad_gen_cli_cmd(test_suite.rad_gen_home)        
         print(f"Running: {cmd_str}")        
-        sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"noc_unit_test_{idx}.log"]), env=cur_env, shell=True)
+        if not args.just_print:   
+            sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"noc_unit_test_{idx}.log"]), env=cur_env, shell=True)
 
 
 

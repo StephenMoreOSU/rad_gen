@@ -1,0 +1,95 @@
+vlsi.core:
+  synthesis_tool_path: [~/rad_gen/vlsi/hammer/hammer/synthesis]
+  synthesis_tool: genus
+  
+  par_tool_path: [~/rad_gen/vlsi/hammer/hammer/par]
+  par_tool: innovus
+
+  sram_generator_tool: "sram_compiler"
+  sram_generator_tool_path: [~/rad_gen/vlsi/hammer/hammer/technology/asap7]
+  sram_generator_tool_path_meta: "append"
+  #technology
+  technology: asap7
+  max_threads: 8
+
+
+# synthesis settings
+synthesis:
+  inputs.input_files: [~/rad_gen/input_designs/sram/rtl/sram.sv]
+  inputs.top_module: sram_wrapper
+  clock_gating_mode: "empty"
+# place and route settings
+par.innovus.design_flow_effort: "express"
+
+vlsi.inputs:
+  # SRAM Settings
+  sram_parameters: "~/rad_gen/unit_tests/inputs/sram/configs/mem_params.json"
+  sram_parameters_meta: ["transclude", "json2list"]
+
+  power_spec_mode: "auto"
+  power_spec_type: "cpf"
+  clocks : [
+    {
+      name: "clk",
+      period: "0.0 ns",
+    }
+  ]
+  placement_constraints:
+  - path: "sram_wrapper"
+    type: toplevel
+    x: 0
+    y: 0
+    width: 500
+    height: 500
+    margins:
+      left: 0
+      right: 0
+      top: 0
+      bottom: 0
+  - path: "sram_wrapper/mem_0_0"
+    type: hardmacro
+    x: 20
+    y: 20
+    orientation: "r0"
+    top_layer: "M4"
+    master: "SRAM1RW1024x16"
+  # - path: "sram_wrapper/sram_inst/mem_0_0"
+  #   type: hardmacro
+  #   x: 20
+  #   y: 20
+  #   orientation: "r0"
+  #   top_layer: "M4"
+  #   master: "SRAM1RW4096x8"
+# - path: "data_arrays_0_ext/mem_0_0"
+#   type: hardmacro
+#   x: 550
+#   y: 25
+#   orientation: "r0"
+#   top_layer: "M4"
+#   master: "SRAM1RW4096x8"
+# - path: "data_arrays_0_ext/mem_0_1"
+#   type: hardmacro
+#   x: 550
+#   y: 270
+#   orientation: "r0"
+#   top_layer: "M4"
+# - path: "data_arrays_0_ext/mem_0_2"
+#   type: hardmacro
+#   x: 675 
+#   y: 25
+#   orientation: "r0"
+#   top_layer: "M4"
+#   master: "SRAM1RW4096x8"
+# - path: "data_arrays_0_ext/mem_0_3"
+#   type: hardmacro
+#   x: 675
+#   y: 270
+#   orientation: "r0"
+#   top_layer: "M4"
+#   master: "SRAM1RW4096x8"
+  pin_mode: generated
+  pin.generate_mode: semi_auto
+  pin.assignments: [
+    {pins: "*", layers: ["M5", "M7"] ,side: "bottom"}
+  ]
+

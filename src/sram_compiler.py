@@ -3,6 +3,8 @@ import re
 
 import math
 
+import src.data_structs as rg
+
 def truncate(f, n):
     '''Truncates/pads a float f to n decimal places without rounding'''
     s = '{}'.format(f)
@@ -26,15 +28,11 @@ def decode_sram_name(sram_str):
         ret_val = rw_ports, width, depth
     return ret_val
 
-def compile(rw_ports,width,depth,pdk):
-    env = os.environ.copy()
-    if pdk == "asap7":
-        pdk_path = f'{env["HAMMER_HOME"]}/src/hammer-vlsi/technology/asap7'
-        sram_memories_path = f'{pdk_path}/sram_compiler/memories'
-    sram_list = f'{pdk_path}/srams.txt'
+def compile(hammer_tech_pdk_path: str, rw_ports: int, width: int, depth: int):
+    sram_list = f'{hammer_tech_pdk_path}/srams.txt'
     srams = open(sram_list,"r").read()
     # This is going to be a very basic, dumb sram compiler
-    # deincentivize depth over width
+    # deincentivize depth over width -> (width only needs decoders depth needes muxes which are costlier)
     depth_weight = (0.06 / 4 ) # factor which is added to cost as penalty for each depthwise macro
     width_weight = 0.01 # It costs extra routing resources to be able to connect the pins of wider macros so this is to deincentivize width
     best_cost = float("inf")

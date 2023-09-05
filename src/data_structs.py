@@ -206,6 +206,7 @@ class ScriptInfo:
         Filenames of various scripts used in RAD Gen
     """
     gds_to_area_fname: str = "get_area" # name for gds to area script & output csv file
+    virtuoso_setup_path: str = None
 
 @dataclass
 class ReportInfo:
@@ -260,11 +261,7 @@ class EnvSettings:
     rad_gen_home_path: str # path to top level rad gen repo 
     # Hammer
     hammer_home_path: str  # path to hammer repository
-
     env_paths: List[str] # paths to hammer environment file containing absolute paths to asic tools and licenses
-
-
-
 
     # OpenRAM 
     # openram_path: str  # path to openram repository
@@ -309,7 +306,7 @@ class EnvSettings:
     # Regex Info
     res: Regexes = field(default_factory = Regexes)
     # Sript path information
-    scripts_info: ScriptInfo = field(default_factory = ScriptInfo)
+    scripts_info: ScriptInfo = None
     # Report information
     report_info: ReportInfo = field(default_factory = ReportInfo)
 
