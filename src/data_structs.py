@@ -5,6 +5,8 @@ import re
 from typing import Pattern, Dict, List, Any
 from datetime import datetime
 
+from vlsi.hammer.hammer.vlsi.driver import HammerDriver
+
 def create_timestamp(fmt_only_flag: bool = False) -> str:
     """
         Creates a timestamp string in below format
@@ -55,8 +57,9 @@ class SRAMCompilerSettings:
         Paths related to SRAM compiler outputs
         If not specified in the top level config file, will use default output structure (sent to rad gen input designs directory)
     """
-    rtl_out_path: str = os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
-    config_out_path: str = os.path.expanduser("~/rad_gen/input_designs/sram/configs/compiler_outputs")
+    rtl_out_path: str = None # os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
+    config_out_path: str = None #os.path.expanduser("~/rad_gen/input_designs/sram/configs/compiler_outputs")
+    
 
 
 @dataclass
@@ -68,8 +71,13 @@ class TechInfo:
     cds_lib: str = "asap7_TechLib" # name of technology library in cdslib directory, contains views for stdcells, etc needed in design
     sram_lib_path: str = None # path to PDK sram library containing sub dirs named lib, lef, gds with each SRAM.
     # Process settings in RADGen settings as we may need to perform post processing (ASAP7)
-    pdk_rundir: str = None # path to PDK run directory which allows Cadence Virtuoso to run in it
+    pdk_rundir_path: str = None # path to PDK run directory which allows Cadence Virtuoso to run in it
 
+
+@dataclass
+class VLSISweepInfo:
+    params: Dict #[Dict[str, Any]] 
+    
 
 @dataclass 
 class SRAMSweepInfo:
@@ -125,6 +133,16 @@ class PrimeTime:
     search_paths: List[str]
     
 
+
+# @dataclass
+# class HammerSettings:
+#     """
+#         Settings specific to running hammer tool
+#     """
+#     database: hammer_config.HammerDatabase = None # hammer database
+
+
+
 @dataclass 
 class ASICFlowSettings:
     """ 
@@ -132,7 +150,12 @@ class ASICFlowSettings:
         - paths
         - flow stage information
     """
-    design_config : Dict[str, Any] = None # Hammer IR parsable configuration info
+    # Hammer Driver Path
+    hammer_cli_driver_path: str = None # path to hammer driver
+    hammer_driver: HammerDriver = None # hammer settings
+    # Replace design_config with hammer_driver 
+    #design_config : Dict[str, Any] = None # Hammer IR parsable configuration info
+    
     # Paths
     hdl_path: str = None # path to directory containing hdl files
     config_path: str = None # path to hammer IR parsable configuration file
@@ -145,6 +168,7 @@ class ASICFlowSettings:
     run_syn: bool = False
     run_par: bool = False
     run_pt: bool = False
+    make_build: bool = False # Use the Hammer provided make build to manage asic flow execution
     # flow stages
     flow_stages: dict = field(default_factory = lambda: {
         "sram": {
@@ -168,6 +192,13 @@ class ASICFlowSettings:
         },
     })
 
+    def __post_init__(self):
+        if self.hammer_cli_driver_path is None:
+            # the hammer-vlsi exec should point to default cli driver in hammer repo if everything installed correctly
+            self.hammer_cli_driver_path = "hammer-vlsi"
+        # else: 
+        #     self.hammer_cli_driver_path = f"python3 {self.hammer_cli_driver_path}"
+
 
 @dataclass
 class ScriptInfo:
@@ -175,6 +206,7 @@ class ScriptInfo:
         Filenames of various scripts used in RAD Gen
     """
     gds_to_area_fname: str = "get_area" # name for gds to area script & output csv file
+    virtuoso_setup_path: str = None
 
 @dataclass
 class ReportInfo:
@@ -229,10 +261,11 @@ class EnvSettings:
     rad_gen_home_path: str # path to top level rad gen repo 
     # Hammer
     hammer_home_path: str  # path to hammer repository
-    env_path: str  # path to hammer environment file containing absolute paths to asic tools and licenses
+    env_paths: List[str] # paths to hammer environment file containing absolute paths to asic tools and licenses
 
     # OpenRAM 
     # openram_path: str  # path to openram repository
+    
     # Top level input
     top_lvl_config_path: str = None # high level rad gen configuration file path
     
@@ -249,6 +282,8 @@ class EnvSettings:
     # Input and output directory structure, these are initialized with design specific paths
     design_input_path: str = None # path to directory which inputs will be read from. Ex ~/rad_gen/input_designs
     design_output_path: str = None # path to directory which object directories will be created. Ex ~/rad_gen/output_designs
+
+    hammer_tech_path: str = None # path to hammer technology directory containing tech files
 
     input_design_dir_structure: dict = field(default_factory = lambda: {
         # Design configuration files
@@ -271,16 +306,18 @@ class EnvSettings:
     # Regex Info
     res: Regexes = field(default_factory = Regexes)
     # Sript path information
-    scripts_info: ScriptInfo = field(default_factory = ScriptInfo)
+    scripts_info: ScriptInfo = None
     # Report information
     report_info: ReportInfo = field(default_factory = ReportInfo)
 
     def __post_init__(self):
-        # Assign defaults for input and output design dir
+        # Assign defaults for input and output design dir, these will be overridden if specified in top level yaml file
         if self.design_input_path is None:
             self.design_input_path = os.path.join(self.rad_gen_home_path, "input_designs") 
         if self.design_output_path is None:
             self.design_output_path = os.path.join(self.rad_gen_home_path, "output_designs")
+        if self.hammer_tech_path is None:
+            self.hammer_tech_path = os.path.join(self.hammer_home_path, "hammer", "technology")
 
 
 @dataclass
@@ -300,29 +337,15 @@ class HighLvlSettings:
     #param_sweep_hdr_dir: str = None # directory containing RTL header files for parameter sweeping
     asic_flow_settings: ASICFlowSettings = None # asic flow settings for single design
     design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
-    sram_compiler_settings: SRAMCompilerSettings = field(default_factory = SRAMCompilerSettings)
-
-
-# struct holding all regexes used in rad gen
-# res = Regexes()
-
-# tech_info = Tech_info(
-#         lib="asap7",
-#         # sram_lib_path=os.path.expanduser("~/hammer/src/hammer-vlsi/technology/asap7/sram_compiler/memories"),
-#         # pdk_rundir=os.path.expanduser("~/ASAP_7_IC/asap7_rundir"),
-#         cds_lib="asap7_TechLib"
-#     )
-
-
-# sram_compiler_settings = SRAM_compiler_settings()
-# script_info = Script_info()
-# report_info = Report_info()
-
-# Create the global variables which will be later modified
-# env_settings = Env_Settings()
-# asic_flow_settings = ASIC_flow_settings()
-# rad_gen_settings = RAD_Gen_Settings()
-
-# modes of operation for RAD Gen
-# rad_gen_mode = RADGen_mode()
-# vlsi_mode = VLSI_mode()
+    sram_compiler_settings: SRAMCompilerSettings = None
+    def __post_init__(self):
+        # Post inits required for structs that use other struct values as inputs and cannot be clearly defined
+        self.tech_info.sram_lib_path = os.path.join(self.env_settings.hammer_tech_path, self.tech_info.name, "sram_compiler", "memories")
+        if self.sram_compiler_settings is None:
+            self.sram_compiler_settings = SRAMCompilerSettings()
+            self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
+            self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
+        elif self.sram_compiler_settings.config_out_path == None:
+            self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
+        elif self.sram_compiler_settings.rtl_out_path == None:
+            self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")

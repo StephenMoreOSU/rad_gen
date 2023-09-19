@@ -1,12 +1,12 @@
 designs:
-  - base_config_path: ~/rad_gen/input_designs/sram/configs/sram_config.yml 
+  - base_config_path: ~/rad_gen/unit_tests/inputs/sram/configs/sram.yml
     # These two args are required for each run of hammer flow
     top_lvl_module: sram_wrapper
-    rtl_dir_path: ~/rad_gen/input_designs/sram/rtl
+    rtl_dir_path: ~/rad_gen/unit_tests/inputs/sram/rtl
     type: "sram"
     sram_memory_path: ~/hammer/src/hammer-vlsi/technology/asap7/sram_compiler/memories
     # params below this line are specific to the "sram" design type
-    base_rtl_path: ~/rad_gen/input_designs/sram/rtl/sram.sv
+    base_rtl_path: ~/rad_gen/unit_tests/inputs/sram/rtl/sram.sv
     # Sram compiler will replace rtl_module with 
     # Small depth = 128, med = 512, large = 2048
     mems :

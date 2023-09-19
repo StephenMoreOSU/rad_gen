@@ -1,7 +1,7 @@
 ######### This is a template sram config file which is used to generate other macros and larger srams composed of multiple macros #########
 # synthesis settings
 synthesis:
-  inputs.input_files: [~/rad_gen/input_designs/sram/rtl/sram.sv]
+  inputs.input_files: [~/rad_gen/unit_tests/inputs/sram/rtl/sram.sv]
   inputs.top_module: sram_wrapper
   clock_gating_mode: "empty"
 # place and route settings
@@ -9,7 +9,7 @@ par.innovus.design_flow_effort: "express"
 
 vlsi.inputs:
   # SRAM Settings
-  sram_parameters: "~/rad_gen/input_designs/sram/configs/mem_params.json"
+  sram_parameters: "~/rad_gen/unit_tests/inputs/sram/configs/mem_params.json"
   sram_parameters_meta: ["transclude", "json2list"]
 
   power_spec_mode: "auto"
