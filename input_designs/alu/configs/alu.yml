@@ -1,19 +1,9 @@
-vlsi.core:
-  synthesis_tool_path: [/fs1/eecg/vaughn/morestep/hammer/src/hammer-vlsi/hammer-cadence-plugins/synthesis]
-  synthesis_tool: genus
-  
-  par_tool_path: [/fs1/eecg/vaughn/morestep/hammer/src/hammer-vlsi/hammer-cadence-plugins/par]
-  par_tool: innovus
-
-  #technology
-  technology: asap7
-
-  max_threads: 2
-
-
 # synthesis settings
 synthesis:
-  inputs.input_files: [ input_designs/alu/rtl/src/alu.sv ]
+  inputs.input_files: [ 
+    /fs1/eecg/vaughn/morestep/rad_gen/input_designs/alu/rtl/src/alu.sv,
+    /fs1/eecg/vaughn/morestep/rad_gen/input_designs/alu/rtl/src/dff.sv
+   ]
   inputs.top_module: alu_ver
   inputs.hdl_search_paths: [ /fs1/eecg/vaughn/morestep/rad_gen/input_designs/alu/rtl/src ]
   clock_gating_mode: "empty"

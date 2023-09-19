@@ -1,20 +1,14 @@
-vlsi.core:
-  synthesis_tool_path: [~/rad_gen/vlsi/hammer/hammer/synthesis]
-  synthesis_tool: genus
-  
-  par_tool_path: [~/rad_gen/vlsi/hammer/hammer/par]
-  par_tool: innovus
-
-  #technology
-  technology: asap7
-  max_threads: 2
-
-
 # synthesis settings
 synthesis:
+  #### Inputs between these comments are changed with -v and -t arguments of rad-gen, if they don't look correct in this file pass in those respective arguments ####
   inputs.input_files: [ /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src/router_wrap_bk.v ]
   inputs.top_module: router_wrap_bk
-  inputs.hdl_search_paths: [ /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src, /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src/clib ]
+  inputs.hdl_search_paths: [ 
+    /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src, 
+    /fs1/eecg/vaughn/morestep/rad_gen/input_designs/NoC/src/clib
+  ]
+  #### Inputs between these comments are changed with -v and -t arguments of rad-gen, if they don't look correct in this file pass in those respective arguments ####
+
   clock_gating_mode: "empty"
   
 
@@ -33,9 +27,10 @@ vlsi.inputs:
       period: "0.571 ns",
     }
   ]
+  # These placement constraints will not be used if the "manual" floorplan mode is used in the "par" section, but they may still be required by hammer so we keep them in
   placement_constraints:
   - path: router_wrap_bk
-    type: toplevel
+    type: toplevel ## RAD-Gen -t argument
     x: 100
     y: 100
     width: 3500

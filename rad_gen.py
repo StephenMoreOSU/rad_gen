@@ -1498,6 +1498,13 @@ def rad_gen_flow(rad_gen_settings: rg.HighLvlSettings, config_paths: List[str]) 
         - Static Timing & Power Analysis
         Reports will also be printed to stdout & written to csv
     """
+
+    ## config_paths = [rad_gen_settings.asic_flow_settings.config_path]
+    # TODO low priority -> see if theres a way to do this through hammer api
+    config_paths = rad_gen_settings.asic_flow_settings.hammer_driver.options.project_configs + config_paths
+    # These config paths are not initialized in a dataclass so we need to process them to make sure they all have abspaths
+    config_paths = [ os.path.realpath(os.path.expanduser(c_p)) for c_p in config_paths]
+    
     # Get cwd and change to the design specific output directory (above individual obj dirs)
     pre_flow_dir = os.getcwd()
 
@@ -1517,11 +1524,7 @@ def rad_gen_flow(rad_gen_settings: rg.HighLvlSettings, config_paths: List[str]) 
     # In hammer the later the configuration is specified after the "-p" argument the higher the priority it has in ASIC flow
     # - Therefore appending to the list of config paths and passing it in order of list indexes is correct
     
-    ## config_paths = [rad_gen_settings.asic_flow_settings.config_path]
-    # TODO low priority -> see if theres a way to do this through hammer api
-    config_paths = rad_gen_settings.asic_flow_settings.hammer_driver.options.project_configs + config_paths
-    
-    
+
     # TODO get Makefile based build working (need to add support for SRAM generator stages)
     # if rad_gen_settings.asic_flow_settings.make_build:
     # Generate dependancy and make files
@@ -2205,7 +2208,7 @@ def init_structs(args: argparse.Namespace) -> rg.HighLvlSettings:
             obj_dir_path = None
             # Users can specify a specific obj directory
             if args.manual_obj_dir != None:
-                obj_dir_path = os.path.realpath(args.manual_obj_dir)
+                obj_dir_path = os.path.realpath(os.path.expanduser(args.manual_obj_dir))
             # Or they can use the latest created obj dir
             elif args.use_latest_obj_dir:
                 if os.path.isdir(out_dir):

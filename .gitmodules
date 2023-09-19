@@ -1,5 +1,5 @@
 [submodule "hammer"]
-	path = hammer
+	path = vlsi/hammer
 	url = git@github.com:StephenMoreOSU/hammer.git
 [submodule "COFFE"]
 	path = COFFE

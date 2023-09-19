@@ -3,11 +3,11 @@ designs:
   # base config is the hammer config file which is used as a template for designs which will be swept over
   - base_config_path: ~/rad_gen/input_designs/NoC/configs/vcr_config.yml
     # These two args are required for each run of hammer flow
-    top_level_module: router_wrap_bk
+    top_lvl_module: router_wrap_bk
     rtl_dir_path:  ~/rad_gen/input_designs/NoC/src
     # base_rtl_path: ~/rad_gen/input_designs/sram/rtl/
     type: "rtl_params"
-    base_param_hdr_path: ~/rad_gen/input_designs/NoC/parameters.v
+    base_header_path: ~/rad_gen/input_designs/NoC/parameters.v
     flow_threads: 2
     params:
       {

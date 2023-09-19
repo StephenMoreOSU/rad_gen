@@ -1,24 +1,14 @@
-vlsi.core:
-  synthesis_tool_path: [~/rad_gen/vlsi/hammer/hammer/synthesis]
-  synthesis_tool: genus
-  
-  par_tool_path: [~/rad_gen/vlsi/hammer/hammer/par]
-  par_tool: innovus
-
-  #technology
-  technology: asap7
-
-  max_threads: 2
-
-
 # synthesis settings
 synthesis:
+  #### Inputs between these comments are changed with -v and -t arguments of rad-gen, if they don't look correct in this file pass in those respective arguments ####
   inputs.input_files: [ 
-    /fs1/eecg/vaughn/morestep/rad_gen/input_designs/alu/rtl/src/alu.sv,
-    /fs1/eecg/vaughn/morestep/rad_gen/input_designs/alu/rtl/src/dff.sv
+    ~/rad_gen/unit_tests/alu/rtl/src/alu.sv,
+    ~/rad_gen/unit_tests/alu/rtl/src/dff.sv
    ]
   inputs.top_module: alu_ver
-  inputs.hdl_search_paths: [ /fs1/eecg/vaughn/morestep/rad_gen/input_designs/alu/rtl/src ]
+  inputs.hdl_search_paths: [ ~/rad_gen/input_designs/alu/rtl/src ]
+  #### Inputs between these comments are changed with -v and -t arguments of rad-gen, if they don't look correct in this file pass in those respective arguments ####
+
   clock_gating_mode: "empty"
   
 
@@ -37,8 +27,9 @@ vlsi.inputs:
       period: "2 ns",
     }
   ]
+  # These placement constraints will not be used if the "manual" floorplan mode is used in the "par" section, but they may still be required by hammer so we keep them in
   placement_constraints:
-  - path: alu_ver
+  - path: alu_ver ## RAD-Gen -t argument
     type: toplevel
     x: 20
     y: 20
