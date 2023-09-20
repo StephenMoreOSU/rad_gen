@@ -34,18 +34,21 @@ class RadGenCLI:
         sys_args = []
         cmd_str = f"python3 {rad_gen_home}/rad_gen.py"
         for _field in RadGenCLI.__dataclass_fields__:
-            if _field != "no_use_arg_list" and self.no_use_arg_list != None and _field not in self.no_use_arg_list:
-                val = getattr(self, _field)
-                if val != None and val != False:
-                    if isinstance(val, list):
-                        sys_args += [f"--{_field}"] + val
-                        val = " ".join(val)
-                    if isinstance(val, str):    
-                        cmd_str += f" --{_field} {val}"
-                        sys_args += [f"--{_field}", val]
-                    elif isinstance(val, bool):
-                        cmd_str += f" --{_field}"
-                        sys_args += [f"--{_field}"]
+            if _field != "no_use_arg_list":
+                if self.no_use_arg_list != None and _field not in self.no_use_arg_list:
+                    continue
+                else:
+                    val = getattr(self, _field)
+                    if val != None and val != False:
+                        if isinstance(val, list):
+                            sys_args += [f"--{_field}"] + val
+                            val = " ".join(val)
+                        if isinstance(val, str):    
+                            cmd_str += f" --{_field} {val}"
+                            sys_args += [f"--{_field}", val]
+                        elif isinstance(val, bool):
+                            cmd_str += f" --{_field}"
+                            sys_args += [f"--{_field}"]
         return cmd_str, sys_args
 
 @dataclass 
@@ -200,7 +203,7 @@ def compare_results(input_csv_path: str, ref_csv_path: str) -> pd.DataFrame:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="RADGen CI Test Suite")
-    parser.add_argument("-p", "--just_print",  help="Don't execute test just print commands to console", action='store_true')
+    parser.add_argument("-p", "--just_print",  help="Don't execute test just print commands to console, this parses & compares results if they already exist", action='store_true')
 
     return parser.parse_args()
 
