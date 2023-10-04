@@ -3,8 +3,6 @@ import re
 
 import math
 
-import src.data_structs as rg
-
 def truncate(f, n):
     '''Truncates/pads a float f to n decimal places without rounding'''
     s = '{}'.format(f)

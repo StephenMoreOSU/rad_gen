@@ -8,15 +8,21 @@ from typing import List, Dict, Any, Tuple, Type, NamedTuple, Set, Optional
 
 import pandas as pd
 
-import rad_gen as rg
+# import rad_gen as rg
+import src.utils as rg_utils
 import subprocess as sp
 
 @dataclass
 class RadGenCLI: 
     # Refrences @ rad_gen.py -> parse_cli_args()
-    design_configs: List[str] = None
+    top_config_path: str = None
+    subtools: List[str] = "asic_dse"
+
+    flow_config_paths: List[str] = None
+    # design_configs: List[str] = None
     design_sweep_config: str = None
-    top_lvl_config: str = None
+    # top_lvl_config: str = None
+    env_config_path: str = None 
     top_lvl_module: str = None
     hdl_path: str = None
     manual_obj_dir: str = None
@@ -73,11 +79,12 @@ class TestSuite:
     def __post_init__(self):
         ci_test_obj_dir_suffix = "ci_test"
         if self.top_config_path is None:
-            self.top_config_path = os.path.expanduser(f"{self.rad_gen_home}/unit_tests/rad_gen_config.yml")
+            self.top_config_path = os.path.expanduser(f"{self.rad_gen_home}/unit_tests/rad_gen_test_config.yml")
             assert os.path.exists(self.top_config_path)
-            top_config_dict = yaml.safe_load(open(self.top_config_path, "r"))
-            assert os.path.exists( os.path.expanduser(top_config_dict["env"]["rad_gen_home_path"]) )
-            self.rad_gen_home = os.path.expanduser(top_config_dict["env"]["rad_gen_home_path"])
+            top_config_dict = rg_utils.parse_yml_config(self.top_config_path)
+            env_config_dict = rg_utils.parse_yml_config(top_config_dict["asic_dse"]["env_config_path"])
+            assert os.path.exists( os.path.expanduser(env_config_dict["env"]["rad_gen_home_path"]) )
+            self.rad_gen_home = os.path.expanduser(env_config_dict["env"]["rad_gen_home_path"])
                 
         if self.sys_configs is None:
             sys_configs = [
@@ -87,12 +94,19 @@ class TestSuite:
             self.sys_configs = [ os.path.expanduser(p) for p in sys_configs] 
         if self.alu_tests is None:
             self.alu_tests = []
-            # ALU ASIC TEST [1]
-            alu_config = os.path.expanduser(f"{self.rad_gen_home}/input_designs/alu/configs/alu.yml")
+            # ALU VLSI SWEEP TEST
+            alu_sweep_config = os.path.expanduser(f"{self.rad_gen_home}/unit_tests/sweeps/alu_sweep.yml")
+            alu_sweep_test = RadGenCLI(
+                top_config_path=self.top_config_path,
+                design_sweep_config = alu_sweep_config,
+            )
+            self.alu_tests.append(alu_sweep_test)
+            # SINGLE ALU SWEEP TEST (HAMMER FLOW)
+            alu_config = os.path.expanduser(f"{self.rad_gen_home}/input_designs/alu/configs/alu_period_2.0.yaml")
             top_lvl_mod = "alu_ver"
             alu_test = RadGenCLI(
-                top_lvl_config=self.top_config_path,
-                design_configs= self.sys_configs + [alu_config],
+                top_config_path=self.top_config_path,
+                flow_config_paths= self.sys_configs + [alu_config],
                 top_lvl_module=top_lvl_mod,
                 manual_obj_dir=os.path.join(self.rad_gen_home,"unit_tests","outputs",top_lvl_mod,f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
                 hdl_path=os.path.expanduser(f"{self.rad_gen_home}/input_designs/alu/rtl/src"),
@@ -104,7 +118,7 @@ class TestSuite:
             # SRAM STITCHED & MACRO GENERATION TEST [2]
             sram_gen_config = os.path.expanduser(f"{self.rad_gen_home}/unit_tests/sweeps/sram_sweep.yml")
             sram_gen_test = RadGenCLI(
-                top_lvl_config=self.top_config_path,
+                top_config_path=self.top_config_path,
                 design_sweep_config = sram_gen_config,
             )
             self.sram_tests.append(sram_gen_test)
@@ -113,8 +127,8 @@ class TestSuite:
             top_lvl_mod = "sram_wrapper"
             # SRAM SINGLE MACRO ASIC TEST [3]
             single_sram_macro_test = RadGenCLI(
-                top_lvl_config = self.top_config_path,
-                design_configs = self.sys_configs + [sram_config],
+                top_config_path = self.top_config_path,
+                flow_config_paths = self.sys_configs + [sram_config],
                 manual_obj_dir=os.path.join(self.rad_gen_home,"unit_tests","outputs",top_lvl_mod,f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
                 sram_compiler = True,
                 top_lvl_module = top_lvl_mod,
@@ -127,8 +141,8 @@ class TestSuite:
             top_lvl_mod = "sram_macro_map_2x256x64"
             sram_compiled_macro_config = os.path.expanduser(f"{self.rad_gen_home}/input_designs/sram/configs/compiler_outputs/sram_config__sram_macro_map_2x256x64.yaml" )
             sram_compiled_macro_test = RadGenCLI(
-                top_lvl_config=self.top_config_path,
-                design_configs= self.sys_configs + [sram_compiled_macro_config],
+                top_config_path=self.top_config_path,
+                flow_config_paths= self.sys_configs + [sram_compiled_macro_config],
                 manual_obj_dir=os.path.join(self.rad_gen_home,"unit_tests","outputs",top_lvl_mod,f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
                 sram_compiler=True,
                 top_lvl_module = top_lvl_mod,
@@ -140,7 +154,7 @@ class TestSuite:
             # NoC RTL PARAM SWEEP GEN TEST [5]
             noc_sweep_config = os.path.expanduser(f"{self.rad_gen_home}/unit_tests/sweeps/noc_sweep.yml")
             noc_sweep_test = RadGenCLI(
-                top_lvl_config=self.top_config_path,
+                top_config_path=self.top_config_path,
                 design_sweep_config = noc_sweep_config,
             )
             self.noc_tests.append(noc_sweep_test)
@@ -148,8 +162,8 @@ class TestSuite:
             top_lvl_mod = "router_wrap_bk"
             noc_config = os.path.expanduser(f"{self.rad_gen_home}/input_designs/NoC/configs/vcr_config_num_message_classes_5_buffer_size_80_num_nodes_per_router_1_num_dimensions_2_flit_data_width_196_num_vcs_5.yaml")
             noc_sweep_test = RadGenCLI(
-                top_lvl_config = self.top_config_path,
-                design_configs = self.sys_configs + [noc_config],
+                top_config_path = self.top_config_path,
+                flow_config_paths = self.sys_configs + [noc_config],
                 top_lvl_module = top_lvl_mod,
                 hdl_path = os.path.expanduser(f"{self.rad_gen_home}/input_designs/NoC/src"),
                 manual_obj_dir=os.path.join(self.rad_gen_home,"unit_tests","outputs",top_lvl_mod,f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
@@ -222,10 +236,9 @@ def main():
         if not args.just_print:   
             sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"alu_unit_test_{idx}.log"]), env=cur_env, shell=True)
         # Parse result and compare
-        if test.design_configs != None:
+        if test.flow_config_paths != None:
             res_df = compare_results(os.path.join(test.manual_obj_dir, "flow_report.csv"),os.path.join(test_suite.rad_gen_home, "unit_tests", "golden_results", f"{test.top_lvl_module}_flow_report.csv"))
             print(res_df)
-    
     print("Running SRAM tests")
     for idx, test in enumerate(test_suite.sram_tests):
         cmd_str, sys_args = test.get_rad_gen_cli_cmd(test_suite.rad_gen_home)        
@@ -233,7 +246,7 @@ def main():
         if not args.just_print:   
             sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"sram_unit_test_{idx}.log"]), env=cur_env, shell=True)
         # Parse result and compare
-        if test.design_configs != None:
+        if test.flow_config_paths != None:
             res_df = compare_results(os.path.join(test.manual_obj_dir, "flow_report.csv"),os.path.join(test_suite.rad_gen_home, "unit_tests", "golden_results", f"{test.top_lvl_module}_flow_report.csv"))
             print(res_df)
 
@@ -244,7 +257,7 @@ def main():
         if not args.just_print:   
             sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"noc_unit_test_{idx}.log"]), env=cur_env, shell=True)
         # Parse result and compare
-        if test.design_configs != None:
+        if test.flow_config_paths != None:
             res_df = compare_results(os.path.join(test.manual_obj_dir, "flow_report.csv"),os.path.join(test_suite.rad_gen_home, "unit_tests", "golden_results", f"{test.top_lvl_module}_flow_report.csv"))
             print(res_df)
 

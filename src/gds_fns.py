@@ -37,6 +37,7 @@ def main(argv: List[str]):
     return ret_val
 
 def get_area(gds_tool, cell_list, gds_file):
+    # TODO implement with gdspy as well
     if gds_tool.__name__ == 'gdstk':
         total_area = 0.0
         # load gds

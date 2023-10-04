@@ -4,8 +4,30 @@ import os, sys
 import re
 from typing import Pattern, Dict, List, Any
 from datetime import datetime
+import logging
+
 
 from vlsi.hammer.hammer.vlsi.driver import HammerDriver
+
+# import src.utils as rg_utils
+
+#  ██████╗ ██████╗ ███████╗███████╗███████╗
+# ██╔════╝██╔═══██╗██╔════╝██╔════╝██╔════╝
+# ██║     ██║   ██║█████╗  █████╗  █████╗  
+# ██║     ██║   ██║██╔══╝  ██╔══╝  ██╔══╝  
+# ╚██████╗╚██████╔╝██║     ██║     ███████╗
+#  ╚═════╝ ╚═════╝ ╚═╝     ╚═╝     ╚══════╝
+                                         
+
+
+
+
+#  █████╗ ███████╗██╗ ██████╗    ██████╗ ███████╗███████╗
+# ██╔══██╗██╔════╝██║██╔════╝    ██╔══██╗██╔════╝██╔════╝
+# ███████║███████╗██║██║         ██║  ██║███████╗█████╗  
+# ██╔══██║╚════██║██║██║         ██║  ██║╚════██║██╔══╝  
+# ██║  ██║███████║██║╚██████╗    ██████╔╝███████║███████╗
+# ╚═╝  ╚═╝╚══════╝╚═╝ ╚═════╝    ╚═════╝ ╚══════╝╚══════╝
 
 def create_timestamp(fmt_only_flag: bool = False) -> str:
     """
@@ -35,6 +57,8 @@ class VLSIMode:
     """ 
         Mode settings associated with running VLSI flow
     """
+    run_mode: str = None # specify if flow is run in serial or parallel for sweeps 
+    flow_mode: str = None # mode in which asic flow is run "hammer" or "custom" modes
     enable: bool = False # run VLSI flow
     config_pre_proc: bool = False # Don't create a modified config file for this design
 
@@ -122,25 +146,6 @@ class DesignSweepInfo:
     type: str = None # options are "sram", "rtl_params" or "vlsi_params" TODO this could be instead determined by searching through parameters acceptable to hammer IR
     flow_threads: int = 1 # number of vlsi runs which will be executed in parallel (in terms of sweep parameters)
     type_info: Any = None # contains either RTLSweepInfo or SRAMSweepInfo depending on sweep type
-
-
-
-@dataclass
-class PrimeTime:
-    """
-        PrimeTime settings
-    """
-    search_paths: List[str]
-    
-
-
-# @dataclass
-# class HammerSettings:
-#     """
-#         Settings specific to running hammer tool
-#     """
-#     database: hammer_config.HammerDatabase = None # hammer database
-
 
 
 @dataclass 
@@ -276,6 +281,7 @@ class EnvSettings:
     # 0 - Brief output
     # 1 - Brief output + I/O + command line access
     # 2 - Hammer and asic tool outputs will be printed to console    
+    logger: logging.Logger = logging.getLogger(f"rad-gen-{create_timestamp()}") # logger for RAD Gen
     log_file: str = f"rad-gen-{create_timestamp()}.log" # path to log file for current RAD Gen run
     log_verbosity: int = 1 # verbosity level for log file 
     
@@ -334,8 +340,8 @@ class HighLvlSettings:
     tech_info: TechInfo # technology information for the design
     sweep_config_path: str = None # path to sweep configuration file containing design parameters to sweep
     result_search_path: str = None # path which will look for various output obj directories to parse results from
-    #param_sweep_hdr_dir: str = None # directory containing RTL header files for parameter sweeping
     asic_flow_settings: ASICFlowSettings = None # asic flow settings for single design
+    custom_asic_flow_settings: Dict[str, Any] = None # custom asic flow settings
     design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
     sram_compiler_settings: SRAMCompilerSettings = None
     def __post_init__(self):
@@ -349,3 +355,10 @@ class HighLvlSettings:
             self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
         elif self.sram_compiler_settings.rtl_out_path == None:
             self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
+
+
+
+
+# class ASICDSE:
+#     def __init__(self):
+#         self.asic_dse_settings = HighLvlSettings()

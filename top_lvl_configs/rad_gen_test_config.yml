@@ -1,0 +1,54 @@
+
+
+# CLI ARGS FOR SUBTOOLS
+
+# Note that even if a user wanted to just run the subtool COFFE and nothing else, they should provide a config to the ASIC-DSE subtool if they wanted to use an asic flow 
+
+
+
+
+rad_gen:
+  # Could also contain general information about obj directories or other things that can be reused across subtools
+  # Contains information about larger functionality which may use the three tools as libraries
+
+ic_3d:
+  # CLI args ...
+  # 3D_IC_config: ~/
+
+asic_dse:
+  # CLI args ...
+  # top_lvl_module: <top_module_name>
+  # hdl_path: <path_to_hdl_top_directory>
+  # hammer_config_paths: <path_to_hammer_design_configs> -> Seperate conf files for tech / tools / design
+  # use_latest_obj_dir: bool
+  # manual_obj_dir_path: <path_to_manually_defined_obj_dir>
+  # env_config_path: <env_config> -> This now should only have information about asic tool licenses and other env vars
+  # design_sweep_conf_path: <path_to_design_sweep_config> -> Information to allow for RTL / VLSI design sweep
+  # compile_results: bool -> If true, use either a manually specified obj dir or if combined w sweep use all dirs in the design directory to get the resulst
+  # syn/par/pt/make -> bool run options to specify a single stage of asic flow to run
+  # sram -> bool -> If true, run sram compiler prior to rest of asic flow stages
+
+  flow_mode: custom # "custom" or "hammer" for either full custom scripts or hammer scripts
+  run_mode: parallel # "parallel" or "serial"
+  env_config_path: ~/rad_gen/top_lvl_configs/rad_gen_config.yml
+
+  # flow type -> "custom" or "hammer" for either full custom scripts or hammer scripts
+  # full_custom_flow_config_paths: [COFFE/input_files/strtx_III_dsp/dsp_stdcell_params.yml]
+  # One can either pass the  full custom flow configs of hammer configs, depending on user option will determine how they are parsed
+  # flow_config_paths: [ system_configs/asap7.yml, system_configs/cadence_tools.yml, input_designs/alu/configs/alu.yml]
+  flow_config_paths: [ ~/rad_gen/input_designs/alu/configs/alu_custom_flow.yml ]
+
+  # CLI args can be passed through this file OR can be present in the subtool specific config
+  # This config specifies higher level modes of operation for the rad-gen PPA sweep & asic flow
+  # This config provides all asic related settings for this subtool and any other that may call it during its process
+
+coffe:
+  # CLI args ...
+  # "custom" or "hammer" for either full custom scripts or hammer scripts
+  # asic_opt: hammer
+  # coffe_config: ~/rad_gen/COFFE/input_designs/strtx_III_dsp/dsp_coffe_params.yaml
+  # No ASIC params here... 
+  fpga_arch_conf_path: ~/rad_gen/COFFE/input_files/alu/alu_7nm.yaml
+
+
+# Rest of the Configruation params that are non Hammer specific

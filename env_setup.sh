@@ -11,6 +11,9 @@ RAD_GEN_HOME=$PWD
 VLSI_HOME=$PWD/vlsi
 HAMMER_HOME=$VLSI_HOME/hammer
 
+pathadd $RAD_GEN_HOME
+# pathadd $RAD_GEN_HOME/src
+
 # We need to add all of the hammer submodules to the PYTHONPATH
 pathadd $HAMMER_HOME/hammer/technology
 pathadd $HAMMER_HOME/hammer/vlsi
@@ -39,3 +42,6 @@ for flow_stage in "${flow_stages[@]}"; do
 done
 
 
+## PYTHONPATH for COFFE
+pathadd $RAD_GEN_HOME/COFFE
+pathadd $RAD_GEN_HOME/COFFE/coffe
