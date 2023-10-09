@@ -14,6 +14,9 @@ rad_gen:
 ic_3d:
   # CLI args ...
   # 3D_IC_config: ~/
+  input_config_path: ~/3D_ICs/input_configs/3D_ic_explore.yaml
+  buffer_sens_study: True
+  # buffer_dse: True
 
 asic_dse:
   # CLI args ...
@@ -48,7 +51,8 @@ coffe:
   # asic_opt: hammer
   # coffe_config: ~/rad_gen/COFFE/input_designs/strtx_III_dsp/dsp_coffe_params.yaml
   # No ASIC params here... 
-  fpga_arch_conf_path: ~/rad_gen/COFFE/input_files/alu/alu_7nm.yaml
+  fpga_arch_conf_path: ~/rad_gen/COFFE/input_files/finfet_7nm_fabric_w_hbs/finfet_7nm_fabric_w_hbs.yml
+  hb_flows_conf_path: ~/rad_gen/COFFE/input_files/finfet_7nm_fabric_w_hbs/hb_flows.yml
 
 
 # Rest of the Configruation params that are non Hammer specific

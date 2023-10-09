@@ -1,116 +1,33 @@
-"""@package docstring
-RADGen documentation can be found at https://rad-gen.readthedocs.io/en/latest/
 
-"""
-
-
-#import ..hammer.src.hammer_config 
-# The below function parses hammer IR
-# load_config_from_paths([config.yamls])
-
-import argparse
-import sys, os
-import subprocess as sp
-import shlex
-import re
-
-import json
+# General imports
+from typing import List, Dict, Tuple, Set, Union, Any, Type
+import os, sys
+from dataclasses import dataclass, asdict
+import datetime
 import yaml
-
-
-import time
-import math
-
+import re
+import subprocess as sp
+from pathlib import Path
+import json
 import copy
-
-import csv
+import math
 import pandas as pd
 
-import src.sram_compiler as sram_compiler 
-import src.data_structs as rg
-import src.utils as rg_utils
 
-
-import datetime
-
-from dataclasses import dataclass
-
-from typing import List, Dict, Any, Tuple, Type, NamedTuple, Set, Optional
-# from typing import Pattern
-
-from dataclasses import field
-from pathlib import Path
-
-
-#Import hammer modules
-import vlsi.hammer.hammer.config as hammer_config
-from vlsi.hammer.hammer.vlsi.hammer_vlsi_impl import HammerVLSISettings 
-from vlsi.hammer.hammer.vlsi.driver import HammerDriver
-import vlsi.hammer.hammer.tech as hammer_tech
-
-# import gds funcs (for asap7)
-
-import src.gds_fns as gds_fns
-
-
-###### ASIC DSE IMPORTS ######
-import src.asic_dse.custom_flow as asic_custom
+# asic_dse imports
 import src.asic_dse.hammer_flow as asic_hammer
-import src.asic_dse.asic_dse as asic_dse
+import src.asic_dse.custom_flow as asic_custom
+
+# rad gen utils imports
+import src.utils as rg_utils
+import src.data_structs as rg_ds
 
 
-##### COFFE IMPORTS ##### 
-import src.coffe.coffe as coffe
-# import COFFE.coffe.utils as coffe_utils 
-
-
-##### 3D IC IMPORTS ##### 
-import src.ic_3d.ic_3d as ic_3d
-
-
-rad_gen_log_fd = "rad_gen.log"
+rad_gen_log_fd = "asic_dse.log"
 log_verbosity = 2
 cur_env = os.environ.copy()
 
-# ██████╗  █████╗ ██████╗      ██████╗ ███████╗███╗   ██╗    ███████╗██╗  ██╗███████╗ ██████╗    ███╗   ███╗ ██████╗ ██████╗ ███████╗███████╗
-# ██╔══██╗██╔══██╗██╔══██╗    ██╔════╝ ██╔════╝████╗  ██║    ██╔════╝╚██╗██╔╝██╔════╝██╔════╝    ████╗ ████║██╔═══██╗██╔══██╗██╔════╝██╔════╝
-# ██████╔╝███████║██║  ██║    ██║  ███╗█████╗  ██╔██╗ ██║    █████╗   ╚███╔╝ █████╗  ██║         ██╔████╔██║██║   ██║██║  ██║█████╗  ███████╗
-# ██╔══██╗██╔══██║██║  ██║    ██║   ██║██╔══╝  ██║╚██╗██║    ██╔══╝   ██╔██╗ ██╔══╝  ██║         ██║╚██╔╝██║██║   ██║██║  ██║██╔══╝  ╚════██║
-# ██║  ██║██║  ██║██████╔╝    ╚██████╔╝███████╗██║ ╚████║    ███████╗██╔╝ ██╗███████╗╚██████╗    ██║ ╚═╝ ██║╚██████╔╝██████╔╝███████╗███████║
-# ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝      ╚═════╝ ╚══════╝╚═╝  ╚═══╝    ╚══════╝╚═╝  ╚═╝╚══════╝ ╚═════╝    ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝
-
-
-def parse_cli_args(input_parser: argparse.ArgumentParser = None) -> argparse.Namespace:
-    if input_parser == None:
-        parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--top_lvl_module', help="name of top level design in HDL", type=str, default=None)
-    parser.add_argument('-v', '--hdl_path', help="path to directory containing HDL files", type=str, default=None)
-    parser.add_argument('-p', '--flow_config_paths', 
-                        help="list of paths to hammer design specific config.yaml files",
-                        nargs="*",
-                        type=str,
-                        default=None)
-    parser.add_argument('-l', '--use_latest_obj_dir', help="uses latest obj dir found in rad_gen dir", action='store_true') 
-    parser.add_argument('-o', '--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
-    parser.add_argument('-e', '--top_lvl_config', help="path to top level config file",  type=str, default=None)
-    parser.add_argument('-s', '--design_sweep_config', help="path to config file containing design sweep parameters",  type=str, default=None)
-    parser.add_argument('-c', '--compile_results', help="path to dir", action='store_true') 
-    parser.add_argument('-syn', '--synthesis', help="flag runs synthesis on specified design", action='store_true') 
-    parser.add_argument('-par', '--place_n_route', help="flag runs place & route on specified design", action='store_true') 
-    parser.add_argument('-pt', '--primetime', help="flag runs primetime on specified design", action='store_true') 
-    parser.add_argument('-sram', '--sram_compiler', help="flag enables srams to be run in design", action='store_true') 
-    parser.add_argument('-make', '--make_build', help="flag enables make build system for asic flow", action='store_true') 
-    
-    # Testing integration
-    #parser.add_argument('-j', '--top_config', help="path to top level config file",  type=str, default=None)
-
-    # parser.add_argument('-r', '--openram_config_dir', help="path to dir (TODO)", type=str, default='')
-    # parser.add_argument('-sim', '--sram_compiler', help="path to dir", action='store_true') 
-    args = parser.parse_args()
-    
-    return args
-
-def compile_results(rad_gen_settings: rg.HighLvlSettings):
+def compile_results(rad_gen_settings: rg_ds.HighLvlSettings):
     # read in the result config file
     report_search_dir = rad_gen_settings.env_settings.design_output_path
     csv_lines = []
@@ -150,7 +67,7 @@ def compile_results(rad_gen_settings: rg.HighLvlSettings):
     csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(rad_gen_settings.sweep_config_path))[0] )
     rg_utils.write_dict_to_csv(csv_lines,csv_fname)
 
-def design_sweep(rad_gen_settings: rg.HighLvlSettings):
+def design_sweep(rad_gen_settings: rg_ds.HighLvlSettings):
     # Starting with just SRAM configurations for a single rtl file (changing parameters in header file)
     rg_utils.rad_gen_log(f"Running design sweep from config file {rad_gen_settings.sweep_config_path}",rad_gen_log_fd)
     
@@ -233,14 +150,16 @@ def design_sweep(rad_gen_settings: rg.HighLvlSettings):
             permission_cmd = f"chmod +x {script_path}"
             rg_utils.run_shell_cmd_no_logs(permission_cmd)
 
-def run_asic_flow(rad_gen_settings: rg.HighLvlSettings):
+def run_asic_flow(rad_gen_settings: rg_ds.HighLvlSettings) -> Dict[str, Any]:
     if rad_gen_settings.mode.vlsi_flow.flow_mode == "custom":
         if rad_gen_settings.mode.vlsi_flow.run_mode == "serial":
             for hb_settings in rad_gen_settings.custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]:
-                asic_custom.hardblock_flow(hb_settings)
+                flow_results = asic_custom.hardblock_flow(hb_settings)
         elif rad_gen_settings.mode.vlsi_flow.run_mode == "parallel":
             for hb_settings in rad_gen_settings.custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]:
+                # Maybe 
                 asic_custom.hardblock_parallel_flow(hb_settings)
+                flow_results = None
     elif rad_gen_settings.mode.vlsi_flow.flow_mode == "hammer":
       # If the args for top level and rtl path are not set, we will use values from the config file
       in_configs = []
@@ -250,13 +169,13 @@ def run_asic_flow(rad_gen_settings: rg.HighLvlSettings):
           in_configs.append(mod_config_file)
 
       # Run the flow
-      asic_hammer.run_hammer_flow(rad_gen_settings, in_configs)
+      flow_results = asic_hammer.run_hammer_flow(rad_gen_settings, in_configs)
        
     rg_utils.rad_gen_log("Done!", rad_gen_log_fd)
-    sys.exit()    
+    return flow_results
 
 
-def main(args: Optional[List[str]] = None) -> None:
+def run_asic_dse(asic_dse_cli: rg_ds.AsicDseCLI) -> Tuple[float]:
     global cur_env
     global rad_gen_log_fd
     global log_verbosity
@@ -265,44 +184,25 @@ def main(args: Optional[List[str]] = None) -> None:
     fd = open(rad_gen_log_fd, 'w')
     fd.close()
 
-    # Parse command line arguments
-    # args = parse_cli_args()
 
-    args, gen_arg_keys, default_arg_vals = rg_utils.parse_rad_gen_top_cli_args()
+    # Hack to convert asic_dse_cli to dict as input for init_structs function
+    asic_dse_conf = asdict(asic_dse_cli)
+
+    asic_flow_dse_info = rg_utils.init_asic_dse_structs(asic_dse_conf)
+
+    # args, gen_arg_keys, default_arg_vals = rg_utils.parse_rad_gen_top_cli_args()
 
     # rad_gen_settings = init_structs(args)
-    rad_gen_info = rg_utils.init_structs_top(args, gen_arg_keys, default_arg_vals)
+    # rad_gen_info = rg_utils.init_structs_top(args, gen_arg_keys, default_arg_vals)
 
-    cur_env = os.environ.copy()
-
+    ret_info = None
     """ Ex. args python3 rad_gen.py -s param_sweep/configs/noc_sweep.yml -c """
-    if "asic_dse" in rad_gen_info.keys():
-        if rad_gen_info["asic_dse"].mode.result_parse:
-            asic_dse.compile_results(rad_gen_info["asic_dse"])
-        # If a design sweep config file is specified, modify the flow settings for each design in sweep
-        elif rad_gen_info["asic_dse"].mode.sweep_gen:
-            asic_dse.design_sweep(rad_gen_info["asic_dse"])
-        elif rad_gen_info["asic_dse"].mode.vlsi_flow.enable:
-            asic_dse.run_asic_flow(rad_gen_info["asic_dse"])
-    elif "coffe" in rad_gen_info.keys():
-        # COFFE RUN OPTIONS
-        coffe.run_coffe_flow(rad_gen_info["coffe"])
-    elif "ic_3d" in rad_gen_info.keys():
-        if rad_gen_info["ic_3d"].cli_args.buffer_dse:
-            ic_3d.run_buffer_dse(rad_gen_info["ic_3d"])
-        if rad_gen_info["ic_3d"].cli_args.pdn_modeling:
-            ic_3d.run_pdn_modeling(rad_gen_info["ic_3d"])
-        if rad_gen_info["ic_3d"].cli_args.buffer_sens_study:
-            ic_3d.run_buffer_sens_study(rad_gen_info["ic_3d"])
-        if rad_gen_info["ic_3d"].cli_args.debug_spice != None:
-            debug_procs = [ rg.SpProcess(top_sp_dir=rg_utils.clean_path("~/rad_gen/spice_sim"), title = title) for title in rad_gen_info["ic_3d"].cli_args.debug_spice ]
-            for sp_process in debug_procs:
-                ic_3d.run_spice_debug(rad_gen_info["ic_3d"], sp_process)
-        
-        
+    if asic_flow_dse_info.mode.result_parse:
+        compile_results(asic_flow_dse_info)
+    # If a design sweep config file is specified, modify the flow settings for each design in sweep
+    elif asic_flow_dse_info.mode.sweep_gen:
+        design_sweep(asic_flow_dse_info)
+    elif asic_flow_dse_info.mode.vlsi_flow.enable:
+        ret_info = run_asic_flow(asic_flow_dse_info)
 
-
-    
-    
-if __name__ == '__main__':
-    main()
+    return ret_info

@@ -7,6 +7,8 @@ import logging
 import flatdict
 
 
+import shapely as sh
+
 
 #Import hammer modules
 import vlsi.hammer.hammer.config as hammer_config
@@ -19,7 +21,244 @@ import vlsi.hammer.hammer.tech as hammer_tech
 import src.data_structs as rg_ds
 
 # COFFE modules
-# import COFFE.coffe.utils as coffe_utilss
+import COFFE.coffe.utils as coffe_utils
+
+import csv
+import re
+import subprocess as sp 
+import pandas as pd
+
+# temporary imports from rad_gen main for testing ease
+
+rad_gen_log_fd = "asic_dse.log"
+log_verbosity = 2
+cur_env = os.environ.copy()
+
+#  ██████╗ ███████╗███╗   ██╗███████╗██████╗  █████╗ ██╗         ██╗   ██╗████████╗██╗██╗     ███████╗
+# ██╔════╝ ██╔════╝████╗  ██║██╔════╝██╔══██╗██╔══██╗██║         ██║   ██║╚══██╔══╝██║██║     ██╔════╝
+# ██║  ███╗█████╗  ██╔██╗ ██║█████╗  ██████╔╝███████║██║         ██║   ██║   ██║   ██║██║     ███████╗
+# ██║   ██║██╔══╝  ██║╚██╗██║██╔══╝  ██╔══██╗██╔══██║██║         ██║   ██║   ██║   ██║██║     ╚════██║
+# ╚██████╔╝███████╗██║ ╚████║███████╗██║  ██║██║  ██║███████╗    ╚██████╔╝   ██║   ██║███████╗███████║
+#  ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
+
+def rad_gen_log(log_str: str, file: str):
+    """
+    Prints to a log file and the console depending on level of verbosity
+    log codes:
+    {
+        "info"
+        "debug"
+        "error"
+    }
+    """
+    if file == sys.stdout:
+        print(f"{log_str}")
+    else:
+        fd = open(file, 'a')
+        if(log_verbosity >= 0):
+            print(f"{log_str}",file=fd)
+            print(f"{log_str}")
+        fd.close()
+
+def write_dict_to_csv(csv_lines,csv_fname):
+    csv_fd = open(f"{csv_fname}.csv","w")
+    writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
+    writer.writeheader()
+    for line in csv_lines:
+        writer.writerow(line)
+    csv_fd.close()
+
+def check_for_valid_path(path):
+    ret_val = False
+    if os.path.exists(os.path.abspath(path)):
+        ret_val = True
+    else:
+        rad_gen_log(f"ERROR: {path} does not exist", rad_gen_log_fd)
+        raise FileNotFoundError(f"ERROR: {path} does not exist")
+    return ret_val
+
+def handle_error(fn, expected_vals: set=None):
+    # for fn in funcs:
+    if not fn() or (expected_vals is not None and fn() not in expected_vals):
+        sys.exit(1)
+
+
+def create_bordered_str(text: str = "", border_char: str = "#", total_len: int = 150) -> list:
+    text = f"  {text}  "
+    text_len = len(text)
+    if(text_len > total_len):
+        total_len = text_len + 10 
+    border_size = (total_len - text_len) // 2
+    return [ border_char * total_len, f"{border_char * border_size}{text}{border_char * border_size}", border_char * total_len]
+
+
+def c_style_comment_rm(text):
+    """ 
+        This function removes c/c++ style comments from a file
+        WARNING does not work for all cases (such as escaped characters and other edge cases of comments) but should work for most
+    """
+    def replacer(match):
+        s = match.group(0)
+        if s.startswith('/'):
+            return " " # note: a space and not an empty string
+        else:
+            return s
+    pattern = re.compile(
+        r'//.*?$|/\*.*?\*/|\'(?:\\.|[^\\\'])*\'|"(?:\\.|[^\\"])*"',
+        re.DOTALL | re.MULTILINE
+    )
+    return re.sub(pattern, replacer, text)
+
+
+def rec_find_fpath(dir,fname):
+    ret_val = 1
+    for root, dirs, files in os.walk(dir):
+        if fname in files:
+            ret_val = os.path.join(root, fname)
+    return ret_val
+                                                              
+def pretty(d, indent=0):
+   """
+    Pretty prints a dictionary
+   """
+   for key, value in d.items():
+      print('\t' * indent + str(key))
+      if isinstance(value, dict):
+         pretty(value, indent+1)
+      else:
+         print('\t' * (indent+1) + str(value))
+
+def truncate(f, n):
+    '''
+        Truncates/pads a float f to n decimal places without rounding
+    '''
+    s = '{}'.format(f)
+    if 'e' in s or 'E' in s:
+        return '{0:.{1}f}'.format(f, n)
+    i, p, d = s.partition('.')
+    return '.'.join([i, (d+'0'*n)[:n]])
+
+def flatten_mixed_list(input_list):
+    """
+        Flattens a list with mixed value Ex. ["hello", ["billy","bob"],[["johnson"]]] -> ["hello", "billy","bob","johnson"]
+    """
+    # Create flatten list lambda function
+    flat_list = lambda input_list:[element for item in input_list for element in flat_list(item)] if type(input_list) is list else [input_list]
+    # Call lambda function
+    flattened_list = flat_list(input_list)
+    return flattened_list
+
+def run_shell_cmd(cmd_str,log_file):
+    run_cmd = cmd_str + f" | tee {log_file}"
+    rad_gen_log(f"Running: {run_cmd}",rad_gen_log_fd)
+    sp.call(run_cmd,shell=True,executable='/bin/bash',env=cur_env)
+
+def run_shell_cmd_no_logs(cmd_str: str, to_log: bool = True):
+    if to_log:
+        log_fd = rad_gen_log_fd
+    else:
+        log_fd = sys.stdout
+    rad_gen_log(f"Running: {cmd_str}", log_fd)
+    run_out = sp.Popen([cmd_str], executable='/bin/bash', env=cur_env, stderr=sp.PIPE, stdout=sp.PIPE, shell=True)
+    run_stdout = ""
+    for line in iter(run_out.stdout.readline, ""):
+        if(run_out.poll() is None):
+            run_stdout += line.decode("utf-8")
+            if log_verbosity >= 2: 
+                sys.stdout.buffer.write(line)
+        else:
+            break
+    if log_verbosity >= 2: 
+        _, run_stderr = run_out.communicate()
+    else:
+        run_stdout, run_stderr = run_out.communicate()
+        run_stdout = run_stdout.decode("utf-8")
+    run_stderr = run_stderr.decode("utf-8")
+    return run_stdout, run_stderr
+
+def run_shell_cmd_safe_no_logs(cmd_str: str):
+    print(f"Running: {cmd_str}")
+    ret_code = sp.call(cmd_str, executable='/bin/bash', env=cur_env, shell=True)
+    return ret_code
+
+
+def run_csh_cmd(cmd_str):
+    rad_gen_log(f"Running: {cmd_str}",rad_gen_log_fd)
+    sp.call(['csh', '-c', cmd_str])
+
+    
+
+def rec_get_flist_of_ext(design_dir_path,hdl_exts):
+    """
+    Takes in a path and recursively searches for all files of specified extension, returns dirs of those files and file paths in two lists
+    """
+    design_folder = os.path.expanduser(design_dir_path)
+    design_files = [os.path.abspath(os.path.join(r,fn)) for r, _, fs in os.walk(design_folder) for fn in fs if fn.endswith(tuple(hdl_exts))]
+    design_dirs = [os.path.abspath(r) for r, _, fs in os.walk(design_folder) for fn in fs if fn.endswith(tuple(hdl_exts))]
+    design_dirs = list(dict.fromkeys(design_dirs))
+
+    return design_files,design_dirs
+
+def file_write_ln(fd, line):
+  """
+  writes a line to a file with newline after
+  """
+  fd.write(line + "\n")
+
+def edit_config_file(config_fpath, config_dict):
+    """
+    Super useful function which I have needed in multiple tools, take in a dict of key value pairs and replace them in a config file,
+    will keep it to yaml specification for now.
+    """
+    #read in config file as text
+    with open(config_fpath, 'r') as f:
+        config_text = f.read()
+
+    for key, value in config_dict.items():
+        key_re = re.compile(f"{key}:.*",re.MULTILINE)
+        
+        if(isinstance(value,list)):
+            val_str = "\", \"".join(value)
+            repl_str = f"{key}: [{val_str}]"
+        else:    
+            repl_str = f"{key}: {value}"
+        #replace relevant configs
+        config_text = key_re.sub(repl=repl_str,string=config_text)        
+    
+    with open(config_fpath, 'w') as f:
+        f.write(config_text)
+
+
+def sanitize_config(config_dict) -> dict:
+    """
+        Modifies values of yaml config file to do the following:
+        - Expand relative paths to absolute paths
+    """    
+    for param, value in config_dict.copy().items():
+        if("path" in param or "sram_parameters" in param):
+            if isinstance(value, list):
+                config_dict[param] = [os.path.realpath(os.path.expanduser(v)) for v in value]
+            elif isinstance(value, str):
+                config_dict[param] = os.path.realpath(os.path.expanduser(value))
+            else:
+                pass
+    return config_dict
+
+def get_df_output_lines(df: pd.DataFrame) -> List[str]:
+    cell_chars = 40
+    ncols = len(df.columns)
+    seperator = "+".join(["-"*cell_chars]*ncols)
+    format_str = f"{{:^{cell_chars}}}"
+    df_output_lines = [
+        seperator,
+        "|".join([format_str for _ in range(len(df.columns))]).format(*df.columns),
+        seperator,
+        *["|".join([format_str for _ in range(len(df.columns))]).format(*row.values) for _, row in df.iterrows()],
+        seperator,
+    ]
+    return df_output_lines
+
+
 
 def find_newest_obj_dir(search_dir: str, obj_dir_fmt: str):
     """
@@ -255,7 +494,8 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
         }
 
 
-        parser.add_argument('-a', '--fpga_arch_conf_path', help ="path to config file containing coffe FPGA arch information", type=str, default= None)
+        parser.add_argument('-f', '--fpga_arch_conf_path', help ="path to config file containing coffe FPGA arch information", type=str, default= None)
+        parser.add_argument('-hb', '--hb_flows_conf_path', type=float, default=None, help="top level hardblock flows config file, this specifies all hardblocks and asic flows used")
         parser.add_argument('-n', '--no_sizing', help="don't perform transistor sizing", action='store_true')
         parser.add_argument('-o', '--opt_type', type=str, choices=["global", "local"], default = default_arg_vals["opt_type"], help="choose optimization type")
         parser.add_argument('-s', '--initial_sizes', type=str, default = default_arg_vals["initial_sizes"], help="path to initial transistor sizes")
@@ -264,24 +504,29 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
         parser.add_argument('-d', '--delay_opt_weight', type=int, default = default_arg_vals["delay_opt_weight"], help="delay optimization weight")
         parser.add_argument('-i', '--max_iterations', type=int, default = default_arg_vals["max_iterations"] ,help="max FPGA sizing iterations")
         parser.add_argument('-hi', '--size_hb_interfaces', type=float, default=default_arg_vals["size_hb_interfaces"], help="perform transistor sizing only for hard block interfaces")
-        #arguments for ASIC flow 
-        parser.add_argument('-ho',"--hardblock_only",help="run only a single hardblock through the asic flow", action='store_true',default=False)
-        parser.add_argument('-g',"--gen_hb_scripts",help="generates all hardblock scripts which can be run by a user",action='store_true',default=False)
-        parser.add_argument('-p',"--parallel_hb_flow",help="runs the hardblock flow for current parameter selection in a parallel fashion",action='store_true',default=False)
-        parser.add_argument('-r',"--parse_pll_hb_flow",help="parses the hardblock flow from previously generated results",action='store_true',default=False)
-
         # quick mode is disabled by default. Try passing -q 0.03 for 3% minimum improvement
         parser.add_argument('-q', '--quick_mode', type=float, default=-1.0, help="minimum cost function improvement for resizing")
+        
+                
+        #arguments for ASIC flow 
+        # parser.add_argument('-ho',"--hardblock_only",help="run only a single hardblock through the asic flow", action='store_true',default=False)
+        # parser.add_argument('-g',"--gen_hb_scripts",help="generates all hardblock scripts which can be run by a user",action='store_true',default=False)
+        # parser.add_argument('-p',"--parallel_hb_flow",help="runs the hardblock flow for current parameter selection in a parallel fashion",action='store_true',default=False)
+        # parser.add_argument('-r',"--parse_pll_hb_flow",help="parses the hardblock flow from previously generated results",action='store_true',default=False)
+
+
 
     #   _______    ___ ___     _   ___  ___ ___ 
     #  |__ /   \  |_ _/ __|   /_\ | _ \/ __/ __|
     #   |_ \ |) |  | | (__   / _ \|   / (_ \__ \
     #  |___/___/  |___\___| /_/ \_\_|_\\___|___/
     if "ic_3d" in parsed_args.subtools:
-        parser.add_argument('-p', '--plot_spice', help="takes the ubump output.lis file and plots single run values, is used for manual spice editing, does not write spice", action="store_true")
-        parser.add_argument('-t', '--tsv_model', help="performs tsv modeling", action="store_true")
-        parser.add_argument('-e', '--buffer_param_dse', help="sweeps parameters for buffer chain wire load, plots results", action="store_true")
-        parser.add_argument('-c', '--input_config', help="top level input config file", type=str, default=None)
+        parser.add_argument('-d', '--debug_spice', help="takes in directory(ies) named according to tile of spice sim, runs sim, opens waveforms and param settings for debugging", nargs="*", type=str, default= None)
+        parser.add_argument('-p', '--pdn_modeling', help="performs pdn modeling", action="store_true")
+        parser.add_argument('-b', '--buffer_dse', help="brute forces the user provided range of stage ratio and number of stages for buffer sizing", action="store_true")
+        parser.add_argument('-s', '--buffer_sens_study', help="sweeps parameters for buffer chain wire load, plots results", action="store_true")
+
+        parser.add_argument('-c', '--input_config_path', help="top level input config file", type=str, default=None)
     
     args = parser.parse_args()
     return args, gen_arg_keys, default_arg_vals
@@ -308,17 +553,20 @@ def init_structs_top(args: argparse.Namespace, gen_arg_keys: List[str], default_
             # We only want the parameters relevant to the subtool we're running (exclude top level args)
             # If one wanted to exclude other subtool args they could do it here
             if k_cli not in gen_arg_keys:
-                for k_conf, v_conf in top_conf[subtool].items():
-                    if k_conf == k_cli:
-                        # If the cli key is not a default value or None/False AND cli key is not in the cli default values dictionary then we will use the cli value
-                        if v_cli != None and v_cli != False and v_cli != default_arg_vals[k_cli]:
-                            result_conf[k_conf] = v_cli
-                        else:
-                            result_conf[k_conf] = v_conf
-                # if the cli key was not loaded into result config 
-                # meaning it didnt exist in config file, we use whatever value was in cli
-                if k_cli not in result_conf.keys():
-                    result_conf[k_cli] = v_cli 
+                if args.top_config_path != None:
+                    for k_conf, v_conf in top_conf[subtool].items():
+                        if k_conf == k_cli:
+                            # If the cli key is not a default value or None/False AND cli key is not in the cli default values dictionary then we will use the cli value
+                            if v_cli != None and v_cli != False and v_cli != default_arg_vals[k_cli]:
+                                result_conf[k_conf] = v_cli
+                            else:
+                                result_conf[k_conf] = v_conf
+                    # if the cli key was not loaded into result config 
+                    # meaning it didnt exist in config file, we use whatever value was in cli
+                    if k_cli not in result_conf.keys():
+                        result_conf[k_cli] = v_cli 
+                else:
+                    result_conf[k_cli] = v_cli
         subtool_confs[subtool] = result_conf
 
     # Before this function make sure all of the parameters have been defined in the dict with default values if not specified
@@ -432,7 +680,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
                 print("\tTiming & Power: Synopsys PrimeTime")
                 # If custom flow is enabled there should only be a single config file
                 assert len(asic_dse_conf["flow_config_paths"]) == 1, "ERROR: Custom flow mode requires a single config file"
-                custom_asic_flow_settings = load_params(clean_path(asic_dse_conf["flow_config_paths"][0]))
+                custom_asic_flow_settings = load_hb_params(clean_path(asic_dse_conf["flow_config_paths"][0]))
 
             elif asic_dse_conf["flow_mode"] == "hammer":
                 custom_asic_flow_settings = None
@@ -513,19 +761,516 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
 
     return high_lvl_settings
 
-
 def init_coffe_structs(coffe_conf: Dict[str, Any]):
-    pass
+    fpga_arch_conf = load_arch_params(clean_path(coffe_conf["fpga_arch_conf_path"]))
+    hb_flows_conf =  parse_yml_config(coffe_conf["hb_flows_conf_path"])
+    ###################### SETTING UP ASIC TOOL ARGS FOR HARDBLOCKS ######################
+    # Build up the cli args used for calling the asic-dse tool
+    asic_dse_cli_args_base = {}        
+
+    # Asic flow args (non design specific) that can be passed from hb_flows_conf
+    for k, v in hb_flows_conf.items():
+        # if key is not hardblocks, then it should be part of asic_dse cli args
+        if k != "hardblocks":
+            asic_dse_cli_args_base[k] = v
+
+    hardblocks = []
+    # if user did not specify any hardblocks in config then don't use any
+    if "hardblocks" in hb_flows_conf.keys():
+        hb_confs = [ parse_yml_config(hb_flow_conf["hb_config_path"]) for hb_flow_conf in hb_flows_conf["hardblocks"] ]
+        for hb_conf in hb_confs:
+            # pray this is pass by copy not reference
+            asic_dse_cli_args = { **asic_dse_cli_args_base }
+            asic_dse_cli_args["flow_config_paths"] = hb_conf["flow_config_paths"]
+            asic_dse_cli = init_dataclass(rg_ds.AsicDseCLI, asic_dse_cli_args)
+            hb_inputs = {
+                "asic_dse_cli": asic_dse_cli
+            }
+            hardblocks.append( init_dataclass(rg_ds.Hardblock, hb_conf, hb_inputs) )
+    else:
+        hardblocks = None
+    ###################### SETTING UP ASIC TOOL ARGS FOR HARDBLOCKS ######################
+    # At this point we have dicts representing asic_dse cli args we need to run for each fpga hardblock    
+    coffe_inputs = {
+        # Get arch name from the input arch filename
+        "arch_name" : os.path.basename(os.path.splitext(coffe_conf["fpga_arch_conf_path"])[0]),
+        "fpga_arch_conf": fpga_arch_conf,
+        "hardblocks": hardblocks,
+    }
+    coffe_info = init_dataclass(rg_ds.Coffe, coffe_conf, coffe_inputs)
+    return coffe_info
 
 
 
-def init_3d_ic_structs(ic_3d_conf: Dict[str, Any]):
-    pass
+def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
 
+    cli_arg_inputs = {}
+    for k, v in ic_3d_conf.items():
+        if k in rg_ds.Ic3dCLI.__dataclass_fields__:
+            cli_arg_inputs[k] = v
+    cli_args = init_dataclass(rg_ds.Ic3dCLI, cli_arg_inputs)
+
+    # TODO update almost all the parsing in this function
+    ic_3d_conf = parse_yml_config(ic_3d_conf["input_config_path"])
+    # check that inputs are in proper format (all metal layer lists are of same length)
+    for process_info in ic_3d_conf["process_infos"]:
+        if not (all(length == process_info["mlayers"] for length in [len(v) for v in process_info["mlayer_lists"].values()])\
+                and all(length == process_info["mlayers"] for length in [len(v) for v in process_info["via_lists"].values()])
+                # and len(ic_3d_conf["design_info"]["pwr_rail_info"]["mlayer_dist"]) == process_info["mlayers"]
+                ):
+            raise ValueError("All metal layer and via lists must be of the same length (mlayers)")
+    # Load in process information from yaml
+    process_infos = [
+        rg_ds.ProcessInfo(
+            name=process_info["name"],
+            num_mlayers=process_info["mlayers"],
+            contact_poly_pitch=process_info["contact_poly_pitch"],
+            # min_width_tx_area=process_info["min_width_tx_area"],
+            # tx_dims=process_info["tx_dims"],
+            mlayers=[
+                rg_ds.MlayerInfo(
+                    idx=layer,
+                    wire_res_per_um=process_info["mlayer_lists"]["wire_res_per_um"][layer],
+                    wire_cap_per_um=process_info["mlayer_lists"]["wire_cap_per_um"][layer],
+                    via_res=process_info["via_lists"]["via_res"][layer],
+                    via_cap=process_info["via_lists"]["via_cap"][layer],
+                    via_pitch=process_info["via_lists"]["via_pitch"][layer],
+                    pitch=process_info["mlayer_lists"]["pitch"][layer],
+                    height=process_info["mlayer_lists"]["hcu"][layer],
+                    width=process_info["mlayer_lists"]["wcu"][layer],
+                    t_barrier=process_info["mlayer_lists"]["t_barrier"][layer],
+                ) for layer in range(process_info["mlayers"])
+            ],
+            via_stack_infos = [
+                rg_ds.ViaStackInfo(
+                    mlayer_range = via_stack["mlayer_range"],
+                    res = via_stack["res"],
+                    height = via_stack["height"],
+                    # Using the average of the metal layer cap per um for the layers used in via stack (this would assume parallel plate cap as much as metal layers so divide by 2)
+                    # This should be a conservative estimate with a bit too much capacitance
+                    avg_mlayer_cap_per_um = (sum(process_info["mlayer_lists"]["wire_cap_per_um"][via_stack["mlayer_range"][0]:via_stack["mlayer_range"][1]])/len(process_info["mlayer_lists"]["wire_cap_per_um"][via_stack["mlayer_range"][0]:via_stack["mlayer_range"][1]]))*0.5,
+                )
+                for via_stack in process_info["via_stacks"]
+            ],
+            tx_geom_info = rg_ds.TxGeometryInfo( 
+                min_tx_contact_width = float(process_info["geometry_info"]["min_tx_contact_width"]),
+                tx_diffusion_length = float(process_info["geometry_info"]["tx_diffusion_length"]),
+                gate_length = float(process_info["geometry_info"]["gate_length"]),
+                min_width_tx_area = float(process_info["geometry_info"]["min_width_tx_area"]),
+            )
+        ) for process_info in ic_3d_conf["process_infos"]
+    ]
+    
+
+    stage_range = [i for i in range(*ic_3d_conf["d2d_buffer_dse"]["stage_range"])]
+    fanout_range = [i for i in range(*ic_3d_conf["d2d_buffer_dse"]["stage_ratio_range"])]
+    cost_fx_exps = {
+        "delay": ic_3d_conf["d2d_buffer_dse"]["cost_fx_exps"]["delay"],
+        "area": ic_3d_conf["d2d_buffer_dse"]["cost_fx_exps"]["area"],
+        "power": ic_3d_conf["d2d_buffer_dse"]["cost_fx_exps"]["power"],
+    }
+    
+    # check that inputs are in proper format (all metal layer lists are of same length)
+    if not (all(length == len(ic_3d_conf["package_info"]["ubump"]["sweeps"]["pitch"]) for length in [len(v) for v in ic_3d_conf["package_info"]["ubump"]["sweeps"].values()])):
+        raise ValueError("All ubump parameter lists must have the same length")
+    
+    ubump_infos = [
+        rg_ds.SolderBumpInfo(
+            pitch=ic_3d_conf["package_info"]["ubump"]["sweeps"]["pitch"][idx],
+            diameter=float(ic_3d_conf["package_info"]["ubump"]["sweeps"]["pitch"][idx])/2,
+            height=ic_3d_conf["package_info"]["ubump"]["sweeps"]["height"][idx],
+            cap=ic_3d_conf["package_info"]["ubump"]["sweeps"]["cap"][idx],
+            res=ic_3d_conf["package_info"]["ubump"]["sweeps"]["res"][idx],
+            tag="ubump",
+        ) for idx in range(len(ic_3d_conf["package_info"]["ubump"]["sweeps"]["pitch"]))
+    ]
+
+
+    design_info = rg_ds.DesignInfo(
+        srams=[
+            rg_ds.SRAMInfo(
+                width=float(macro_info["dims"][0]),
+                height=float(macro_info["dims"][1]),
+            ) for macro_info in ic_3d_conf["design_info"]["macro_infos"]
+        ],
+        # nocs = [
+        #     NoCInfo(
+        #         area = float(noc_info["area"]),
+        #         rtl_params = noc_info["rtl_params"],
+        #         # flit_width = int(noc_info["flit_width"])
+        #     ) for noc_info in ic_3d_conf["design_info"]["noc_infos"]
+        # ],
+        logic_block = rg_ds.HwModuleInfo(
+            name = "logic_block",
+            area = float(ic_3d_conf["design_info"]["logic_block_info"]["area"]),
+            # dims = ic_3d_conf["design_info"]["logic_block_info"]["dims"],
+            width = float(ic_3d_conf["design_info"]["logic_block_info"]["dims"][0]),
+            height = float(ic_3d_conf["design_info"]["logic_block_info"]["dims"][1]),
+        ),
+        process_info=process_info,
+        subckt_libs=rg_ds.SpSubCktLibs(),
+        bot_die_nstages = 1,
+        buffer_routing_mlayer_idx = int(ic_3d_conf["design_info"]["buffer_routing_mlayer_idx"]),
+    )
+
+    esd_rc_params = ic_3d_conf["design_info"]["esd_load_rc_wire_params"]
+    add_wlens = ic_3d_conf["design_info"]["add_wire_lengths"]
+
+    # Other Spice Setup stuff
+    process_data = rg_ds.SpProcessData(
+        global_nodes = {
+            "gnd": "gnd",
+            "vdd": "vdd"
+        },
+        voltage_info = {
+            "supply_v": "0.7"
+        },
+        driver_info = {
+            **{
+                key : val
+                for stage_idx in range(10)
+                for key, val in {
+                    f"init_Wn_{stage_idx}" : "1",
+                    f"init_Wp_{stage_idx}" : "2"
+                }.items()
+            },
+            "dvr_ic_in_res" : "1m",
+            "dvr_ic_in_cap" : "0.001f",
+        },
+        geometry_info = None, # These are set later
+        tech_info = None
+    )
+
+
+    
+
+    # PDN Setup stuff
+    design_dims = [float(dim) for dim in ic_3d_conf["design_info"]["dims"]]
+
+    pdn_sim_settings = rg_ds.PDNSimSettings()
+    pdn_sim_settings.plot_settings["tsv_grid"] = ic_3d_conf["pdn_sim_settings"]["plot"]["tsv_grid"]
+    pdn_sim_settings.plot_settings["c4_grid"] = ic_3d_conf["pdn_sim_settings"]["plot"]["c4_grid"]
+    pdn_sim_settings.plot_settings["power_region"] = ic_3d_conf["pdn_sim_settings"]["plot"]["power_region"]
+    pdn_sim_settings.plot_settings["pdn_sens_study"] = ic_3d_conf["pdn_sim_settings"]["plot"]["pdn_sens_study"]
+
+    
+    design_pdn = rg_ds.DesignPDN(
+        floorplan=sh.Polygon([(0,0), (0, design_dims[1]), (design_dims[0], design_dims[1]), (design_dims[0], 0)]),
+        power_budget=float(ic_3d_conf["design_info"]["power_budget"]), #W
+        process_info=process_infos[0], # TODO update this to support multi process in same run 
+        supply_voltage=float(ic_3d_conf["design_info"]["supply_voltage"]), #V
+        ir_drop_budget=float(ic_3d_conf["design_info"]["ir_drop_budget"]), #mV 
+        fpga_info=rg_ds.FPGAInfo(
+            sector_info=rg_ds.SectorInfo(), # unitized SectorInfo class to be calculated from floorplan and resource info
+            sector_dims = ic_3d_conf["design_info"]["fpga_info"]["sector_dims"],
+            lbs = rg_ds.FPGAResource(
+                total_num = int(ic_3d_conf["design_info"]["fpga_info"]["lbs"]["total_num"]),
+                abs_area = float(ic_3d_conf["design_info"]["fpga_info"]["lbs"]["abs_area"]),
+                rel_area = int(ic_3d_conf["design_info"]["fpga_info"]["lbs"]["rel_area"]),
+                abs_width = float(ic_3d_conf["design_info"]["fpga_info"]["lbs"]["abs_width"]),
+                abs_height = float(ic_3d_conf["design_info"]["fpga_info"]["lbs"]["abs_height"]),
+            ),
+            dsps = rg_ds.FPGAResource(
+                total_num = int(ic_3d_conf["design_info"]["fpga_info"]["dsps"]["total_num"]),
+                abs_area = float(ic_3d_conf["design_info"]["fpga_info"]["dsps"]["abs_area"]),
+                rel_area = int(ic_3d_conf["design_info"]["fpga_info"]["dsps"]["rel_area"]),
+            ),
+            brams = rg_ds.FPGAResource(
+                total_num = int(ic_3d_conf["design_info"]["fpga_info"]["brams"]["total_num"]),
+                abs_area = float(ic_3d_conf["design_info"]["fpga_info"]["brams"]["abs_area"]),
+                rel_area = int(ic_3d_conf["design_info"]["fpga_info"]["brams"]["rel_area"]),
+            )
+        ),
+        pwr_rail_info=rg_ds.PwrRailInfo(
+            # pitch_fac=float(ic_3d_conf["design_info"]["pwr_rail_info"]["pitch_fac"]),
+            mlayer_dist = [float(ic_3d_conf["design_info"]["pwr_rail_info"]["mlayer_dist"]["bot"]),float(ic_3d_conf["design_info"]["pwr_rail_info"]["mlayer_dist"]["top"])],
+            num_mlayers = int(ic_3d_conf["design_info"]["pwr_rail_info"]["num_mlayers"]),
+        ),
+        tsv_info=rg_ds.TSVInfo(
+            single_tsv=rg_ds.SingleTSVInfo(
+                height=int(ic_3d_conf["package_info"]["tsv"]["height"]), #um
+                diameter=int(ic_3d_conf["package_info"]["tsv"]["diameter"]), #um
+                pitch=int(ic_3d_conf["package_info"]["tsv"]["pitch"]), #um
+                resistivity=float(ic_3d_conf["package_info"]["tsv"]["resistivity"]), #Ohm*um (1.72e-8 * 1e6)
+                keepout_zone=int(ic_3d_conf["package_info"]["tsv"]["keepout_zone"]), # um     
+                resistance=float(ic_3d_conf["package_info"]["tsv"]["resistance"]), #Ohm
+            ),
+            area_bounds = ic_3d_conf["design_info"]["pwr_placement"]["tsv_area_bounds"],
+            placement_setting = ic_3d_conf["design_info"]["pwr_placement"]["tsv_grid"],
+            koz_grid=None,
+            tsv_grid=None,
+        ),
+        c4_info=rg_ds.C4Info(
+            rg_ds.SingleC4Info(
+                height=int(ic_3d_conf["package_info"]["c4"]["height"]), #um
+                diameter=int(ic_3d_conf["package_info"]["c4"]["diameter"]), #um
+                pitch=int(ic_3d_conf["package_info"]["c4"]["pitch"]), #um
+                resistance=float(ic_3d_conf["package_info"]["c4"]["resistance"]), #Ohm
+                area=None,
+            ),                
+            placement_setting = ic_3d_conf["design_info"]["pwr_placement"]["c4_grid"],
+            margin=int(ic_3d_conf["package_info"]["c4"]["margin"]), #um
+            grid=None,       
+        ),
+        ubump_info=rg_ds.UbumpInfo(
+            single_ubump=rg_ds.SingleUbumpInfo(
+                height=float(ic_3d_conf["package_info"]["ubump"]["height"]), #um
+                diameter=float(ic_3d_conf["package_info"]["ubump"]["diameter"]), #um
+                pitch=float(ic_3d_conf["package_info"]["ubump"]["pitch"]), #um
+                # resistivity=float(ic_3d_conf["package_info"]["ubump"]["resistivity"]), #Ohm*um (1.72e-8 * 1e6)    
+            ),
+            margin=float(ic_3d_conf["package_info"]["ubump"]["margin"]),
+            grid=None,
+        )
+    )
+
+    
+
+
+    ic3d_inputs = {
+        # BUFFER DSE STUFF
+        "design_info": design_info,
+        "process_infos": process_infos,
+        "ubump_infos": ubump_infos,
+        # TODO put these into design info
+        "esd_rc_params": esd_rc_params,
+        "add_wlens" : add_wlens,
+        # TODO put these somewhere better
+        "stage_range": stage_range,
+        "fanout_range": fanout_range,
+        "cost_fx_exps": cost_fx_exps,
+        # previous globals from 3D IC TODO fix this to take required params from top conf
+        # remove all these bs dataclasses I don't need
+        "spice_info": rg_ds.SpInfo(),
+        "process_data": process_data,
+        "driver_model_info": rg_ds.DriverSpModel(),
+        "pn_opt_model": rg_ds.SpPNOptModel(),
+        "res": rg_ds.Regexes(),
+        "sp_sim_settings": rg_ds.SpGlobalSimSettings(),
+        # PDN STUFF
+        "pdn_sim_settings": pdn_sim_settings,
+        "design_pdn": design_pdn,
+        "cli_args": cli_args,
+    }
+
+
+
+    ic_3d_info = init_dataclass(rg_ds.Ic3d, ic3d_inputs)
+    return ic_3d_info
 
 
 # COMMENTED BELOW RUN_OPTS (args) as they are not used
-def load_params(filename): #,run_options):
+def load_arch_params(filename): #,run_options):
+    # This is the dictionary of parameters we expect to find
+    #No defaults for ptn or run settings
+    arch_params = {
+        'W': -1,
+        'L': -1,
+        'Fs': -1,
+        'N': -1,
+        'K': -1,
+        'I': -1,
+        'Fcin': -1.0,
+        'Fcout': -1.0,
+        'Or': -1,
+        'Ofb': -1,
+        'Fclocal': -1.0,
+        'Rsel': "",
+        'Rfb': "",
+        'transistor_type': "",
+        'switch_type': "",
+        'use_tgate': False,
+        'use_finfet': False,
+        'memory_technology': "SRAM",
+        'enable_bram_module': 0,
+        'ram_local_mux_size': 25,
+        'read_to_write_ratio': 1.0,
+        'vdd': -1.0,
+        'vsram': -1.0,
+        'vsram_n': -1.0,
+        'vclmp': 0.653,
+        'vref': 0.627,
+        'vdd_low_power': 0.95,
+        'number_of_banks': 1,
+        'gate_length': -1,
+        'rest_length_factor': -1,
+        'min_tran_width': -1,
+        'min_width_tran_area': -1,
+        'sram_cell_area': -1,
+        'trans_diffusion_length' : -1,
+        'model_path': "",
+        'model_library': "",
+        'metal' : [],
+        'row_decoder_bits': 8,
+        'col_decoder_bits': 1,
+        'conf_decoder_bits' : 5,
+        'sense_dv': 0.3,
+        'worst_read_current': 1e-6,
+        'SRAM_nominal_current': 1.29e-5,
+        'MTJ_Rlow_nominal': 2500,
+        'MTJ_Rhigh_nominal': 6250,
+        'MTJ_Rlow_worstcase': 3060,
+        'MTJ_Rhigh_worstcase': 4840,
+        'use_fluts': False,
+        'independent_inputs': 0,
+        'enable_carry_chain': 0,
+        'carry_chain_type': "ripple",
+        'FAs_per_flut':2,
+        'arch_out_folder': "None",
+        'gen_routing_metal_pitch': 0.0,
+        'gen_routing_metal_layers': 0,
+    }
+    
+    #top level param types
+    param_type_names = ["fpga_arch_params","asic_hardblock_params"]
+    hb_sub_param_type_names = ["hb_run_params", "ptn_params"]
+    #get values from yaml file
+    with open(filename, 'r') as file:
+        param_dict = yaml.safe_load(file)
+
+    #check to see if the input settings file is a subset of defualt params
+    for key in arch_params.keys():
+        if(key not in param_dict["fpga_arch_params"].keys()):
+            #assign default value if key not found 
+            param_dict["fpga_arch_params"][key] = arch_params[key]
+
+    #load defaults into unspecified values
+    for k,v in param_dict.items():
+        #if key exists in arch_dict
+        if(k in param_type_names):
+            for k1,v1 in v.items():
+                #parse arch params
+                if(k1 in arch_params):
+                    if(v1 == None):
+                        v[k1] = arch_params[k1]
+                else:
+                    print("ERROR: Found invalid parameter (" + k1 + ") in " + filename)
+                    sys.exit()
+
+    # TODO make this cleaner, should probably just have a data structure containing all expected data types for all params
+    for param,value in zip(list(param_dict["fpga_arch_params"]),list(param_dict["fpga_arch_params"].values())):
+        #architecture parameters
+        if param == 'W':
+            param_dict["fpga_arch_params"]['W'] = int(value)
+        elif param == 'L':
+            param_dict["fpga_arch_params"]['L'] = int(value)
+        elif param == 'Fs':
+            param_dict["fpga_arch_params"]['Fs'] = int(value)
+        elif param == 'N':
+            param_dict["fpga_arch_params"]['N'] = int(value)
+        elif param == 'K':
+            param_dict["fpga_arch_params"]['K'] = int(value)
+        elif param == 'I':
+            param_dict["fpga_arch_params"]['I'] = int(value)
+        elif param == 'Fcin':
+            param_dict["fpga_arch_params"]['Fcin'] = float(value)
+        elif param == 'Fcout':
+            param_dict["fpga_arch_params"]['Fcout'] = float(value) 
+        elif param == 'Or':
+            param_dict["fpga_arch_params"]['Or'] = int(value)
+        elif param == 'Ofb':
+            param_dict["fpga_arch_params"]['Ofb'] = int(value)
+        elif param == 'Fclocal':
+            param_dict["fpga_arch_params"]['Fclocal'] = float(value)
+        elif param == 'Rsel':
+            param_dict["fpga_arch_params"]['Rsel'] = str(value)
+        elif param == 'Rfb':
+            param_dict["fpga_arch_params"]['Rfb'] = str(value)
+        elif param == 'row_decoder_bits':
+            param_dict["fpga_arch_params"]['row_decoder_bits'] = int(value)
+        elif param == 'col_decoder_bits':
+            param_dict["fpga_arch_params"]['col_decoder_bits'] = int(value)
+        elif param == 'number_of_banks':
+            param_dict["fpga_arch_params"]['number_of_banks'] = int(value)
+        elif param == 'conf_decoder_bits':
+            param_dict["fpga_arch_params"]['conf_decoder_bits'] = int(value) 
+        #process technology parameters
+        elif param == 'transistor_type':
+            param_dict["fpga_arch_params"]['transistor_type'] = str(value)
+            if value == 'finfet':
+                param_dict["fpga_arch_params"]['use_finfet'] = True
+        elif param == 'switch_type':  
+            param_dict["fpga_arch_params"]['switch_type'] = str(value)        
+            if value == 'transmission_gate':
+                param_dict["fpga_arch_params"]['use_tgate'] = True
+        elif param == 'memory_technology':
+            param_dict["fpga_arch_params"]['memory_technology'] = str(value)
+        elif param == 'vdd':
+            param_dict["fpga_arch_params"]['vdd'] = float(value)
+        elif param == 'vsram':
+            param_dict["fpga_arch_params"]['vsram'] = float(value)
+        elif param == 'vsram_n':
+            param_dict["fpga_arch_params"]['vsram_n'] = float(value)
+        elif param == 'gate_length':
+            param_dict["fpga_arch_params"]['gate_length'] = int(value)
+        elif param == 'sense_dv':
+            param_dict["fpga_arch_params"]['sense_dv'] = float(value)
+        elif param == 'vdd_low_power':
+            param_dict["fpga_arch_params"]['vdd_low_power'] = float(value)
+        elif param == 'vclmp':
+            param_dict["fpga_arch_params"]['vclmp'] = float(value)
+        elif param == 'read_to_write_ratio':
+            param_dict["fpga_arch_params"]['read_to_write_ratio'] = float(value)
+        elif param == 'enable_bram_module':
+            param_dict["fpga_arch_params"]['enable_bram_module'] = int(value)
+        elif param == 'ram_local_mux_size':
+            param_dict["fpga_arch_params"]['ram_local_mux_size'] = int(value)
+        elif param == 'use_fluts':
+            param_dict["fpga_arch_params"]['use_fluts'] = bool(value)
+        elif param == 'independent_inputs':
+            param_dict["fpga_arch_params"]['independent_inputs'] = int(value)
+        elif param == 'enable_carry_chain':
+            param_dict["fpga_arch_params"]['enable_carry_chain'] = int(value)
+        elif param == 'carry_chain_type':
+            param_dict["fpga_arch_params"]['carry_chain_type'] = value
+        elif param == 'FAs_per_flut':
+            param_dict["fpga_arch_params"]['FAs_per_flut'] = int(value)
+        elif param == 'vref':
+            param_dict["fpga_arch_params"]['ref'] = float(value)
+        elif param == 'worst_read_current':
+            param_dict["fpga_arch_params"]['worst_read_current'] = float(value)
+        elif param == 'SRAM_nominal_current':
+            param_dict["fpga_arch_params"]['SRAM_nominal_current'] = float(value)
+        elif param == 'MTJ_Rlow_nominal':
+            param_dict["fpga_arch_params"]['MTJ_Rlow_nominal'] = float(value)
+        elif param == 'MTJ_Rhigh_nominal':
+            param_dict["fpga_arch_params"]['MTJ_Rhigh_nominal'] = float(value)
+        elif param == 'MTJ_Rlow_worstcase':
+            param_dict["fpga_arch_params"]['MTJ_Rlow_worstcase'] = float(value)
+        elif param == 'MTJ_Rhigh_worstcase':
+            param_dict["fpga_arch_params"]['MTJ_Rhigh_worstcase'] = float(value)          
+        elif param == 'rest_length_factor':
+            param_dict["fpga_arch_params"]['rest_length_factor'] = int(value)
+        elif param == 'min_tran_width':
+            param_dict["fpga_arch_params"]['min_tran_width'] = int(value)
+        elif param == 'min_width_tran_area':
+            param_dict["fpga_arch_params"]['min_width_tran_area'] = int(value)
+        elif param == 'sram_cell_area':
+            param_dict["fpga_arch_params"]['sram_cell_area'] = float(value)
+        elif param == 'trans_diffusion_length':
+            param_dict["fpga_arch_params"]['trans_diffusion_length'] = float(value)
+        elif param == 'model_path':
+            param_dict["fpga_arch_params"]['model_path'] = os.path.abspath(value)
+        elif param == 'metal':
+            tmp_list = []
+            for rc_vals in param_dict["fpga_arch_params"]["metal"]:
+                tmp_list.append(tuple(rc_vals))
+            param_dict["fpga_arch_params"]['metal'] = tmp_list
+        elif param == 'model_library':
+            param_dict["fpga_arch_params"]['model_library'] = str(value)
+        elif param == 'arch_out_folder':
+            param_dict["fpga_arch_params"]['arch_out_folder'] = str(value)
+        elif param == 'gen_routing_metal_pitch':
+            param_dict["fpga_arch_params"]['gen_routing_metal_pitch'] = float(value)
+        elif param == 'gen_routing_metal_layers':
+            param_dict["fpga_arch_params"]['gen_routing_metal_layers'] = int(value)
+    
+    # Check architecture parameters to make sure that they are valid
+    coffe_utils.check_arch_params(param_dict["fpga_arch_params"], filename)
+    return param_dict    
+
+# COMMENTED BELOW RUN_OPTS (args) as they are not used
+def load_hb_params(filename): #,run_options):
     # This is the dictionary of parameters we expect to find
     #No defaults for ptn or run settings
     hard_params = {
