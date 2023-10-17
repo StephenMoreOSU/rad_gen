@@ -1,0 +1,34 @@
+
+designs:
+  # base config is the hammer config file which is used as a template for designs which will be swept over
+  # output configs currently written to same directory to the base_config_path
+  - base_config_path: ~/rad_gen/unit_tests/inputs/asic_dse/NoC/configs/vcr_config.yml
+    # These two args are required for each run of hammer flow
+    top_lvl_module: router_wrap_bk
+    # This path contains all RTL except the parameters.v file which will be swept over
+    rtl_dir_path:  ~/rad_gen/unit_tests/inputs/asic_dse/NoC/rtl/src
+    type: "rtl_params"
+    # Path to file containing parameters which we will manipulate to propegate desired values to other parameters
+    base_header_path: ~/rad_gen/unit_tests/inputs/asic_dse/NoC/rtl/parameters.v
+    # Number of parallel asic flow threads being run concurrently Ex. [syn -> par, syn -> par]
+    flow_threads: 2
+    params:
+      {
+        # In the parameters we set the number of message classes to be equal to the number of vcs we want
+        # If parameters can be directly assigned a value they can just have lists
+        ################### THESE SETTINGS WILL RECREATE RESULTS IN FPL'23 PAPER ###################
+        "num_vcs":
+          {
+            # These are the values we want the variable to be swept over
+            "vals": [5, 5, 5],
+            "num_message_classes": [5, 5, 5],
+            "buffer_size": [20, 40, 80],
+            "num_nodes_per_router": [1, 1, 1],
+            "num_dimensions": [2, 2, 2],
+            "flit_data_width": [124, 196, 342]
+          },
+        # We use these variables to print out the parsed values for these parameters to make sure the above settings do what we want 
+        "num_ports": [],
+        "flit_data_width": [],
+        "buffer_size": []
+      }

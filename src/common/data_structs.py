@@ -1,38 +1,519 @@
 from dataclasses import dataclass, field, fields
 import os, sys
+
 import re
-import typing
-from typing import List
+from typing import Pattern, Dict, List, Any, Tuple
+from datetime import datetime
+import logging
 
+from vlsi.hammer.hammer.vlsi.driver import HammerDriver
+
+# IC 3D imports
 import shapely as sh
-
 import plotly.graph_objects as go
 import plotly.subplots as subplots
 import plotly.express as px
-
 import math
 from itertools import combinations
 
 
-def flatten_mixed_list(input_list):
+#  █████╗ ███████╗██╗ ██████╗    ██████╗ ███████╗███████╗
+# ██╔══██╗██╔════╝██║██╔════╝    ██╔══██╗██╔════╝██╔════╝
+# ███████║███████╗██║██║         ██║  ██║███████╗█████╗  
+# ██╔══██║╚════██║██║██║         ██║  ██║╚════██║██╔══╝  
+# ██║  ██║███████║██║╚██████╗    ██████╔╝███████║███████╗
+# ╚═╝  ╚═╝╚══════╝╚═╝ ╚═════╝    ╚═════╝ ╚══════╝╚══════╝
+
+
+@dataclass
+class AsicDseCLI:
+    env_config_path: str = None # path to hammer environment configuration file 
+    design_sweep_config: str = None # Path to design sweep config file 
+    run_mode: str = None # specify if flow is run in "serial" or "parallel" or "gen_scripts"
+    flow_mode: str = None # mode in which asic flow is run "hammer" or "custom" modes
+    top_lvl_module: str = None # top level module of design 
+    hdl_path: str = None # path to directory containing hdl files 
+    flow_config_paths: List[str] = None
+    use_latest_obj_dir: bool = False
+    manual_obj_dir: str = None
+    compile_results: bool = False
+    synthesis: bool = False
+    place_n_route: bool = False
+    primetime: bool = False
+    sram_compiler: bool = False
+    make_build: bool = False
+
+
+@dataclass
+class RadGenCLI:
+    top_config_path: str = None # Optional top config path that can be used to pass cli args to RAD Gen
+    subtools: List[str] = None # Possible subtool strings: "ic_3d" , "asic_dse", "coffe"
+    subtool_cli: Any = None # Options would be the cli classes for each subtool
+
+    no_use_arg_list: List[str] = None # list of arguments which should not be used in the command line interface
+
+    def decode_dataclass_to_cli(self, sys_args: List[str], cmd_str: str, _field: str, obj: Any = None) -> Tuple[str, List[str]]:
+        if obj == None:
+            obj = self
+        val = getattr(obj, _field)
+        if val != None and val != False:
+            # This in a different if statement as it sets up for the next if by converting value to str if its a list
+            if isinstance(val, list):
+                sys_args += [f"--{_field}"] + val
+                val = " ".join(val)
+            
+            # Be careful bools can be positivly evaluated as strings as well so this should be above the str eval
+            if isinstance(val, bool):
+                cmd_str += f" --{_field}"
+                sys_args += [f"--{_field}"]
+            elif isinstance(val, str) or isinstance(val, int) or isinstance(val, float):    
+                cmd_str += f" --{_field} {val}"
+                sys_args += [f"--{_field}", val]
+            else:
+                raise Exception(f"Unsupported type for {_field} in {obj}")
+        return cmd_str, sys_args
+
+    def get_rad_gen_cli_cmd(self, rad_gen_home: str):
+        sys_args = []
+        cmd_str = f"python3 {rad_gen_home}/rad_gen.py"
+        for _field in RadGenCLI.__dataclass_fields__:
+            if _field != "no_use_arg_list":
+                if ("cli" in _field) or ( self.no_use_arg_list != None and ( _field in self.no_use_arg_list ) ):
+                    continue
+                else:
+                    cmd_str, sys_args = self.decode_dataclass_to_cli(sys_args = sys_args, cmd_str = cmd_str, _field = _field)
+        if self.subtool_cli != None:
+            for _field in self.subtool_cli.__dataclass_fields__:
+                if _field != "no_use_arg_list":
+                    if self.no_use_arg_list != None and ( _field in self.no_use_arg_list ):
+                        continue
+                    else:
+                        cmd_str, sys_args = self.decode_dataclass_to_cli(obj = self.subtool_cli, sys_args = sys_args, cmd_str = cmd_str, _field = _field)
+        return cmd_str, sys_args
+
+
+def create_timestamp(fmt_only_flag: bool = False) -> str:
     """
-    Flattens a list with mixed value Ex. ["hello", ["billy","bob"],[["johnson"]]] -> ["hello", "billy","bob","johnson"]
+        Creates a timestamp string in below format
     """
-    # Create flatten list lambda function
-    flat_list = lambda input_list:[element for item in input_list for element in flat_list(item)] if type(input_list) is list else [input_list]
-    # Call lambda function
-    flattened_list = flat_list(input_list)
-    return flattened_list
+    now = datetime.now()
+
+    # Format timestamp
+    timestamp_format = "{year:04}--{month:02}--{day:02}--{hour:02}--{minute:02}--{second:02}--{milliseconds:03}"
+    formatted_timestamp = timestamp_format.format(
+        year=now.year,
+        month=now.month,
+        day=now.day,
+        hour=now.hour,
+        minute=now.minute,
+        second=now.second,
+        milliseconds=int(now.microsecond // 1e3)
+    )
+    dt_format = "%Y--%m--%d--%H--%M--%S--%f"
+
+    retval = dt_format if fmt_only_flag else formatted_timestamp
+    return retval
+
+
+@dataclass
+class VLSIMode:
+    """ 
+        Mode settings associated with running VLSI flow
+    """
+    run_mode: str = None # specify if flow is run in serial or parallel for sweeps 
+    flow_mode: str = None # mode in which asic flow is run "hammer" or "custom" modes
+    enable: bool = False # run VLSI flow
+    config_pre_proc: bool = False # Don't create a modified config file for this design
 
 @dataclass 
-class regexes:
-    wspace_re = re.compile(r"\s+",re.MULTILINE)
-    int_re = re.compile(r"[0-9]+", re.MULTILINE)
-    # sp_del_grab_info_re = re.compile("([^\s=]+)=\s*(-?[\d\.]+)([a-z]+)\s+([^\s=]+)=\s*(-?[\d\.]+)([a-z]+)\s+([^\s=]+)=\s*(-?[\d\.]+)([a-z]+)",re.MULTILINE)
-    sp_del_grab_info_re = re.compile(r"^.(?:(?P<var1>[^\s=]+)=\s*(?P<val1>-?[\d.]+)(?P<unit1>[a-z]+))?\s*(?:(?P<var2>[^\s=]+)=\s*(?P<val2>-?[\d.]+)(?P<unit2>[a-z]+))?\s*(?:(?P<var3>[^\s=]+)=\s*(?P<val3>-?[\d.]+)(?P<unit3>[a-z]+))?",re.MULTILINE)
-    sp_grab_print_vals_re = re.compile(r"^x.*?^y",re.DOTALL | re.MULTILINE) 
-    #
-    sp_grab_inv_pn_vals_re : re.Pattern = re.compile(r"\s+\.param\s+(?P<name>inv_w[np]_\d+)\s+=\s+(?P<value>\d+\.\d+)\w*")
+class RADGenMode:
+    """ 
+    The mode in which the RADGen tool is running
+    Ex. 
+     - Sweep mode
+     - Single design mode
+    """
+    sweep_gen: bool = False # run sweep config, header, script generation
+    result_parse: bool = False # parse results 
+    vlsi_flow: VLSIMode = field(default_factory = VLSIMode)# modes for running VLSI flow
+
+
+@dataclass
+class SRAMCompilerSettings:
+    """
+        Paths related to SRAM compiler outputs
+        If not specified in the top level config file, will use default output structure (sent to rad gen input designs directory)
+    """
+    rtl_out_path: str = None # os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
+    config_out_path: str = None #os.path.expanduser("~/rad_gen/input_designs/sram/configs/compiler_outputs")
+    
+
+
+@dataclass
+class StdCellTechInfo:
+    """
+        Paths and PDK information for the current rad gen run
+    """
+    name: str = "asap7" # name of technology lib
+    cds_lib: str = "asap7_TechLib" # name of technology library in cdslib directory, contains views for stdcells, etc needed in design
+    sram_lib_path: str = None # path to PDK sram library containing sub dirs named lib, lef, gds with each SRAM.
+    # Process settings in RADGen settings as we may need to perform post processing (ASAP7)
+    pdk_rundir_path: str = None # path to PDK run directory which allows Cadence Virtuoso to run in it
+
+
+@dataclass
+class VLSISweepInfo:
+    params: Dict #[Dict[str, Any]] 
+    
+
+@dataclass 
+class SRAMSweepInfo:
+    base_rtl_path: str # path to RTL file which will be modified by SRAM scripts to generate SRAMs, its an SRAM instantiation (supporting dual and single ports with ifdefs) wrapped in registers
+    """
+        List of dicts each of which contain the following elements:
+        - rw_ports -> number of read/write ports
+        - w -> sram width
+        - d -> sram depth
+    """
+    mems: List[Dict[str, int]] # Contains sram information to be created from existing SRAM macros using mappers
+    # parameters for explicit macro generation
+    rw_ports: List[int]
+    widths: List[int]
+    depths: List[int]
+
+@dataclass
+class RTLSweepInfo:
+    """
+        Contains information for sweeping designs 
+    """
+    base_header_path: str # path to  containing RTL header file for parameter sweeping
+    """
+        parameters to sweep, each [key, dict] pair contains the following elements:
+        - key = name of parameter to sweep
+        - dict elements:
+            - vals -> sweep values for parameter defined in "key"
+            - <arbirary_additional_param_values> -> sweep values of same length of "vals" for any additional parameters which need to be swept at the same time
+    """
+    params: Dict #[Dict[str, Any]] 
+
+# TODO add validators
+@dataclass
+class DesignSweepInfo:
+    """
+        Information specific to a single sweep of design parameters, this corresponds to a single design in sweep config file
+        Ex. If sweeping clock freq in terms of [0, 1, 2] this struct contains information about that sweep
+    """
+    top_lvl_module: str # top level module of design
+    base_config_path: str # path to hammer config of design
+    rtl_dir_path: str # path to directory containing rtl files for design, files can be in subdirectories
+    type: str = None # options are "sram", "rtl_params" or "vlsi_params" TODO this could be instead determined by searching through parameters acceptable to hammer IR
+    flow_threads: int = 1 # number of vlsi runs which will be executed in parallel (in terms of sweep parameters)
+    type_info: Any = None # contains either RTLSweepInfo or SRAMSweepInfo depending on sweep type
+
+
+@dataclass 
+class ASICFlowSettings:
+    """ 
+        ASIC flow related design specific settings relevant the following catagories:
+        - paths
+        - flow stage information
+    """
+    # Hammer Driver Path
+    hammer_cli_driver_path: str = None # path to hammer driver
+    hammer_driver: HammerDriver = None # hammer settings
+    # Replace design_config with hammer_driver 
+    #design_config : Dict[str, Any] = None # Hammer IR parsable configuration info
+    
+    # Paths
+    hdl_path: str = None # path to directory containing hdl files
+    config_path: str = None # path to hammer IR parsable configuration file
+    top_lvl_module: str = None # top level module of design
+    obj_dir_path: str = None # hammer object directory containing subdir for each flow stage
+    # use_latest_obj_dir: bool # looks for the most recently created obj directory associated with design (TODO & design parameters) and use this for the asic run
+    # manual_obj_dir: str # specify a specific obj directory to use for the asic run (existing or non-existing)
+    # Stages being run
+    run_sram: bool = False
+    run_syn: bool = False
+    run_par: bool = False
+    run_pt: bool = False
+    make_build: bool = False # Use the Hammer provided make build to manage asic flow execution
+    # flow stages
+    flow_stages: dict = field(default_factory = lambda: {
+        "sram": {
+            "name": "sram",
+            "run": False,
+        },
+        "syn": {
+            "name": "syn",
+            "run": False,
+            "tool": "cadence",
+        },
+        "par": {
+            "name": "par",
+            "run": False,
+            "tool": "cadence",
+        },
+        "pt": {
+            "name": "pt",
+            "run": False,
+            "tool": "synopsys",
+        },
+    })
+
+    def __post_init__(self):
+        if self.hammer_cli_driver_path is None:
+            # the hammer-vlsi exec should point to default cli driver in hammer repo if everything installed correctly
+            self.hammer_cli_driver_path = "hammer-vlsi"
+        # else: 
+        #     self.hammer_cli_driver_path = f"python3 {self.hammer_cli_driver_path}"
+
+
+@dataclass
+class ScriptInfo:
+    """
+        Filenames of various scripts used in RAD Gen
+    """
+    gds_to_area_fname: str = "get_area" # name for gds to area script & output csv file
+    virtuoso_setup_path: str = None
+
+@dataclass
+class ReportInfo:
+    """
+        Information relevant to report information and filenames 
+    """
+    # name out output directory reports are sent to
+    report_dir: str = "reports"
+    # subdir to report_dir for additional information which parsers haven't been written for yet
+    unparse_report_dir: str = "unparse_reports"
+    gds_area_fname : str = "gds_area.rpt"
+    power_lookup : dict = field(default_factory = lambda: {
+        "W": float(1),
+        "mW": float(1e-3),
+        "uW": float(1e-6),
+        "nW": float(1e-9),
+        "pW": float(1e-12)
+    })
+    power_display_unit = "mW"
+    timing_display_unt = "ps"
+    area_display_unit = "um^2"
+
+
+@dataclass
+class Regexes:
+    """
+        Stores all regexes used in various placed in RAD Gen, its more convenient to have them all in one place
+    """
+    wspace_re: Pattern = re.compile(r"\s+")
+    find_params_re: Pattern = re.compile(f"parameter\s+\w+(\s|=)+.*;")
+    find_defines_re: Pattern = re.compile(f"`define\s+\w+\s+.*")
+    grab_bw_soft_bkt: Pattern = re.compile(f"\(.*\)")
+    
+    find_localparam_re: Pattern = re.compile(f"localparam\s+\w+(\s|=)+.*?;",re.MULTILINE|re.DOTALL)
+    first_eq_re: Pattern = re.compile("\s=\s")
+    find_soft_brkt_chars_re: Pattern = re.compile(f"\(|\)", re.MULTILINE)
+
+    find_verilog_fn_re: Pattern = re.compile(f"function.*?function", re.MULTILINE|re.DOTALL)
+    grab_verilog_fn_args: Pattern = re.compile(f"\(.*?\)",re.MULTILINE|re.DOTALL)
+    find_verilog_fn_hdr: Pattern = re.compile("<=?")
+
+    decimal_re: Pattern = re.compile("\d+\.{0,1}\d*",re.MULTILINE)
+    signed_dec_re: Pattern = re.compile("\-{0,1}\d+\.{0,1}\d*",re.MULTILINE)
+    sci_not_dec_re: Pattern = re.compile("\-{0,1}\d+\.{0,1}\d*[eE]{0,1}\-{0,1}\d+",re.MULTILINE)
+
+    # IC 3D
+    int_re : re.Pattern = re.compile(r"[0-9]+", re.MULTILINE)
+    sp_del_grab_info_re: re.Pattern = re.compile(r"^.(?:(?P<var1>[^\s=]+)=\s*(?P<val1>-?[\d.]+)(?P<unit1>[a-z]+))?\s*(?:(?P<var2>[^\s=]+)=\s*(?P<val2>-?[\d.]+)(?P<unit2>[a-z]+))?\s*(?:(?P<var3>[^\s=]+)=\s*(?P<val3>-?[\d.]+)(?P<unit3>[a-z]+))?",re.MULTILINE)
+    sp_grab_print_vals_re: re.Pattern = re.compile(r"^x.*?^y",re.DOTALL | re.MULTILINE) 
+    sp_grab_inv_pn_vals_re: re.Pattern = re.compile(r"\s+\.param\s+(?P<name>inv_w[np]_\d+)\s+=\s+(?P<value>\d+\.\d+)\w*")
+    # spice output file ".lis" regex matches
+    sp_grab_tran_analysis_ub_str: str = r"\s*transient\s*analysis.*?\s*"
+    sp_grab_tran_analysis_re: re.Pattern = re.compile(r"\s*transient\s*analysis.*?\s*\.title\s*", re.DOTALL)
+    # line by line grabs either "measure" statements -> group 1 is name of parameter, group 2 is the value in scientific notation
+    sp_grab_measure_re: re.Pattern = re.compile( r"\b(\w+)\s*=\s*(failed|not found|[-+]?\d*(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*(?:\w+)?(?=\s|$)" )
+    # global grabs all ".param" statements -> group 1 is name of parameter, group 2 is the value in scientific notation
+    sp_grab_param_re: re.Pattern = re.compile(r"\.param\s+([^\s=]+)\s*=\s*([+\-]?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)\s*\$")
+
+    # COFFE parsing
+    coffe_key_w_spaces_rep_re: re.Pattern = re.compile(r'^([^0-9]+)\s+([0-9.]+[eE]{0,1}[0-9-]+)$', re.MULTILINE)
+
+
+
+@dataclass
+class EnvSettings:
+    """ 
+        Settings which are specific to a user of the RAD Gen tool including the following:
+        - paths specified to system running RAD Gen
+        - log settings
+        - directory structures for inputs and outputs
+    """
+    # RAD-Gen
+    rad_gen_home_path: str # path to top level rad gen repo 
+    # Hammer
+    hammer_home_path: str  # path to hammer repository
+    env_paths: List[str] # paths to hammer environment file containing absolute paths to asic tools and licenses
+
+    # OpenRAM 
+    # openram_path: str  # path to openram repository
+    
+    # Top level input
+    top_lvl_config_path: str = None # high level rad gen configuration file path
+    
+    # Name of directory which stores parameter sweep headers
+    # param_sweep_hdr_dir: str = "param_sweep_hdrs" TODO remove this and use input_dir_structure defined below (gen)
+    
+    # Verbosity level
+    # 0 - Brief output
+    # 1 - Brief output + I/O + command line access
+    # 2 - Hammer and asic tool outputs will be printed to console    
+    logger: logging.Logger = logging.getLogger(f"rad-gen-{create_timestamp()}") # logger for RAD Gen
+    log_file: str = f"rad-gen-{create_timestamp()}.log" # path to log file for current RAD Gen run
+    log_verbosity: int = 1 # verbosity level for log file 
+    
+    # Input and output directory structure, these are initialized with design specific paths
+    design_input_path: str = None # path to directory which inputs will be read from. Ex ~/rad_gen/input_designs
+    design_output_path: str = None # path to directory which object directories will be created. Ex ~/rad_gen/output_designs
+
+    hammer_tech_path: str = None # path to hammer technology directory containing tech files
+
+    # Directory structure for auto-dse hammer asic flow
+    input_dir_struct: dict = field(default_factory = lambda: {
+        # Design configuration files
+        "configs": {
+            # Auto-generated configuration files from sweep
+            "gen" : "gen",
+            # Tmp directory for storing modified configuration files by user passing in top_lvl & hdl_path & original config 
+            "mod" : "mod",
+        },
+        # Design RTL files
+        "rtl" : {
+            "gen" : "gen", # Auto-generated directories containing RTL
+            "src" : "src", # Contains design RTL files
+            "include": "include", # Contains design RTL header files
+            "verif" : "verif", # verification related files
+            "build" : "build", # build related files for this design
+        }
+    })
+
+    # Regex Info
+    res: Regexes = field(default_factory = Regexes)
+    # Sript path information
+    scripts_info: ScriptInfo = None
+    # Report information
+    report_info: ReportInfo = field(default_factory = ReportInfo)
+
+    def __post_init__(self):
+        # Assign defaults for input and output design dir, these will be overridden if specified in top level yaml file
+        if self.design_input_path is None:
+            self.design_input_path = os.path.join(self.rad_gen_home_path, "input_designs") 
+        if self.design_output_path is None:
+            self.design_output_path = os.path.join(self.rad_gen_home_path, "output_designs")
+        if self.hammer_tech_path is None:
+            self.hammer_tech_path = os.path.join(self.hammer_home_path, "hammer", "technology")
+
+
+@dataclass
+class HighLvlSettings:
+    """
+        These settings are applicable to a single execution of the RAD Gen tool from command line 
+
+        Settings which are used by users for higher level data preperation such as following:
+        - Preparing designs to be swept via RTL/VLSI parameters
+        - Using the SRAM mapper
+    """
+    env_settings: EnvSettings # env settings relative to paths and filenames for RAD Gen
+    mode: RADGenMode # mode in which RAD Gen is running
+    tech_info: StdCellTechInfo # technology information for the design
+    sweep_config_path: str = None # path to sweep configuration file containing design parameters to sweep
+    result_search_path: str = None # path which will look for various output obj directories to parse results from
+    asic_flow_settings: ASICFlowSettings = None # asic flow settings for single design
+    custom_asic_flow_settings: Dict[str, Any] = None # custom asic flow settings
+    design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
+    sram_compiler_settings: SRAMCompilerSettings = None
+    def __post_init__(self):
+        # Post inits required for structs that use other struct values as inputs and cannot be clearly defined
+        self.tech_info.sram_lib_path = os.path.join(self.env_settings.hammer_tech_path, self.tech_info.name, "sram_compiler", "memories")
+        if self.sram_compiler_settings is None:
+            self.sram_compiler_settings = SRAMCompilerSettings()
+            self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
+            self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
+        elif self.sram_compiler_settings.config_out_path == None:
+            self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
+        elif self.sram_compiler_settings.rtl_out_path == None:
+            self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
+
+
+
+
+#  ██████╗ ██████╗ ███████╗███████╗███████╗
+# ██╔════╝██╔═══██╗██╔════╝██╔════╝██╔════╝
+# ██║     ██║   ██║█████╗  █████╗  █████╗  
+# ██║     ██║   ██║██╔══╝  ██╔══╝  ██╔══╝  
+# ╚██████╗╚██████╔╝██║     ██║     ███████╗
+#  ╚═════╝ ╚═════╝ ╚═╝     ╚═╝     ╚══════╝
+
+
+@dataclass
+class Hardblock:
+    asic_dse_cli: AsicDseCLI 
+    # COFFE tx sizing hb settings
+    name: str
+    num_gen_inputs: int
+    crossbar_population: float 
+    height: int
+    num_gen_outputs: int 
+    num_dedicated_outputs: int
+    soft_logic_per_block: float
+    area_scale_factor: float
+    freq_scale_factor: float
+    power_scale_factor: float
+    input_usage: float
+    num_crossbars: int
+    crossbar_modelling: str 
+
+
+@dataclass
+class CoffeCLI:
+    no_sizing: bool = None # don't perform sizing
+    opt_type: str = None # optimization type, options are "global" or "local"
+    initial_sizes: str = None # where to get initial transistor sizes options are "default" ... TODO find all valid options
+    re_erf: int = None # how many sizing combos to re-erf
+    area_opt_weight: int = None # area optimization weight
+    delay_opt_weight: int = None # delay optimization weight
+    max_iterations: int = None # max FPGA sizing iterations
+    size_hb_interfaces: float = None # perform transistor sizing only for hard block interfaces
+    quick_mode : float = None # minimum cost function improvement for resizing, could try 0.03 for 3% improvement
+    fpga_arch_conf_path: Dict[str, Any] = None # FPGA architecture configuration dictionary TODO define as dataclass
+    hb_flows_conf_path: Dict[str, Any] = None # Hard block flows configuration dictionary TODO define as dataclass
+
+
+@dataclass
+class Coffe:
+    # TODO put coffe CLI in here
+    no_sizing: bool # don't perform sizing
+    opt_type: str # optimization type, options are "global" or "local"
+    initial_sizes: str # where to get initial transistor sizes options are "default" ... TODO find all valid options
+    re_erf: int # how many sizing combos to re-erf
+    area_opt_weight: int # area optimization weight
+    delay_opt_weight: int # delay optimization weight
+    max_iterations: int # max FPGA sizing iterations
+    size_hb_interfaces: float # perform transistor sizing only for hard block interfaces
+    quick_mode : float # minimum cost function improvement for resizing, could try 0.03 for 3% improvement
+    fpga_arch_conf: Dict[str, Any] # FPGA architecture configuration dictionary TODO define as dataclass
+    # NON cli args are below:
+    arch_name: str # name of FPGA architecture
+    hardblocks: List[Hardblock] = None # Hard block flows configuration dictionary
+
+# class ASICDSE:
+#     def __init__(self):
+#         self.asic_dse_settings = HighLvlSettings()
+
+
+# ██╗ ██████╗    ██████╗ ██████╗ 
+# ██║██╔════╝    ╚════██╗██╔══██╗
+# ██║██║          █████╔╝██║  ██║
+# ██║██║          ╚═══██╗██║  ██║
+# ██║╚██████╗    ██████╔╝██████╔╝
+# ╚═╝ ╚═════╝    ╚═════╝ ╚═════╝ 
 
 
 @dataclass
@@ -42,23 +523,23 @@ class SpProcess:
     From a title a spice directory will be created
     """
     title: str
-    top_sp_dir: str
-    sp_dir: str = None # path to directory created
-    sp_file: str = None # path to sp file used for simulation
-    sp_outfile: str = None # output file
+    top_sp_dir: str # path to top level spice directory
+    sp_dir: str = None # path to sim working directory (contains .sp and output files )
+    sp_file: str = None # path to sp file used for simulation ".sp" file
+    sp_outfile: str = None # output file ".lis"
+
     def __post_init__(self):
         self.sp_dir = os.path.join(self.top_sp_dir,self.title)
         if not os.path.exists(self.sp_dir):
             os.makedirs(self.sp_dir)
         self.sp_file = os.path.join(self.sp_dir,self.title+".sp")
         self.sp_outfile = os.path.join(self.sp_dir,self.title+".lis")
-        
 
 
 @dataclass
 class SpInfo:
     """Spice subckt generation info"""
-    top_dir: str = os.path.expanduser("~/3D_ICs")
+    top_dir: str = os.path.expanduser("~/rad_gen")
     sp_dir: str = os.path.join(top_dir,"spice_sim")
     sp_sim_title: str = "ubump_ic_driver"
     sp_sim_file: str = os.path.join(top_dir,sp_dir,sp_sim_title,"ubump_ic_driver.sp")
@@ -114,7 +595,6 @@ class SpSubCkt:
                 inst.conns["out"] = cur_tmp_int_node
             
                 # Connect las inst output to subckt output
-                
     def __post_init__(self):
         prefix_lut = {
             "cap" : "C",
@@ -141,23 +621,6 @@ class SpSubCktInst:
     def __post_init__(self):
         if self.param_values == None:
             self.param_values = self.subckt.params.copy()
-
-
-@dataclass
-class SpVoltageSrcOptions:
-    """ Data structure for specifying a voltage source """
-    type: str = "PULSE"
-    args: dict = field(default_factory = lambda: { 
-        "init_val": "0",
-        "pulsed_val": "supply_v",
-        "delay_time": "0n",
-        "rise_time": "0n",
-        "fall_time": "0n",
-        # below is the 1/2 period, and period for a square wave
-        "pulse_width": "2n",
-        "period": "4n",
-    })
-
 
 @dataclass
 class TechInfo:
@@ -200,15 +663,62 @@ class DriverSpModel:
 
 
 
+
+@dataclass
+class SpVoltageSrc:
+    """
+        Data structure for specifying a voltage source 
+        Only supportive of a pulse voltage source
+    """
+    name: str # name of voltage source, ex. if name = "IN" -> will be written as "VIN"
+    out_node: str # node connecting to output of voltage source
+    type: str # Type of voltage source (pulse, sine, etc)
+    # All relevant params for pulse voltage src
+    init_volt: str = None
+    peak_volt: str = None
+    delay_time: str = None
+    rise_time: str = None
+    fall_time: str = None
+    pulse_width: str = None
+    period: str = None
+
+
+
+
 @dataclass
 class SpLocalSimSettings:
-    top_die_inv_stages: int
-    # How many inverters on the base die?
-    bottom_die_inv_stages: int
-    total_inv_stages: int
 
+    dut_in_vsrc: SpVoltageSrc # voltage source for providing stimulus to the DUT
+
+    target_freq: int = None # freq in MHz
+    target_period: float = None # period in ns
+
+    # TODO make everything unitless (just use sci notation, if needs to be set to some unit standard to that where relevant)
+    sim_time: float = None # Total simulation time in ns
+    sim_prec: float = None # Frequency of simulation sampling in ps
+    
+    prec_factor: float = 0.001 # Will be used to determine sim precision as 
+    sim_time_factor: float = 1.005 # Factor to be applied to the simulation time to ensure that all the measure statments are captured
+
+    
     def __post_init__(self):
-        self.total_inv_stages = self.top_die_inv_stages + self.bottom_die_inv_stages
+        if self.target_period is None and self.target_freq is not None:
+            self.target_period = 1e3 / (self.target_freq) # convert from MHz to ns
+        elif self.target_period is not None and self.target_freq is None:
+            self.target_freq = 1e3 / (self.target_period)
+        else:
+            raise ValueError("ERROR: Either target period or target freq must be specified, you cannot specify both")
+        if self.sim_prec is None:
+            self.sim_prec = self.prec_factor * self.target_period * 1e3 # convert from ns to ps
+        if self.sim_time is None:
+            self.sim_time = self.sim_time_factor * self.target_period
+        if self.dut_in_vsrc.pulse_width is None:
+            self.dut_in_vsrc.pulse_width = f"{self.target_period / 2}n"
+        if self.dut_in_vsrc.period is None:
+            self.dut_in_vsrc.period = f"{self.target_period}n"
+
+
+
 
 @dataclass 
 class SpGlobalSimSettings:
@@ -226,22 +736,71 @@ class SpGlobalSimSettings:
             "n": 1e-6,
         }
     })
-    bottom_die_inv_stages: int = 1 
+    # This defines the default units for various fields (ex. time in pS, voltage in mV, ...)
+    unit_lookup_factors: dict = field(default_factory = lambda: {
+        "time" : "p",
+        "voltage": "m"
+    })
+    # unit lookups which are also in the spice format (in case they need to get back and forth)
+    abs_unit_lookups: dict = field(default_factory = lambda: {
+        "g": 1e9,
+        "x": 1e6,
+        "k": 1e3,
+        " ": 1,
+        "m": 1e-3,
+        "u": 1e-6,
+        "n": 1e-9,
+        "p": 1e-12,
+        "f": 1e-15,
+        "a": 1e-18,
+    })
+    # below key value pairs are passed into spice simulation ".OPTION BRIEF=1 ..."
+    sp_options: dict = field(default_factory = lambda: {
+        "BRIEF": 1,
+        "POST": 1,
+        "INGOLD": 1,
+        "NODE": 1,
+        "LIST": 1,
+    })
+
+    # TODO both these two below nodes should be defined somewhere else and link to the function writing the include spice file (which sets these pins as global gnd and vdd)
+    gnd_node: str = "gnd" # ground node
+    vdd_node: str = "vdd" #VDD node
+    vdd_param: str = "supply_v" #VDD node
+
+
+    bottom_die_inv_stages: int = 1 # This should be removed pray this inst being used somewhere  
 
 
 ########################## GENERAL PROCESS INFORMATION ###########################
+
+@dataclass
+class SpOptSettings:
+    init: float
+    range: List[float]
+    step: float
+
+    def __post_init__(self):
+        if min(self.range) > self.init or max(self.range) < self.init:
+            raise ValueError(f"Initial value {self.init} is not within range {self.range}")
+
+
 @dataclass
 class SpParam:
     # param name
     name: str
     # param unit (ex. f, p, etc)
-    suffix: str
+    suffix: str = None
     # unit type (meters, farads, etc)
     # param val
     value: float = None
-    unit: str = None
+    # unit: str = None
     # sweep_vals: List[float] = None
-        
+    opt_settings: SpOptSettings = None
+    # Opt param settings
+
+
+
 
 @dataclass
 class MlayerInfo:
@@ -617,8 +1176,6 @@ class FPGAResource:
     abs_width: float = None # um
     abs_height: float = None # um 
 
-
-
 @dataclass
 class FPGAInfo:
     sector_info: SectorInfo
@@ -630,10 +1187,7 @@ class FPGAInfo:
     grid_height: int = None
     grid_width: int = None
 
-######################## GENERATING FPGA SECTOR FLOORPLAN ########################
 
-
-pdn_sim_settings = PDNSimSettings()
 
 
 def get_total_poly_area(boxes: List[sh.Polygon]) -> float:
@@ -660,9 +1214,6 @@ def get_total_poly_area(boxes: List[sh.Polygon]) -> float:
     return total_coverage_area
 
 
-
-
-
 @dataclass
 class DesignPDN:
     ################ USER INPUTTED VALUES ################
@@ -687,7 +1238,8 @@ class DesignPDN:
     num_txs: int = None
 
 
-    def init_placement(grid_pls: List[GridPlacement], area_inter: bool) -> PolyPlacements:
+
+    def init_placement(self, grid_pls: List[GridPlacement], area_inter: bool) -> PolyPlacements:
         rects = [ rect for grid_pl in grid_pls for rows in grid_pl.grid for rect in rows ]
         polys = [ rect.bb for grid_pl in grid_pls for rows in grid_pl.grid for rect in rows ]
         if area_inter:
@@ -895,15 +1447,58 @@ pdn_modeling_info = PDNModelingInfo()
 
 
 
-    
+
+@dataclass
+class TxSizing:
+    opt_mode: str = None  # possible modes are "P", "NP" and "N" if one of those strings is included then the sizing for the respective PMOS / NMOS will be optimized by hspice
+    opt_goal: str = None # options are "tpd" (propegation delay) or "diff" (match the rising and falling propegation delays)
+    pmos_sz: int = None
+    nmos_sz: int = None
+    p_opt_params: dict = None
+    n_opt_params: dict = None
+    iters: int = None
+
+
+
+
 
 
 @dataclass
 class SpTestingModel:
-    insts : list
-    testing_in_node: str = "n_in"
-    testing_out_node: str = "n_out"
-    target_freq: int = 1000 # freq in MHz
+
+
+    # Design Info
+    insts :  List[SpSubCktInst] # All nodes inside of the spice sim
+    vsrcs: List[SpVoltageSrc]  = None # We create a basic voltage source for each instantiation to measure their power
+
+    # Node definitions
+    dut_in_node: str = "n_in" # input node (connected to non inst stimulus
+    dut_out_node: str = "n_out" # output node (hanging or connected to non inst stimulus)
+    
+    # Simulation Info
+    sim_settings: SpLocalSimSettings = None # Simulation settings
+    # target_freq: int = 1000 # freq in MHz
+    # target_period: float = None # period in ns
+    # voltage_src: SpVoltageSrc = None # voltage source for simulation
+    
+    # FIELDS WHICH ARE ONLY HERE TO WORK WITH OLD FUNCTIONS THAT I DESIRE TO GET RID OF 
+    target_freq: int = None # freq in MHz
+
+    opt_params: List[SpParam] = None # List of all optimization parameters used in simulation
+    def __post_init__(self):
+        if self.sim_settings != None:
+            if self.sim_settings.dut_in_vsrc.out_node is None:
+                self.sim_settings.dut_in_vsrc.out_node = self.dut_in_node
+
+    
+
+ 
+
+
+
+
+
+
     # sim_prec: int # samples in ps
     # Params swept in sp simulation
     # sweep_mlayer_trav_dist: SpParam = None # um
@@ -929,364 +1524,12 @@ class SpPNOptModel:
     wn_param : str = "inv_Wn"
     wp_param : str = "inv_Wp"
 
-pn_opt_model = SpPNOptModel()
-
-
-io_ports = {
-    "in" : { 
-        "name" : "n_in",
-        "idx" : 0
-    },
-    "out" : { 
-        "name" : "n_out",
-        "idx" : 1
-    }
-}
-
-io_vdd_gnd_ports = {
-    "in" : { 
-        "name" : "n_in",
-        "idx" : 0
-    },
-    "out" : { 
-        "name" : "n_out",
-        "idx" : 1
-    },
-    "gnd" : { 
-        "name" : "n_gnd",
-        "idx" : 2
-    },
-    "vdd" : { 
-        "name" : "n_vdd",
-        "idx" : 3
-    }
-}
-
-
-mfet_ports = {
-    "base" : {
-        "name" : "n_b",
-        "idx": 3,
-    },
-    "drain" : {
-        "name" : "n_d",
-        "idx": 0,
-    },
-    "gate" : {
-        "name" : "n_g",
-        "idx": 1,
-    },
-    "source" : {
-        "name" : "n_s",
-        "idx": 2,
-    },
-}
-
-nfet_width_param = "Wn"
-pfet_width_param = "Wp"
-
-
-tech_info = TechInfo()
-
-"""
-    Atomic subckts are from spice syntax and are not defined anywhere
-    This means that the parameters used are always assigned during an instantiation of atomic subckts
-"""
-sp_subckt_atomic_lib = {
-    "cap" : SpSubCkt(
-        element = "cap",
-        ports = io_ports,
-        params = {
-            "C" : "1f"
-        }
-    ),
-    "res" : SpSubCkt(
-        element = "res",
-        ports = io_ports,
-        params = {
-            "R" : "1m"
-        }
-    ),
-    "ind" : SpSubCkt(
-        element = "ind",
-        ports = io_ports,
-        params = {
-            "L" : "1p"
-        }
-    ),
-    "mnfet" : SpSubCkt(
-        name = "nmos",
-        element = "mnfet",
-        ports = mfet_ports,
-        params = {
-            "hfin" : "hfin",
-            "lfin" : "lfin",
-            "L" : "gate_length",
-            "M" : "1",
-            "nfin" : f"{nfet_width_param}",
-            "ASEO" : f"{nfet_width_param}*min_tran_width*trans_diffusion_length",
-            "ADEO" : f"{nfet_width_param}*min_tran_width*trans_diffusion_length",
-            "PSEO" : f"{nfet_width_param}*min_tran_width+2*trans_diffusion_length",
-            "PDEO" : f"{nfet_width_param}*min_tran_width+2*trans_diffusion_length",
-        }
-    ),
-    "mpfet" : SpSubCkt(
-        name = "pmos",
-        element = "mpfet",
-        ports = mfet_ports,
-        params = {
-            "hfin" : "hfin",
-            "lfin" : "lfin",
-            "L" : "gate_length",
-            "M" : "1",
-            "nfin" : f"{pfet_width_param}",
-            "ASEO" : f"{pfet_width_param}*min_tran_width*trans_diffusion_length",
-            "ADEO" : f"{pfet_width_param}*min_tran_width*trans_diffusion_length",
-            "PSEO" : f"{pfet_width_param}*min_tran_width+2*trans_diffusion_length",
-            "PDEO" : f"{pfet_width_param}*min_tran_width+2*trans_diffusion_length",
-        }
-    )
-    
-}
-
-
-"""
-How to describe connections to ports in a subckt?
-conns should be a list of port key names which define the 
-
-"""
-
-""" 
-    Basic subckts are made up from atomics and used to build more complex subckts
-"""
-
-#TODO make sure that the number of conn keys are equal to the number of ports in inst 
-basic_subckts = {
-    "inv" : SpSubCkt(
-        name = "inv",
-        element = "subckt",
-        ports = io_vdd_gnd_ports,
-        params = {
-            "hfin": "3.5e-008",
-            "lfin": "6.5e-009",
-            "Wn" : "1",
-            "Wp" : "2",
-            "fanout" : "1",
-        },
-        insts = [
-            SpSubCktInst(
-                subckt = sp_subckt_atomic_lib["mnfet"],
-                name = "N_DOWN",
-                # Connecting the io_gnd_vdd_ports to the mnfet ports
-                # Key will be mnfet port and value will be io_gnd_vdd_ports OR internal node
-                conns = {
-                    "gate" : io_vdd_gnd_ports["in"]["name"],
-                    "base" : io_vdd_gnd_ports["gnd"]["name"],
-                    "drain" : io_vdd_gnd_ports["out"]["name"],
-                    "source" : io_vdd_gnd_ports["gnd"]["name"],
-                },
-                param_values = {
-                    "hfin" : "hfin",
-                    "lfin" : "lfin",
-                    "L" : "gate_length",
-                    "M" : "fanout",
-                    "nfin" : f"{nfet_width_param}",
-                    "ASEO" : f"{nfet_width_param}*min_tran_width*trans_diffusion_length",
-                    "ADEO" : f"{nfet_width_param}*min_tran_width*trans_diffusion_length",
-                    "PSEO" : f"{nfet_width_param}*min_tran_width+2*trans_diffusion_length",
-                    "PDEO" : f"{nfet_width_param}*min_tran_width+2*trans_diffusion_length",
-                }
-                # if param values are not defined they are set to default
-            ),
-            SpSubCktInst(
-                subckt = sp_subckt_atomic_lib["mpfet"],
-                name = "P_UP",
-                # Connecting the io_gnd_vdd_ports to the mnfet ports
-                # Key will be mnfet port and value will be io_gnd_vdd_ports OR internal node
-                conns = {
-                    "drain" : io_vdd_gnd_ports["out"]["name"],
-                    "gate" : io_vdd_gnd_ports["in"]["name"],
-                    "source" : io_vdd_gnd_ports["vdd"]["name"],
-                    "base" : io_vdd_gnd_ports["vdd"]["name"],
-                },
-                param_values = {
-                    "hfin" : "hfin",
-                    "lfin" : "lfin",
-                    "L" : "gate_length",
-                    "M" : "fanout",
-                    "nfin" : f"{pfet_width_param}",
-                    "ASEO" : f"{pfet_width_param}*min_tran_width*trans_diffusion_length",
-                    "ADEO" : f"{pfet_width_param}*min_tran_width*trans_diffusion_length",
-                    "PSEO" : f"{pfet_width_param}*min_tran_width+2*trans_diffusion_length",
-                    "PDEO" : f"{pfet_width_param}*min_tran_width+2*trans_diffusion_length",
-                }
-                # if param values are not defined they are set to default
-            ),
-        ]
-    ),
-    "wire" : SpSubCkt(
-        name = "wire",
-        element = "subckt",
-        ports = io_ports,
-        params = {
-            "Rw" : "1m",
-            "Cw" : "1f",
-        },
-        insts = [
-            SpSubCktInst(
-                subckt = sp_subckt_atomic_lib["cap"],
-                name = "PAR_IN",
-                conns = { 
-                    "in" : io_ports["in"]["name"],
-                    "out" : "gnd", # TODO globally defined gnd, use data structure to access instead of hardcoding                    
-                },
-                param_values = {
-                    "C" : "Cw",
-                }
-            ),
-            SpSubCktInst(
-                subckt = sp_subckt_atomic_lib["res"],
-                name = "SER",
-                conns = { 
-                    "in" : io_ports["in"]["name"],
-                    "out" : io_ports["out"]["name"],          
-                },
-                param_values = {
-                    "R" : "Rw",
-                }
-            ),
-            SpSubCktInst(
-                subckt = sp_subckt_atomic_lib["cap"],
-                name = "PAR_OUT",
-                conns = { 
-                    "in" : io_ports["out"]["name"],
-                    "out" : "gnd", # TODO globally defined gnd, use data structure to access instead of hardcoding                    
-                },
-                param_values = {
-                    "C" : "Cw",
-                }
-            ),
-        ],
-    ),
-}
-
-subckts = {
-    ##### This works for only a specific metal stack, TODO fix this for all processes #####
-    f"bottom_to_top_mlayers_via_stack": SpSubCkt( 
-        name = f"bottom_to_top_mlayers_via_stack",
-        element = "subckt",
-        ports = io_ports,
-        direct_conn_insts = True,
-        insts = flatten_mixed_list([
-            [
-                [SpSubCktInst(
-                    subckt = basic_subckts["wire"],
-                    name = f"m1_to_m3_wire_load",
-                    param_values={
-                        "Rw" : f"m1_to_m3_via_stack_res",
-                        "Cw" : f"{0.22}f",
-                    }
-                )] + [
-                SpSubCktInst(
-                    subckt = basic_subckts["wire"],
-                    name = f"m{mlayer_idx}_to_m{mlayer_idx+1}_wire_load",
-                    param_values={
-                        "Rw" : f"m{mlayer_idx}_to_m{mlayer_idx+1}_via_stack_res",
-                        # The capacitance of the via stack is estimated that 0.11 fF per via stack
-                        "Cw" : f"0.11f",
-                    # This indexing comes from the fact we want to start at metal 4 in the loop
-                    # and only create a via stack (spice wire) for each odd metal layer
-                    # 1 -> 3 ->
-                    # 4 -> 5 ->
-                    # 6 -> 7 ->
-                    # And make sure to leave the last 2 metal layers (8,9) s.t the wire can be routed in X,Y
-                }) for mlayer_idx in range(4, tech_info.num_mlayers-1, 2) ]
-            ]
-        ])
-    ),
-    f"m1_to_{tech_info.num_mlayers}_w_vias_load": SpSubCkt(
-        name = f"m1_to_{tech_info.num_mlayers}_w_vias_load",
-        element = "subckt",
-        ports = io_ports,
-        direct_conn_insts = True,
-        # If the subckt contains a direct connection between insts
-        # Then the insts are connected directly in the following order
-        # [ "in" -> insts[0] -> ... -> insts[n] -> "out" ]
-        insts = flatten_mixed_list([
-            [SpSubCktInst(
-                subckt = basic_subckts["wire"],
-                name = f"m{mlayer_idx}_wire_load",
-                param_values = {
-                    "Rw": f"m{mlayer_idx}_ic_res",
-                    "Cw": f"m{mlayer_idx}_ic_cap",
-                },
-            ),
-            SpSubCktInst(
-                subckt = basic_subckts["wire"],
-                name = f"m{mlayer_idx}_m{mlayer_idx+1}_via_load",
-                param_values = {
-                    "Rw": f"m{mlayer_idx}_m{mlayer_idx+1}_via_res",
-                    "Cw": f"m{mlayer_idx}_m{mlayer_idx+1}_via_cap",
-                },
-            )] for mlayer_idx in range(1, tech_info.num_mlayers )
-        ]) + [
-            # LAST m layer
-            SpSubCktInst(
-                subckt = basic_subckts["wire"],
-                name = f"m{tech_info.num_mlayers}_wire_load",
-                param_values = {
-                    "Rw": f"m{tech_info.num_mlayers}_ic_res",
-                    "Cw": f"m{tech_info.num_mlayers}_ic_cap",
-                },
-            ),
-        ],
-    ),
-    f"m{tech_info.num_mlayers}_to_m1_w_vias_load": SpSubCkt(
-        name = f"m{tech_info.num_mlayers}_to_m1_w_vias_load",
-        element = "subckt",
-        ports = io_ports,
-        direct_conn_insts = True,
-        # If the subckt contains a direct connection between insts
-        # Then the insts are connected directly in the following order
-        # [ "in" -> insts[0] -> ... -> insts[n] -> "out" ]
-        insts = flatten_mixed_list([
-            [SpSubCktInst(
-                subckt = basic_subckts["wire"],
-                name = f"m{mlayer_idx}_wire_load",
-                param_values = {
-                    "Rw": f"m{mlayer_idx}_ic_res",
-                    "Cw": f"m{mlayer_idx}_ic_cap",
-                },
-            ),
-            SpSubCktInst(
-                subckt = basic_subckts["wire"],
-                name = f"m{mlayer_idx}_m{mlayer_idx-1}_via_load",
-                param_values = {
-                    "Rw": f"m{mlayer_idx-1}_m{mlayer_idx}_via_res",
-                    "Cw": f"m{mlayer_idx-1}_m{mlayer_idx}_via_cap",
-                },
-            )] for mlayer_idx in range(tech_info.num_mlayers, 1, -1)
-        ]) + [
-            # LAST m layer
-            SpSubCktInst(
-                subckt = basic_subckts["wire"],
-                name = f"m1_wire_load",
-                param_values = {
-                    "Rw": f"m1_ic_res",
-                    "Cw": f"m1_ic_cap",
-                },
-            ),
-        ],
-    ),
-}
-
-
 
 @dataclass
 class SpSubCktLibs:
-    atomic_subckts: dict = field(default_factory = lambda: sp_subckt_atomic_lib)
-    basic_subckts: dict = field(default_factory = lambda: basic_subckts)
-    subckts: dict = field(default_factory = lambda: subckts)
+    atomic_subckts: dict = None #= field(default_factory = lambda: sp_subckt_atomic_lib)
+    basic_subckts: dict = None #= field(default_factory = lambda: basic_subckts)
+    subckts: dict = None #= field(default_factory = lambda: subckts)
 
 """ Here defines the top class used for buffer exploration """
 @dataclass
@@ -1360,23 +1603,37 @@ class NoCInfo:
         self.add_wire_len = max(math.ceil((math.ceil(math.sqrt(self.needed_num_ubumps * (ubump_pitch**2) / lb_info.area)) \
             - math.ceil(math.sqrt(self.lbs_per_router)) ) / 2) * (lb_info.width + lb_info.height), 0) 
         
-
-
-
 @dataclass
 class DesignInfo:
     """ Contains information about the Whole Design """
     # Process information
     process_info: ProcessInfo
+
+    # Circuit Library
+    subckt_libs: SpSubCktLibs
+
+    # Design Component Info
     srams: List[SRAMInfo]
     logic_block: HwModuleInfo
-    
+
     # Buffer DSE information
-    subckt_libs: SpSubCktLibs
-    bot_die_nstages: int
-    package_info: PackageInfo = None
+    shape_nstages: int = None # num stages of the shape buffer, this is used to make the input signal coming from voltage source to be more realistic
+    dut_buffer_nstages: int = None # num stages of the buffer driving the load we are testing, this is the buffer we are performing DSE on
+    sink_die_nstages: int = None # number of stages of the buffer on an opposite die, which our load driver is sending signal to 
+    total_nstages: int = None
+
+    stage_ratio: int = None 
+
+    # TODO remove this
+    bot_die_nstages: int = 1
 
     nocs: List[NoCInfo] = None
+    # Buffer related params 
+    max_macro_dist: float = None # maximum distance a wire may have to traverse across a die before going to inter die connection (based on size of SRAM macros)
+    add_wlen: float = None # Any additional wire length that could be added to this path between the two dies (pre ubump)
+
+    # Package Info 
+    package_info: PackageInfo = None
 
     # Additional Wire Length Calculation
     # lbs_per_router: float = None
@@ -1387,90 +1644,60 @@ class DesignInfo:
     def calc_add_wlen(self):
         for noc in self.nocs:
             noc.calc_noc_info(self.logic_block, self.package_info.ubump_info.pitch)
+
+    def __post_init__(self):
+        # self.total_nstages = self.shape_nstages + self.load_driver_nstages + self.sink_die_nstages
+        # Find largest Macro in design, will have to route at least half the largest dimension on top metal layer
+        self.max_macro_dist = max([sram.width/2 + sram.height/2 for sram in self.srams])  
+        if self.add_wlen == None:
+            self.add_wlen = 0
+
+
+@dataclass
+class Ic3dCLI:
+    """
+        CLI arguments for IC-3D tool
+    """
+    input_config_path: str = None # path to input configuration file
+    debug_spice: bool = False # plot spice waveforms
+    pdn_modeling: bool = False
+    buffer_dse: bool = False
+    buffer_sens_study: bool = False
+    # This arg is for the WIP buffer DSE flow, one can use it by uncommenting the command in ic_3d.py or wait a little bit
+    use_latest_obj_dir: bool = False # Uses the latest directory in the output folder rather than creating a new one
+
+
+@dataclass
+class Ic3d:
+    # CLI arguments (for modes)
+    cli_args: Ic3dCLI
+
+
+    # Buffer DSE specific data 
+    # Should go into design info tbh TODO
+    esd_rc_params: Dict[str, Any]
+    add_wlens: List[float]
+
+    # Buffer DSE input params
+    stage_range: List[int] # range of buffer stages
+    fanout_range: List[int] # range of buffer fanouts
+    cost_fx_exps: Dict[str, int] # cost function weights
+    tx_sizing: TxSizing # sizing info for transistors in buffer
+
+    # Globals in 3D IC (should not be globals TODO)
+    spice_info: SpInfo
+    process_data: SpProcessData
+    driver_model_info: DriverSpModel
+    pn_opt_model: SpPNOptModel
     
+    res: Regexes
+    sp_sim_settings: SpGlobalSimSettings 
+    design_info: DesignInfo
+    process_infos: List[ProcessInfo]
+    ubump_infos: List[SolderBumpInfo]
+
+    # PDN specific data
+    pdn_sim_settings: PDNSimSettings 
+    design_pdn: DesignPDN
 
 
-
-
-
-
-""" Instantiation of Spice Circuits """
-res = regexes()
-
-spice_info = SpInfo()
-driver_model_info = DriverSpModel()
-
-# subckt_libs = SpSubCktLibs()
-
-# global_sp_sim_settings = SpGlobalSimSettings()
-sp_sim_settings = SpGlobalSimSettings()
-
-
-process_data = SpProcessData(
-    global_nodes = {
-        "gnd": "gnd",
-        "vdd": "vdd"
-    },
-    voltage_info = {
-        "supply_v": "0.7"
-    },
-    geometry_info = {
-        # "fin_height": "3.5e-008",
-        # "fin_length": "6.5e-009",
-        "gate_length" : "20n",
-        "trans_diffusion_length" : "27.0n",
-        "min_tran_width" : "27n",
-        # "rest_length_factor" : "2",
-    },
-    driver_info = {
-        **{
-            key : val
-            for stage_idx in range(10)
-            for key, val in {
-                f"init_Wn_{stage_idx}" : "1",
-                f"init_Wp_{stage_idx}" : "2"
-            }.items()
-        },
-        "dvr_ic_in_res" : "1m",
-        "dvr_ic_in_cap" : "0.001f",
-    },
-    tech_info={
-        # **{ f"m{mlayer+1}_ic_res": f"{res}" for mlayer, res in enumerate(tech_info.mlayer_ic_res_list) },
-        # **{ f"m{mlayer+1}_ic_cap": f"{cap}" for mlayer, cap in enumerate(tech_info.mlayer_ic_cap_list) },
-        # **{
-        #     # Taken from [1] https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=5658180
-        #     "ubump_cap": tech_info.ubump_cap,
-        #     "ubump_res": tech_info.ubump_res,
-        #     "m9_ubump_via_res": tech_info.via_res_list[-1],
-        #     "m9_ubump_via_cap": tech_info.via_cap_list[-1],
-        # },
-        **{
-            # Each of the following via stacks include a via to the next metal layer in name
-            "m1_to_m3_via_stack_res": "33.95",
-            "m4_to_m5_via_stack_res": "14.56",
-            "m6_to_m7_via_stack_res": "9.59",
-            "m8_to_m9_via_stack_res": "5.4",
-        },
-        **{
-            # Taken from [1] https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=5658180
-            "ubump_cap": "25.7f",
-            "ubump_res": "3.9m",
-            "m9_ubump_via_res": "10.32",
-            "m9_ubump_via_cap": "0.12f",
-        },
-        # Values from [2] https://dl.acm.org/doi/pdf/10.1145/3431920.3439300
-        # Mx resitance and capacitance, assuming 1um of metal
-        **{ f"m{mlayer+1}_ic_res": f"128.7" for mlayer in range(tech_info.Mx_range[0],tech_info.Mx_range[1],1)},
-        **{ f"m{mlayer+1}_ic_cap": f"0.22f" for mlayer in range(tech_info.Mx_range[0],tech_info.Mx_range[1],1)},
-        # My resitance and capacitance
-        **{ f"m{mlayer+1}_ic_res": f"21.6" for mlayer in range(tech_info.My_range[0],tech_info.My_range[1],1)},
-        **{ f"m{mlayer+1}_ic_cap": f"0.24f" for mlayer in range(tech_info.My_range[0],tech_info.My_range[1],1)},
-        # Mx-Mx via resistance and capacitance, 
-        **{ f"m{mlayer+1}_m{mlayer+2}_via_res": f"34.8" for mlayer in range(tech_info.Mx_range[0],tech_info.Mx_range[1],1)},
-        **{ f"m{mlayer+1}_m{mlayer+2}_via_cap": f"0.11f" for mlayer in range(tech_info.Mx_range[0],tech_info.Mx_range[1],1)},
-        # My-My via resistance and capacitance, 
-        **{ f"m{mlayer+1}_m{mlayer+2}_via_res": f"10.32" for mlayer in range(tech_info.My_range[0],tech_info.My_range[1],1)},
-        **{ f"m{mlayer+1}_m{mlayer+2}_via_cap": f"0.12f" for mlayer in range(tech_info.My_range[0],tech_info.My_range[1],1)},
-
-    }
-)

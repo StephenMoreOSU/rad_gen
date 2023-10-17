@@ -8,7 +8,7 @@ import re
 import math
 import csv
 
-import src.utils as rg_utils
+import src.common.utils as rg_utils
 
 #   ___ _   _ ___ _____ ___  __  __   _____ ___   ___  _    ___ 
 #  / __| | | / __|_   _/ _ \|  \/  | |_   _/ _ \ / _ \| |  / __|

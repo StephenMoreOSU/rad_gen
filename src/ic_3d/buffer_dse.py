@@ -20,8 +20,8 @@ import plotly.express as px
 import shapely as sh
 
 
-import src.utils as rg_utils
-import src.data_structs as rg_ds
+import src.common.utils as rg_utils
+import src.common.data_structs as rg_ds
 
 
 # UTILS
@@ -189,10 +189,14 @@ def get_meas_lines_new(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.SpTesting
     sp_meas_lines = [
         *get_subckt_hdr_lines("Measurement"),
         *get_prop_del_meas_lines(ic_3d_info, inv_isnts_in_nodes, inv_insts_out_nodes, meas_range),
+        
         #f'.PRINT v({driver_model_info.global_in_node}) ' + ' '.join([f"v({node})" for node in inv_insts_out_nodes[1:len(inv_insts_out_nodes)]])
+
         f'.PRINT ' + ' '.join([f"v({node})" for node in inv_insts_nodes ]),
-        
-        
+        # Measure statements for optimization but still should be printed either way
+        f".measure tpd param='max(rising_prop_delay_{inv_isnts_in_nodes[1]}_{inv_insts_out_nodes[-1]},falling_prop_delay_{inv_isnts_in_nodes[1]}_{inv_insts_out_nodes[-1]})' goal = 0",
+        f".measure diff param='rising_prop_delay_{inv_isnts_in_nodes[1]}_{inv_insts_out_nodes[-1]} - falling_prop_delay_{inv_isnts_in_nodes[1]}_{inv_insts_out_nodes[-1]}' goal = 0",
+
         #f'.GRAPH v({driver_model_info.global_in_node}) ' + ' '.join([f"v({node})" for node in inv_insts_out_nodes[1:len(inv_insts_out_nodes)]]) + ' title "inv_out_node_voltage" '
         # f'.PRINT ' + ' '.join([f"cap({node})" for node in inv_isnts_in_nodes])  
         # f'.plot v({driver_model_info.global_in_node}) v({inv_insts_out_nodes[1]}) v({inv_insts_out_nodes[-1]}) ',
@@ -201,11 +205,6 @@ def get_meas_lines_new(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.SpTesting
 
 
 # GLOBALS
-
-
-
-
-
 
 
 # deps for spice_simulation_setup
@@ -532,6 +531,16 @@ def write_sp_includes(ic_3d_info : rg_ds.Ic3d) -> None:
     
 
 def spice_simulation_setup(ic_3d_info: rg_ds.Ic3d) -> rg_ds.DesignInfo:
+    """ 
+        Inputs:
+            - ic_3d_info: contains information needed to generate spice files for a particular process (information in the same data structure)
+        Outputs: 
+            - Spice files:
+                - process_data library -> contains process parameters, voltage levels, and device models
+                - various subckt libs -> subckt definitions for basic spice components and subckts needed for evaluation
+                - include file -> includes all the libraries needed for spice simulation
+            - design_info: data structure updated with new information / spice libs we just created
+    """
     design_info = ic_3d_info.design_info
     # process data is what spice process data gets written out
     ic_3d_info.process_data.tech_info = {
@@ -550,7 +559,7 @@ def spice_simulation_setup(ic_3d_info: rg_ds.Ic3d) -> rg_ds.DesignInfo:
     # Write out spice parameters for the process parameters
     write_sp_process_data(ic_3d_info)
     # Initialize and write out spice files for this run
-    subckt_libs = init_subckt_libs(ic_3d_info.design_info)
+    subckt_libs = init_subckt_libs(design_info)
     write_subckt_libs(ic_3d_info, subckt_libs)
     write_sp_includes(ic_3d_info)
     design_info.subckt_libs = subckt_libs
@@ -727,7 +736,7 @@ def get_opt_sim_setup_lines(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.SpTe
         "period" : f"{targ_period}n",
     }
     # sim time
-    sim_time = targ_period + 1 # Added a litte to the sim duration to make sure crossings are captured
+    sim_time = targ_period * 1.05 # Added 5% to the sim duration to make sure crossings are captured
     opt_args = {
         "Wp" : {
             "init" : "2",
@@ -748,7 +757,7 @@ def get_opt_sim_setup_lines(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.SpTe
 
     sim_setup_lines = [
         # SWEEP DATA=sweep_data",
-        f'.OPTIONS BRIEF=1', # AUTOSTOP=1',
+        f'.OPTIONS BRIEF', # POST LIST NODE INGOLD AUTOSTOP, # AUTOSTOP=1',
         "*** Input Signal",
         f"VIN {dut_in_node} {gnd_node} {vsrc_args['type']} ({vsrc_args['init_volt']} {vsrc_args['peak_volt']} {vsrc_args['delay_time']} {vsrc_args['rise_time']} {vsrc_args['fall_time']} {vsrc_args['pulse_width']} {vsrc_args['period']})",
         f'*** Opt setup ',
@@ -765,8 +774,9 @@ def get_opt_sim_setup_lines(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.SpTe
         "*** Voltage source for device under test, this is used s.t. the power of the circuit can be measured without measring power of wave shaping and input load circuit",
         # f"V_DRIVER_SRC vdd_driver {gnd_node} {vdd_supply_node}", 
         *get_meas_lines_new(ic_3d_info, sp_testing_model),
-        f".measure tpd param='max(rising_prop_delay_{inv_isnts_in_nodes[1]}_{inv_isnts_out_nodes[-1]},falling_prop_delay_{inv_isnts_in_nodes[1]}_{inv_isnts_out_nodes[-1]})' goal = 0",
-        f".measure diff param='rising_prop_delay_{inv_isnts_in_nodes[1]}_{inv_isnts_out_nodes[-1]} - falling_prop_delay_{inv_isnts_in_nodes[1]}_{inv_isnts_out_nodes[-1]}' goal = 0",
+        
+        # f".measure tpd param='max(rising_prop_delay_{inv_isnts_in_nodes[1]}_{inv_isnts_out_nodes[-1]},falling_prop_delay_{inv_isnts_in_nodes[1]}_{inv_isnts_out_nodes[-1]})' goal = 0",
+        # f".measure diff param='rising_prop_delay_{inv_isnts_in_nodes[1]}_{inv_isnts_out_nodes[-1]} - falling_prop_delay_{inv_isnts_in_nodes[1]}_{inv_isnts_out_nodes[-1]}' goal = 0",
 
         
         #f".measure tpd param='(rising_prop_delay + falling_prop_delay)/2' goal=0 * average prop delay",
@@ -775,7 +785,15 @@ def get_opt_sim_setup_lines(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.SpTe
     ]
     return sim_setup_lines
 
-# , sp_process: rg_ds.SpProcess
+
+# def write_sp_sim(design_info: rg_ds.DesignInfo):
+#     """
+#         Inputs:
+#             - design_info: DesignInfo object containing all the information about the design
+#             - sim_type: string specifying the type of simulation to run, these could be .tran 
+#     """
+
+
 
 def write_pn_sizing_opt_sp_sim(ic_3d_info: rg_ds.Ic3d, num_stages: int, buff_fanout: int, targ_freq: int, add_wlen:int) -> List[rg_ds.SpSubCktInst]:
     """ Writes the spice file for evaluating a driver with a ubump and wireload """
@@ -794,6 +812,8 @@ def write_pn_sizing_opt_sp_sim(ic_3d_info: rg_ds.Ic3d, num_stages: int, buff_fan
         insts = test_insts,
         target_freq= targ_freq,
     )
+
+
 
     sp_sim_file_lines = [
         f'.TITLE {ic_3d_info.spice_info.sp_sim_title}_pn_opt',
@@ -999,8 +1019,294 @@ def plot_sp_run(ic_3d_info: rg_ds.Ic3d, show_flags: dict, sp_run_info: dict, sp_
 
     # fig2.show()
     return del_bar_fig
+
+
+
+def write_sp_buffer_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any], title: str, no_opt: bool = False) -> rg_ds.SpProcess:
+    """
+        Inputs: 
+            - ic_3d_info: object containing high level information needed to write out files and interact w process / design parameters
+            - process_package_params: dict containing parameters being swept for this particular buffer iteration
+        Outputs:
+            - Writes out a spice file for this buffer simulation, returns a SpProcess object to run that simulation
+    """
+
+    sp_testing_model = buffer_sim_setup_updated(ic_3d_info, sweep_params, no_opt)
+
+    sp_title = f"buffer-{title}-{rg_ds.create_timestamp()}"
+
+    if ic_3d_info.cli_args.use_latest_obj_dir:
+        obj_dir_path = rg_utils.find_newest_obj_dir(search_dir = ic_3d_info.spice_info.sp_dir, obj_dir_fmt = f"buffer-{title}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
+        if obj_dir_path != None:
+            sp_title = os.path.basename(obj_dir_path)
+
+
+    sp_sim_lines = [
+        f".TITLE {sp_title}",
+        *get_subckt_hdr_lines("Include libraries, parameters and other"),
+        f'.LIB "{ic_3d_info.spice_info.include_sp_file}" INCLUDES',
+        *get_subckt_hdr_lines("Setup and input"),
+        *get_sim_setup_lines_updated(ic_3d_info, sp_testing_model),
+        *get_meas_lines_new(ic_3d_info, sp_testing_model),
+        *[get_inst_line(inst) for inst in sp_testing_model.insts],
+        '.END',
+    ]
+
+    # Make workding dir if it doesnt exist
+    work_dir = os.path.join(ic_3d_info.spice_info.sp_dir, sp_title)
+    os.makedirs(work_dir, exist_ok=True)
+    with open(os.path.join(work_dir,f"{sp_title}.sp"),"w") as fd:
+        for l in sp_sim_lines:
+            print(l,file=fd)
+
+    # Make an SpProcess object so one can run this simulation
+    sp_out_process = rg_ds.SpProcess(
+        title = sp_title,
+        top_sp_dir = ic_3d_info.spice_info.sp_dir, 
+    )
+    return sp_out_process
+
+
+def buffer_sim_setup_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any], no_opt: bool = False) -> rg_ds.SpTestingModel:
+
+    # Metal Distance for top and bottom metal layers
+    routing_mlayer_params = {
+        "Rw" : f"'{ic_3d_info.design_info.process_info.mlayers[ic_3d_info.design_info.buffer_routing_mlayer_idx].sp_params['wire_res_per_um'].name}*({ic_3d_info.design_info.max_macro_dist} + {sweep_params['add_wlen']})'",
+        "Cw" : f"'{ic_3d_info.design_info.process_info.mlayers[ic_3d_info.design_info.buffer_routing_mlayer_idx].sp_params['wire_cap_per_um'].name}*({ic_3d_info.design_info.max_macro_dist} + {sweep_params['add_wlen']})'",
+    }
+
+    opt_params = []
+    if "P" in ic_3d_info.tx_sizing.opt_mode or no_opt:
+        wp_params = [ 
+            rg_ds.SpParam(
+                name = f"{ic_3d_info.pn_opt_model.wp_param}_{i}",
+                opt_settings = rg_ds.SpOptSettings(
+                    init = ic_3d_info.tx_sizing.p_opt_params["init"],
+                    range = ic_3d_info.tx_sizing.p_opt_params["range"],
+                    step = ic_3d_info.tx_sizing.p_opt_params["step"],
+                ),
+            ) for i in range(ic_3d_info.design_info.total_nstages)
+        ]
+        opt_params += wp_params
+    else:
+        wp_params = [ rg_ds.SpParam(
+                name = ic_3d_info.pn_opt_model.wp_param,
+                value = ic_3d_info.tx_sizing.pmos_sz
+            ) 
+        ] * ic_3d_info.design_info.total_nstages
+    if "N" in ic_3d_info.tx_sizing.opt_mode or no_opt:
+        wn_params = [ 
+            rg_ds.SpParam(
+                name = f"{ic_3d_info.pn_opt_model.wn_param}_{i}",
+                opt_settings = rg_ds.SpOptSettings(
+                    init = ic_3d_info.tx_sizing.n_opt_params["init"],
+                    range = ic_3d_info.tx_sizing.n_opt_params["range"],
+                    step = ic_3d_info.tx_sizing.n_opt_params["step"],
+                ),
+            ) for i in range(ic_3d_info.design_info.total_nstages)
+        ]
+        opt_params += wn_params
+    else:
+        wn_params = [ rg_ds.SpParam(
+                name = ic_3d_info.pn_opt_model.wn_param,
+                value = ic_3d_info.tx_sizing.pmos_sz
+            ) 
+        ] * ic_3d_info.design_info.total_nstages
+
+
+    local_sim_settings = rg_ds.SpLocalSimSettings(
+        target_freq = sweep_params["target_freq"],
+        # Create a voltage source for this simulation
+        dut_in_vsrc = rg_ds.SpVoltageSrc(
+            name = "IN",
+            type = "PULSE",
+            init_volt = "0",
+            peak_volt = f"{ic_3d_info.sp_sim_settings.vdd_param}", 
+            delay_time = "0",
+            rise_time = "0",
+            fall_time = "0",
+            # These will be set in post init
+            out_node = None, 
+            pulse_width = None,
+            period = None
+        )
+    )
+
+    # Create a spice testing model object which has some of the intial values we require to instantiate the below circuits
+    sp_testing_model = rg_ds.SpTestingModel(
+        insts = None, 
+        opt_params = opt_params,
+        sim_settings = local_sim_settings
+    )
+
+
+
+    test_iteration_isnts = rg_utils.flatten_mixed_list([
+        # For the first inst in the chain we need to manually define the input signal
+        [
+            rg_ds.SpSubCktInst(
+                name = "shape_inv",
+                subckt = ic_3d_info.design_info.subckt_libs.basic_subckts["inv"],
+                # if the param values aren't specified then the default values are used
+                param_values = {
+                    "Wn" : f"{wn_params[stage_idx].name}",
+                    "Wp" : f"{wp_params[stage_idx].name}",
+                    "fanout" : f"{sweep_params['stage_ratio']**stage_idx}",
+                },
+                conns = {
+                    "in" : "n_in", # TODO define this using a more global definition rather than hardcoding
+                    "vdd" : f"{ic_3d_info.process_data.global_nodes['vdd']}",
+                    "gnd" : f"{ic_3d_info.process_data.global_nodes['gnd']}",
+                }
+            ) for stage_idx in range(ic_3d_info.design_info.shape_nstages)
+        ],
+        [
+            rg_ds.SpSubCktInst(
+                name = f"dut_inv_stage_{stage_idx}",
+                subckt = ic_3d_info.design_info.subckt_libs.basic_subckts["inv"],
+                param_values = {
+                    "Wn" : f"{wn_params[stage_idx].name}",
+                    "Wp" : f"{wp_params[stage_idx].name}",
+                    "fanout" : f"{sweep_params['stage_ratio']**stage_idx}",
+                },
+                conns = {
+                    "vdd" : f"{ic_3d_info.process_data.global_nodes['vdd']}",
+                    "gnd" : f"{ic_3d_info.process_data.global_nodes['gnd']}",
+                }
+            )
+            for stage_idx in range(ic_3d_info.design_info.shape_nstages, ic_3d_info.design_info.dut_buffer_nstages + ic_3d_info.design_info.shape_nstages, 1)
+        ],
+        rg_ds.SpSubCktInst(
+            name = f"ESD_load_top",
+            subckt = ic_3d_info.design_info.subckt_libs.basic_subckts["wire"],
+            param_values = ic_3d_info.design_info.package_info.esd_rc_params,
+        ),
+        rg_ds.SpSubCktInst(
+            name = f"base_die_active_to_top_via_totem",
+            subckt = ic_3d_info.design_info.subckt_libs.subckts["bottom_to_top_via_stack"],
+        ),
+        # Now we define the wire loads and ubumps which are connected to the last stage of the buffer chain
+        rg_ds.SpSubCktInst(
+            name = f"top_metal_layer_wire_load",
+            subckt = ic_3d_info.design_info.subckt_libs.basic_subckts["wire"],
+            param_values = routing_mlayer_params,
+        ),
+        rg_ds.SpSubCktInst(
+            name = f"ubump_load_1",
+            subckt = ic_3d_info.design_info.subckt_libs.basic_subckts["wire"],
+            param_values = {
+                "Rw" : f"{ic_3d_info.design_info.package_info.ubump_info.sp_params['res'].name}",
+                "Cw" : f"{ic_3d_info.design_info.package_info.ubump_info.sp_params['cap'].name}",
+            },
+        ),
+        rg_ds.SpSubCktInst(
+            name = f"bot_metal_layer_wire_load",
+            subckt = ic_3d_info.design_info.subckt_libs.basic_subckts["wire"],
+            param_values = routing_mlayer_params,
+        ),
+        rg_ds.SpSubCktInst(
+            name = f"top_die_to_active_via_totem",
+            subckt = ic_3d_info.design_info.subckt_libs.subckts["bottom_to_top_via_stack"],
+        ),
+        rg_ds.SpSubCktInst(
+            name = f"ESD_load_bot",
+            subckt = ic_3d_info.design_info.subckt_libs.basic_subckts["wire"],
+            param_values = ic_3d_info.design_info.package_info.esd_rc_params,
+        ),
+        # Now we connect to the inverter chain on the base die
+        [
+            rg_ds.SpSubCktInst(
+                name = f"bottom_die_inv_{stage_idx}",
+                subckt = ic_3d_info.design_info.subckt_libs.basic_subckts["inv"],
+                param_values = {
+                    "Wn": f"{wn_params[ic_3d_info.design_info.shape_nstages + ic_3d_info.design_info.dut_buffer_nstages + stage_idx].name}", 
+                    "Wp": f"{wp_params[ic_3d_info.design_info.shape_nstages + ic_3d_info.design_info.dut_buffer_nstages + stage_idx].name}",
+                    "fanout" : f"{sweep_params['stage_ratio']**stage_idx}",
+                },
+                conns = {
+                    "vdd" : f"{ic_3d_info.process_data.global_nodes['vdd']}",
+                    "gnd" : f"{ic_3d_info.process_data.global_nodes['gnd']}", 
+                }
+            )
+            for stage_idx in range(ic_3d_info.design_info.sink_die_nstages)
+        ]
+    ])
+    
+    # manually assigning the last connection of last inst to output in spice sime:
+    test_iteration_isnts[-1].conns["out"] = sp_testing_model.dut_out_node
+    # Connect all of the instantiations Ex. out node for inst[0] is "in" node for inst[1]
+    test_iteration_isnts = direct_connect_insts(test_iteration_isnts)
+
+    sp_testing_model.insts = test_iteration_isnts
+    
+    # test_circuit_inst_lines = []
+    # for test_iteration_isnt in test_iteration_isnts:
+    #     test_circuit_inst_lines.append(get_inst_line(test_iteration_isnt))
+
+    return sp_testing_model
+
+
+def get_sim_setup_lines_updated(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.SpTestingModel) -> List[str]:
+    """ Generates lines in the spice file to specify the inputs and type of analysis """
+
+    # Just to shorten the way we access this struct
+    dut_in_vsrc = sp_testing_model.sim_settings.dut_in_vsrc
+
+
+    if "P" in ic_3d_info.tx_sizing.opt_mode and "N" not in ic_3d_info.tx_sizing.opt_mode:
+        n_param_lines = [f".PARAM {ic_3d_info.pn_opt_model.wn_param} = {ic_3d_info.tx_sizing.nmos_sz}"]
+        ratio_meas_lines = [f".MEASURE best_ratio_{i} param='{ic_3d_info.pn_opt_model.wp_param}_{i}/{ic_3d_info.pn_opt_model.wn_param}'" for i in range(ic_3d_info.design_info.total_nstages)]
+    elif "N" in ic_3d_info.tx_sizing.opt_mode and "P" not in ic_3d_info.tx_sizing.opt_mode:
+        p_param_lines = [f".PARAM {ic_3d_info.pn_opt_model.wp_param} = {ic_3d_info.tx_sizing.pmos_sz}"]
+        n_param_lines =  [f".PARAM {opt_param.name} = optw( {opt_param.opt_settings.init}, {opt_param.opt_settings.range[0]}, {opt_param.opt_settings.range[1]}, {opt_param.opt_settings.step} )" for opt_param in sp_testing_model.opt_params]
+
+        ratio_meas_lines = [f".MEASURE best_ratio_{i} param='{ic_3d_info.pn_opt_model.wp_param}/{ic_3d_info.pn_opt_model.wn_param}_{i}'" for i in range(ic_3d_info.design_info.total_nstages)]
+    elif "N" in ic_3d_info.tx_sizing.opt_mode and "P" in ic_3d_info.tx_sizing.opt_mode:
+        ratio_meas_lines = [f".MEASURE best_ratio_{i} param='{ic_3d_info.pn_opt_model.wp_param}_{i}/{ic_3d_info.pn_opt_model.wn_param}_{i}'" for i in range(ic_3d_info.design_info.total_nstages)]
+    else:
+        # lol best and only ratio
+        ratio_meas_lines = [f".MEASURE best_ratio param='{ic_3d_info.pn_opt_model.wp_param}/{ic_3d_info.pn_opt_model.wn_param}'" ]
         
 
+    param_setup_lines = [
+        "*** Param Setup",
+        f".PARAM {ic_3d_info.pn_opt_model.wn_param} = {ic_3d_info.tx_sizing.nmos_sz}",
+        f".PARAM {ic_3d_info.pn_opt_model.wp_param} = {ic_3d_info.tx_sizing.pmos_sz}",
+    ]
+
+    opt_setup_lines = [
+        "*** Opt setup ",
+        # Assign opt params 
+        *[f".PARAM {opt_param.name} = optw( {opt_param.opt_settings.init}, {opt_param.opt_settings.range[0]}, {opt_param.opt_settings.range[1]}, {opt_param.opt_settings.step} )" for opt_param in sp_testing_model.opt_params],
+        f".MODEL optmod opt itropt={ic_3d_info.tx_sizing.iters}", # set up optimization model
+        *ratio_meas_lines,
+    ]
+
+    analysis_lines = [ f".TRAN {sp_testing_model.sim_settings.sim_prec}p {sp_testing_model.sim_settings.sim_time}n" ]
+    if sp_testing_model.opt_params is not None and len(sp_testing_model.opt_params) > 0:
+        analysis_lines[0] += f" SWEEP OPTIMIZE=optw RESULTS={ic_3d_info.tx_sizing.opt_goal} MODEL=optmod"
+        analysis_lines = opt_setup_lines + analysis_lines
+
+    sim_setup_lines = [
+        f"*** Hspice Options",
+        f".OPTIONS " + " ".join([f"{k}={v}" for k,v in ic_3d_info.sp_sim_settings.sp_options.items()]),
+        "*** Input Signal",
+        f"V{dut_in_vsrc.name} {sp_testing_model.dut_in_node} {ic_3d_info.sp_sim_settings.gnd_node} {dut_in_vsrc.type} " +\
+            f"({dut_in_vsrc.init_volt} {dut_in_vsrc.peak_volt} {dut_in_vsrc.delay_time} " +\
+            f"{dut_in_vsrc.rise_time} {dut_in_vsrc.fall_time} {dut_in_vsrc.pulse_width} {dut_in_vsrc.period})",
+        "*** Voltage source for device under test, this is used s.t. the power of the circuit can be measured without measring power of wave shaping and input load circuit",
+        # Create a voltage source for each inverter index to get current for each of them
+        # TODO return this V_DRIVER_<idx>_SRC names somewhere so we can use it to generate measure statements
+        *[f"V_DRIVER_{inv_idx}_SRC vdd_driver_{inv_idx} {ic_3d_info.sp_sim_settings.gnd_node} {ic_3d_info.sp_sim_settings.vdd_param}" for inv_idx in range(ic_3d_info.design_info.total_nstages)],
+        *param_setup_lines,
+        *analysis_lines,
+    ]
+
+    # Connect newly defined voltage sources to each instantiation
+    for idx, inst in enumerate(sp_testing_model.insts):
+        inst.conns["vdd"] = f"vdd_driver_{idx}"
+    
+    return sim_setup_lines
 
 def get_sim_setup_lines(ic_3d_info: rg_ds.Ic3d, num_stages: int, sp_testing_model: rg_ds.SpTestingModel) -> List[str]:
     """ Generates lines in the spice file to specify the inputs and type of analysis """
@@ -1008,6 +1314,7 @@ def get_sim_setup_lines(ic_3d_info: rg_ds.Ic3d, num_stages: int, sp_testing_mode
     vdd_supply_node = "supply_v" #TODO Access through data structure
     gnd_node = "gnd"
     dut_in_node = "n_in"
+
     # target period in ns
     targ_period = 1/float(sp_testing_model.target_freq)*1e3
     sim_prec = 0.001*targ_period*1e3
@@ -1237,17 +1544,12 @@ def sens_study_run(ic_3d_info: rg_ds.Ic3d, process_package_params: dict, metal_d
     }
     process_package_params["load_params"] = load_params
     # Make sure mlayer idx is valid
-    assert process_package_params["load_params"]["mlayer_idx"] < len(ic_3d_info.design_info.process_info.mlayers)
+    assert abs(process_package_params["load_params"]["mlayer_idx"]) < len(ic_3d_info.design_info.process_info.mlayers)
     assert len(process_package_params["buffer_params"]["pn_ratios"]) == 1 + process_package_params["buffer_params"]["num_stages"] + ic_3d_info.design_info.bot_die_nstages
     sim_success = False
     while not sim_success:
         ####################### SETUP FOR SWEEPING DSE #######################
         write_sp_process_package_dse(ic_3d_info, process_package_params)
-        ####################### RUN SWEEPING DSE #######################
-        # sp_sim = {
-        #     "sp_work_dir": spice_info.process_package_dse.sp_dir,
-        #     "sim_sp_files": [spice_info.process_package_dse.sp_file]
-        # }
         run_spice(ic_3d_info, sp_process = ic_3d_info.spice_info.process_package_dse)
         ####################### PARSE SPICE RESULTS #######################
         parse_flags = {
@@ -1275,7 +1577,7 @@ def sens_study_run(ic_3d_info: rg_ds.Ic3d, process_package_params: dict, metal_d
         result_dict = {**result_dict, **load_params}
 
         if result_dict["mlayer_idx"] == -1: 
-            result_dict["mlayer_idx"] = f"M{len(ic_3d_info.design_info.process_info.mlayers)}"
+            result_dict["mlayer_idx"] = f"M{len(ic_3d_info.design_info.process_info.mlayers)-1}"
         else:
             result_dict["mlayer_idx"] = "M" + str(result_dict["mlayer_idx"])
 
@@ -1286,7 +1588,7 @@ def sens_study_run(ic_3d_info: rg_ds.Ic3d, process_package_params: dict, metal_d
 
 
 
-def unit_conversion(unit: str, val: float, unit_lookup: Dict[str, float]) -> float:
+def unit_conversion(unit: str, val: float, unit_lookup: Dict[str, float], sig_figs: int = None) -> float:
     """
         Converts a value from one unit to another using a unit lookup dict
         Assumptions:
@@ -1298,9 +1600,17 @@ def unit_conversion(unit: str, val: float, unit_lookup: Dict[str, float]) -> flo
         Example:
             - unit = "m", val = "1.32e-6 seconds" -> "1.32e-3 milliseconds"
     """
-    return val / unit_lookup[unit]
+    try: 
+        if sig_figs != None:
+            ret_val = round(float(val) / unit_lookup[unit], sig_figs)
+        else:
+            ret_val = float(val) / unit_lookup[unit]
+    except:
+        ret_val = val
+    return ret_val
 
-def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Dict[str, bool]) -> Tuple[pd.DataFrame, List[Dict[str, float]]]:
+
+def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Dict[str, bool] = None) -> Tuple[pd.DataFrame, dict]:
     """
         Parses spice output ".lis" file
 
@@ -1315,19 +1625,26 @@ def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Di
 
     """
     
+    if parse_flags is None:
+        parse_flags = {
+            "plot": True,
+            "measure": True,
+            "opt": True
+        }
+
     with open(sp_process.sp_outfile,"r") as lis_fd:
         lis_text = lis_fd.read()
 
     plot_df = None # get from "plot" flag
 
-    grab_tr_analysis_re_pattern = f"{res.sp_grab_tran_analysis_ub_str}{sp_process.title}"
-    grab_tr_analysis_re = re.compile(grab_tr_analysis_re_pattern, re.DOTALL)
-    tr_analysis_texts = grab_tr_analysis_re.findall(lis_text)
+    # grab_tr_analysis_re_pattern = f"{res.sp_grab_tran_analysis_ub_str}{sp_process.title}"
+    # grab_tr_analysis_re = re.compile(grab_tr_analysis_re_pattern, re.DOTALL)
+    tr_analysis_texts = res.sp_grab_tran_analysis_re.findall(lis_text)
     # Each tran analysis should be bordered by the above regex
     for tr_analysis_text in tr_analysis_texts:
         measure_text = tr_analysis_text
         # no groupds so findall returns strs
-        if parse_flags["plot"]:
+        if parse_flags.get("plot"):
             # Assumes tran analysis ie a "time" feild
             dfs = []
             plotting_print_texts = res.sp_grab_print_vals_re.findall(tr_analysis_text)
@@ -1348,7 +1665,7 @@ def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Di
                 df.columns = header
                 dfs.append(df)
             plot_df = reduce(lambda left, right: pd.merge(left , right, on="time"), dfs)
-        if parse_flags["measure"]:
+        if parse_flags.get("measure"):
             # measurement statement parsing
             measurements = []
             line_number_skip_list = [0]
@@ -1366,19 +1683,33 @@ def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Di
                     # Assumes triggers exist in same line as associated measure statement, 
                     for i in range(len(line_meas_matches) - 1):
                         meas_dict[line_meas_matches[i+1][0]] = line_meas_matches[i+1][1]
-                        # meas_dict["triggers"].append({
-                        #     "name": line_meas_matches[i+1][0],
-                        #     "val": line_meas_matches[i+1][1],
-                        # })
                     measurements.append(meas_dict)
-            
+        if parse_flags.get("opt"):
+            # Think this regex is pretty safe so were gonna just use the raw text of the whole thing
+            opt_matches = res.sp_grab_param_re.findall(lis_text)
+
+
+
         return plot_df, measurements
 
-            
-            # if idx in line_num_skip_list:
-                # continue
-            
 
-
-        # print(match)
+def plot_time_vs_voltage(sp_sim_settings: rg_ds.SpGlobalSimSettings, plot_df: pd.DataFrame):
+    # Unit conversion
+    plot_df["time"] = unit_conversion(sp_sim_settings.unit_lookup_factors["time"], plot_df["time"], sp_sim_settings.abs_unit_lookups )
+    for key in plot_df.columns[1:]:
+        plot_df[key] = unit_conversion(sp_sim_settings.unit_lookup_factors["voltage"], plot_df[key], sp_sim_settings.abs_unit_lookups )
     
+    fig = go.Figure()
+
+    # Add traces for each element being plotted
+    for col in plot_df.columns:
+        if col != "time":
+            fig.add_trace(go.Scatter(x=plot_df["time"], y=plot_df[col], name=col))
+
+    # This will be invalid if the user wants to look at something other than voltage
+    fig.update_layout(
+        title=f"Time vs Voltage",
+        xaxis_title=f"Time ({sp_sim_settings.unit_lookup_factors['time']}s)", 
+        yaxis_title=f"Voltage ({sp_sim_settings.unit_lookup_factors['voltage']}V)",
+    )
+    fig.show()

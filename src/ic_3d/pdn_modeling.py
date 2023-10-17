@@ -23,8 +23,8 @@ from shapely.ops import nearest_points
 from plotly.subplots import make_subplots
 from collections import deque
 
-import src.utils as rg_utils
-import src.data_structs as rg_ds
+import src.common.utils as rg_utils
+import src.common.data_structs as rg_ds
 
 def pairwise(iterable):
     "s -> (s0,s1), (s1,s2), (s2, s3), ..."

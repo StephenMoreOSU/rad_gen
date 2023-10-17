@@ -1,0 +1,10 @@
+# Almost the same parameters as those used in asic_dse except with the ability to do multiple hardblocks
+# If doing hardblock flow as well coffe should include all required asic configs for each hardblock
+
+# ASIC-DSE CLI settings (non design or flow run specific)
+flow_mode: hammer # "custom" or "hammer" for either full custom scripts or hammer scripts
+run_mode: serial # "parallel" or "serial"
+env_config_path: ~/rad_gen/unit_tests/inputs/asic_dse/sys_configs/asic_dse_env.yml # Path to asic dse env config
+hardblocks:
+  - hb_config_path: ~/rad_gen/unit_tests/inputs/coffe/finfet_7nm_fabric_w_hbs/alu_hb.yml
+  # - hb_config_path: ~/rad_gen/unit_tests/inputs/coffe/finfet_7nm_fabric_w_hbs/inv_hb.yml

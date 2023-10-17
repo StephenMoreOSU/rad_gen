@@ -1,0 +1,30 @@
+
+
+# Hammer based config paths
+flow_config_paths: [ 
+  ~/rad_gen/unit_tests/inputs/asic_dse/sys_configs/asap7.yml, 
+  ~/rad_gen/unit_tests/inputs/asic_dse/sys_configs/cadence_tools.yml,
+  ~/rad_gen/unit_tests/inputs/asic_dse/alu/configs/alu.yml 
+  ]
+
+# Below option is for custom flow config
+# flow_config_paths: [ ~/rad_gen/unit_tests/inputs/asic_dse/alu/configs/alu_custom_flow.yml ]
+
+# COFFE parameters:
+# These params specify how the asic hardblock is connected and floorplanned into FPGA
+# Will provide values to be used in hardblock mux transistor sizing
+name : alu_ver
+# TODO figure out if num_gen_inputs includes clock (probably not)
+num_gen_inputs : 52
+crossbar_population : 0.5
+height : 1
+num_gen_outputs : 52
+num_dedicated_outputs : 0
+soft_logic_per_block : 0.1
+area_scale_factor : 0.12
+freq_scale_factor : 1.35
+power_scale_factor : 0.3
+input_usage : 0.8
+num_crossbars : 1
+crossbar_modelling : optimistic
+

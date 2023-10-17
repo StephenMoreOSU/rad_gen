@@ -19,8 +19,8 @@ import src.asic_dse.hammer_flow as asic_hammer
 import src.asic_dse.custom_flow as asic_custom
 
 # rad gen utils imports
-import src.utils as rg_utils
-import src.data_structs as rg_ds
+import src.common.utils as rg_utils
+import src.common.data_structs as rg_ds
 
 
 rad_gen_log_fd = "asic_dse.log"

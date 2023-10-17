@@ -1,4 +1,16 @@
 
+# TODO find out what to do with these
+
+# TERMS AND CONDITIONS
+# Copyright (c) 2023, Synopsys, Inc.
+# All rights reserved.
+# These reference scripts should be used only as a reference for developing product-specific flow scripts for use in your design environment.  These scripts are not designed to run in their current form.
+# Internal use, with or without modification, is permitted.  Distribution and repackaging is not permitted.
+# THESE SCRIPTS ARE PROVIDED "AS IS" AND ANY EXPRESS, STATUTORY OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE OR NON INFRINGEMENT AND ANY WARRNTIES ARISING FROM A COURSE OF DEALING OR USAGE OF TRADE ARE DISCLAIMED. IN NO EVENT SHALL SYNOPSYS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THESE SCRIPTS, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# By downloading these scripts you acknowledge and agree to these terms.
+
+
+
 # General modules
 from typing import List, Dict, Tuple, Set, Union, Any, Type
 import os, sys
@@ -20,14 +32,14 @@ from vlsi.hammer.hammer.vlsi.driver import HammerDriver
 import vlsi.hammer.hammer.tech as hammer_tech
 
 # import gds funcs (for asap7)
-import src.gds_fns as gds_fns
+import src.common.gds_fns as gds_fns
 
 # RAD Gen modules
-import src.data_structs as rg_ds
-import src.utils as rg_utils
+import src.common.data_structs as rg_ds
+import src.common.utils as rg_utils
 
 # SRAM Compiler modules
-import src.sram_compiler as sram_compiler 
+import src.asic_dse.sram_compiler as sram_compiler 
 
 
 # from rad_gen import rad_gen_log_fd, cur_env, log_verbosity
@@ -46,6 +58,7 @@ cur_env = os.environ.copy()
 def write_pt_sdc(hammer_driver: HammerDriver):
     """
     Writes an sdc file in the format which will match the output of innovus par stage.
+    This may not be needed as Hammer produces an sdc file prior to synthesis but I think there was some issue with it
     """
     
     # create PT run-dir
@@ -90,45 +103,69 @@ def pt_init(rad_gen_settings: rg_ds.HighLvlSettings) -> Tuple[str]:
         Performs actions required prior to running PrimeTime for Power or Timing
     """
     # create PT run-dir
-    pt_outpath = os.path.join(rad_gen_settings.asic_flow_settings.obj_dir_path,"pt-rundir")
-    if not os.path.isdir(pt_outpath) :
-        os.mkdir(pt_outpath)
-
+    pt_outpath = os.path.join(rad_gen_settings.asic_flow_settings.obj_dir_path, "pt-rundir")
+    os.makedirs(pt_outpath, exist_ok=True)
+    
     # create reports dir
-    report_path = os.path.join(pt_outpath,"reports")
-    if not os.path.isdir(report_path) :
-        os.mkdir(report_path)
+    report_path = os.path.join(pt_outpath, rad_gen_settings.env_settings.report_info.report_dir)
+    unparse_report_path = os.path.join(report_path, rad_gen_settings.env_settings.report_info.unparse_report_dir)
+    os.makedirs(report_path, exist_ok=True)
+    os.makedirs(unparse_report_path, exist_ok=True)
 
     # get pnr output path (should be in this format)
     pnr_design_outpath = os.path.join(rad_gen_settings.asic_flow_settings.obj_dir_path,"par-rundir",f'{rad_gen_settings.asic_flow_settings.top_lvl_module}_FINAL')
-    if not os.path.isdir(pnr_design_outpath) :
+    if not os.path.isdir(pnr_design_outpath):
         rg_utils.rad_gen_log("Couldn't find output of pnr stage, Exiting...",rad_gen_log_fd)
         sys.exit(1)
 
-    return pt_outpath, report_path, pnr_design_outpath
+    return pt_outpath, report_path, unparse_report_path, pnr_design_outpath
 
 def write_pt_power_script(rad_gen_settings: rg_ds.HighLvlSettings):
-    pt_outpath, report_path, pnr_design_outpath = pt_init(rad_gen_settings)
+    pt_outpath, report_path, unparse_report_path, pnr_design_outpath = pt_init(rad_gen_settings)
 
     # Make sure that the $STDCELLS env var is set and use it to find the .lib files to use for Primetime
-    search_paths = [os.path.join(rad_gen_settings.env_settings.rad_gen_home_path, lib) for lib in ["sram_db_libs","asap7_db_libs"] ]  #"/CMC/tools/synopsys/syn_vN-2017.09/libraries/syn /CMC/tools/synopsys/syn_vN-2017.09/libraries/syn_ver /CMC/tools/synopsys/syn_vN-2017.09/libraries/sim_ver"
     db_dirs =  [os.path.join(rad_gen_settings.env_settings.rad_gen_home_path,db_lib) for db_lib in ["sram_db_libs","asap7_db_libs"] ]
-    target_libs = " ".join([os.path.join(db_dir,lib) for db_dir in db_dirs for lib in os.listdir(db_dir) if (lib.endswith(".db"))]) #and corner_filt_str in lib and transistor_type_str in lib) ])
+    
+    # Use FF corner for worst case power
+    corners = ["FF"]
+    tx_types = ["SLVT", "LVT"]
+    filt_strs = [f"{tx_type}_{corner}" for corner in corners for tx_type in tx_types]
+    target_libs = " ".join([
+        os.path.join(db_dir, lib)\
+        for db_dir in db_dirs\
+        for lib in os.listdir(db_dir)\
+        for filt_str in filt_strs\
+        if lib.endswith(".db") and filt_str in lib
+    ])
+    
     #default switching probability (TODO) find where this is and make it come from there
     switching_prob = "0.5"
-    report_power_cmd = "report_power > " + os.path.join(report_path,"power.rpt")
+    report_power_cmds = [ 
+        "report_power > " + os.path.join(report_path,"power.rpt"),
+        # From PrimeTime RM
+        "report_power -threshold_voltage_group > " + os.path.join(unparse_report_path, "power_per_lib_leakage.rpt"),
+        "report_threshold_voltage_group > " + os.path.join(unparse_report_path, "power_per_volt_th_grp.rpt"),
+    ]
+    # TODO implement multimodal analysis (mainly only for power but its also relevant to timing)
+    # By multimodal analysis I mean something like inputs to muxes which control mode of operation of something like a DSP block
+    # More complicated examples may be inputting different instructions to a processor
     case_analysis_cmds = ["#MULTIMODAL ANALYSIS DISABLED"]
     #get switching activity and toggle rates from power_constraints tcl file
     top_mod = rad_gen_settings.asic_flow_settings.hammer_driver.database.get_setting("power.inputs.top_module")
+
+    # Open power constraints file and grab toggle rate
     power_constraints_fd = open(os.path.join(pnr_design_outpath,f'{top_mod}_power_constraints.tcl'),"r")
     power_constraints_lines = power_constraints_fd.readlines()
+    power_constraints_fd.close()
+
+    # Grabbing sequential activity
     toggle_rate_var = "seq_activity"
     grab_opt_val_re = re.compile(f"(?<={toggle_rate_var}\s).*")
-    toggle_rate = ""
+    # This is a decent default toggle rate value
+    toggle_rate = "0.25"
     for line in power_constraints_lines:
         if "set_default_switching_activity" in line:
             toggle_rate = str(grab_opt_val_re.search(line).group(0))
-    power_constraints_fd.close()
     switching_activity_cmd = "set_switching_activity -static_probability " + switching_prob + " -toggle_rate " + toggle_rate + " -base_clock $my_clock_pin -type inputs"
     # access driver db to get required info
     top_mod = rad_gen_settings.asic_flow_settings.hammer_driver.database.get_setting("power.inputs.top_module")
@@ -139,22 +176,29 @@ def write_pt_power_script(rad_gen_settings: rg_ds.HighLvlSettings):
     # Just taking index 0 which is the 100C corner for case of high power
     spef_path = rad_gen_settings.asic_flow_settings.hammer_driver.database.get_setting("power.inputs.spefs")[0]
     file_lines = [
+        "set power_enable_analysis true", 
+        "set power_enable_multi_rail_analysis true", 
+        "set power_analysis_mode averaged", 
         "set sh_enable_page_mode true",
-        "set search_path " + f"\"{search_paths}\"",
+        "set search_path " + f"\"{' '.join(db_dirs)}\"",
         "set my_top_level " + top_mod,
         "set my_clock_pin " + clk_pin,
         "set target_library " + f"\"{target_libs}\"",
+        # Not sure about difference between these two but I think they should be the same
         "set link_library " + "\"* $target_library\"",
+        "set link_path " + "\"* $target_library\"", 
         "read_verilog " + verilog_netlist,
         "current_design $my_top_level",
         case_analysis_cmds,
         "link",
+        # Read in constraints
         f"read_sdc -echo {pt_outpath}/pt.sdc",
+        # read in parasitics from pnr stage
         "read_parasitics -increment " + spef_path,
-        "set power_enable_analysis TRUE",
-        "set power_analysis_mode \"averaged\"",
         switching_activity_cmd,
-        report_power_cmd,
+        "check_power > " + os.path.join(report_path,"check_power.rpt"),
+        "update_power", 
+        *report_power_cmds,
         "quit",
     ]
 
@@ -172,32 +216,40 @@ def write_pt_timing_script(rad_gen_settings: rg_ds.HighLvlSettings):
     writes the tcl script for timing analysis using Synopsys Design Compiler, tested under 2017 version
     This should look for setup/hold violations using the worst case (hold) and best case (setup) libs
     """
-    pt_outpath, report_path, pnr_design_outpath = pt_init(rad_gen_settings)
-
-    # TODO all hardcoded paths need to be moved to the config file
+    pt_outpath, report_path, unparse_report_path, pnr_design_outpath = pt_init(rad_gen_settings)
 
     # Make sure that the $STDCELLS env var is set and use it to find the .lib files to use for Primetime
-    search_paths = [os.path.join(rad_gen_settings.env_settings.rad_gen_home_path, lib) for lib in ["sram_db_libs","asap7_db_libs"] ]  #"/CMC/tools/synopsys/syn_vN-2017.09/libraries/syn /CMC/tools/synopsys/syn_vN-2017.09/libraries/syn_ver /CMC/tools/synopsys/syn_vN-2017.09/libraries/sim_ver"
-    db_dirs =  [os.path.join(rad_gen_settings.env_settings.rad_gen_home_path,db_lib) for db_lib in ["sram_db_libs","asap7_db_libs"] ]
 
-
-    # I tried to filter out specific corners and transistors but it results in errors ¯\_(ツ)_/¯
-    # options are ["TT","FF","SS"]
-    # corner_filt_str = "TT"
-    # options are ["SLVT", "LVT", "RVT", "SRAM"] in order of decreasing drive strength
-    # transistor_type_str = "SLVT"
+    # Below are some example generic paths for a tool like synopsys design compiler     
+    #"/CMC/tools/synopsys/syn_vN-2017.09/libraries/syn /CMC/tools/synopsys/syn_vN-2017.09/libraries/syn_ver /CMC/tools/synopsys/syn_vN-2017.09/libraries/sim_ver"
     
-    target_libs = " ".join([os.path.join(db_dir,lib) for db_dir in db_dirs for lib in os.listdir(db_dir) if (lib.endswith(".db"))]) #and corner_filt_str in lib and transistor_type_str in lib) ])
+    db_dirs =  [os.path.join(rad_gen_settings.env_settings.rad_gen_home_path, db_lib) for db_lib in ["sram_db_libs","asap7_db_libs"] ]
+
+
+    # corner options are ["SS", "TT", "FF"]
+    # tx_type options are ["SLVT", "LVT", "RVT", "SRAM"] in order of decreasing drive strength
+
+    # Designs are made up of SLVT and LVT if not including SRAMs
+    # Using SS corner to show worst case timing
+    corners = ["SS"]
+    tx_types = ["SLVT", "LVT"]
+    filt_strs = [f"{tx_type}_{corner}" for corner in corners for tx_type in tx_types]
+    target_libs = " ".join([
+        os.path.join(db_dir, lib)\
+        for db_dir in db_dirs\
+        for lib in os.listdir(db_dir)\
+        for filt_str in filt_strs\
+        if lib.endswith(".db") and filt_str in lib
+    ]) 
     
-    #default switching probability (TODO) find where this is and make it come from there
-    # switching_prob = "0.5"
-
-
-
-
     # report timing / power commands
-    report_timing_cmd = "report_timing > " + os.path.join(report_path,"timing.rpt")
-    #report_power_cmd = "report_power > " + os.path.join(report_path,"power.rpt")
+    report_timing_cmds = [
+        "report_timing > " + os.path.join(report_path,"timing.rpt"),
+        "report_global_timing > " + os.path.join(unparse_report_path, "global_timing.rpt"),
+        "report_clock -skew -attribute > " + os.path.join(unparse_report_path, "clock_timing.rpt"),
+        "report_analysis_coverage > " + os.path.join(unparse_report_path, "analysis_coverage.rpt"),
+        "report_timing -slack_lesser_than 0.0 -delay min_max -nosplit -input -net > " + os.path.join(unparse_report_path, "timing_violations.rpt"),
+    ]
     # <TAG> <MULTIMODAL-PWR-TIMING TODO>
     case_analysis_cmds = ["#MULTIMODAL ANALYSIS DISABLED"]
     
@@ -210,7 +262,7 @@ def write_pt_timing_script(rad_gen_settings: rg_ds.HighLvlSettings):
     #This part should be reported for all the modes in the design.
     file_lines = [
         "set sh_enable_page_mode true",
-        "set search_path " + f"\"{search_paths}\"",
+        "set search_path " + f"\"{' '.join(db_dirs)}\"",
         "set my_top_level " + top_mod,
         "set my_clock_pin " + clk_pin,
         "set target_library " + f"\"{target_libs}\"",
@@ -220,9 +272,11 @@ def write_pt_timing_script(rad_gen_settings: rg_ds.HighLvlSettings):
         case_analysis_cmds,
         "link",
         #set clock constraints (this can be done by defining a clock or specifying an .sdc file)
-        #read constraints file
         f"read_sdc -echo {pt_outpath}/pt.sdc",
-        report_timing_cmd,
+        "check_timing -verbose > " + os.path.join(report_path,'check_timing.rpt'),
+        "update_timing -full",
+        #read constraints file
+        *report_timing_cmds,
         "quit",
     ]
     file_lines = rg_utils.flatten_mixed_list(file_lines)
@@ -478,7 +532,7 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
                         rad_gen_config = yaml.safe_load(config_fd)
                     rad_gen_config["synthesis"]["inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_str))
                     mod_config_path = os.path.splitext(base_config_path)[0]+f'_{p_name}_{p_val}.yaml'
-                    print("Writing modified config file to: "+mod_config_path,rad_gen_log_fd)
+                    print("Writing modified config file to: " + mod_config_path, rad_gen_log_fd)
                     with open(mod_config_path,"w") as config_fd:
                         yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
                     mod_config_paths.append(mod_config_path)
@@ -1069,15 +1123,29 @@ def parse_report_c(rad_gen_settings: rg_ds.HighLvlSettings, top_level_mod: str, 
                     timing_dict["Setup"] = float(rad_gen_settings.env_settings.res.decimal_re.findall(line)[0])
                 elif "data arrival time" in line:
                     timing_dict["Arrival"] = float(rad_gen_settings.env_settings.res.decimal_re.findall(line)[0])
-                elif "slack" in line:
+                elif "slack" in line and rad_gen_settings.env_settings.res.decimal_re.search(line):
                     timing_dict["Slack"] = float(rad_gen_settings.env_settings.res.signed_dec_re.findall(line)[0])
                 elif "Setup" in timing_dict and "Arrival" in timing_dict:
                     timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
                 # This indicates taht all lines have been read in and we can append the timing_dict
             report_list.append(timing_dict)
+        # elif flow_stage["tool"] == "synopsys":
+        #     timing_dict = {}
+        #     for line in timing_rpt_text.split("\n"):
+        #         if "library setup time" in line:
+        #             timing_dict["Setup"] = float(rad_gen_settings.env_settings.res.decimal_re.findall(line)[0])
+        #         elif "data arrival time" in line:
+        #             timing_dict["Arrival"] = float(rad_gen_settings.env_settings.res.decimal_re.findall(line)[0])
+        #         elif "slack" in line:
+        #             timing_dict["Slack"] = float(rad_gen_settings.env_settings.res.signed_dec_re.findall(line)[0])
+        #         elif "Setup" in timing_dict and "Arrival" in timing_dict:
+        #             timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
+        #         # This indicates taht all lines have been read in and we can append the timing_dict
+        #     report_list.append(timing_dict)
     elif(rep_type == "power"):
         power_rpt_text = open(report_path,"r").read()
-        if flow_stage["tool"] == "synopsys":
+        # TODO should have a section for subtools being used in stages of flow as dc_shell can do timing analysis but doesnt output primetime format
+        if flow_stage["tool"] == "synopsys_dc":
             power_dict = {}
             for line in power_rpt_text.split("\n"):
                 if "Total Dynamic Power" in line:
@@ -1101,6 +1169,48 @@ def parse_report_c(rad_gen_settings: rg_ds.HighLvlSettings, top_level_mod: str, 
                         pwr_vals_line = pwr_vals_line.replace(pwr_val,"")
                     power_dict["Total"] = pwr_totals[-1]
             report_list.append(power_dict)
+        elif flow_stage["tool"] == "synopsys":
+            power_dict = {}
+            power_data = []
+            # Section for capturing detailed primetime power data
+            # TODO figure out something to do with this, it doesn't get returned to summary dict as others do because its format is tabular rather than a single row which can be mapped to df
+            # for line in power_rpt_text.split("\n"):
+            #     headers_captured = False
+            #     # After headers captured we start to look at the values
+            #     if headers_captured:
+            #         power_data_dict = {}
+            #         line_vals = rad_gen_settings.env_settings.res.wspace_re.split(line)
+            #         if len(line_vals) != len(power_type_headers):
+            #             break
+                    
+            #         for val_str, header in zip(line_vals, power_type_headers):
+            #             if header not in ["Power Group", "Attributes"]:
+            #                 val = rad_gen_settings.env_settings.res.sci_not_dec_re.search(val_str).group(0)
+            #             else:
+            #                 val = val_str
+            #             power_data_dict[header] = val
+            #             power_data.append(power_data_dict)
+            #     # Based on power report we assume it starts with "Internal" for first line of column headers
+            #     if "Internal" in line:
+            #         # There is a "Power Group" and "Percentage" column on opposite of each sides
+            #         power_type_headers = ["Power Group"] + rad_gen_settings.env_settings.res.wspace_re.split(line) + ["Percentage", "Attributes"]
+            #         headers_captured = True
+            for line in power_rpt_text.split("\n"):
+                if "Net Switching Power" in line:
+                    vals = rad_gen_settings.env_settings.res.sci_not_dec_re.findall(line)
+                    power_dict["Switching"] = float(vals[0])
+                elif "Cell Internal Power" in line:
+                    vals = rad_gen_settings.env_settings.res.sci_not_dec_re.findall(line)
+                    power_dict["Switching"] = float(vals[0])
+                elif "Cell Leakage Power" in line:
+                    vals = rad_gen_settings.env_settings.res.sci_not_dec_re.findall(line)
+                    power_dict["Leakage"] = float(vals[0])
+                elif "Total Power" in line:
+                    vals = rad_gen_settings.env_settings.res.sci_not_dec_re.findall(line)
+                    power_dict["Total"] = float(vals[0])
+            report_list.append(power_dict)
+
+        
         elif flow_stage["tool"] == "cadence":
             cadence_hdr_catagories = ["Leakage","Internal","Switching","Total","Row%"]
             power_dict = {}
@@ -1152,7 +1262,7 @@ def get_report_results(rad_gen_settings: rg_ds.HighLvlSettings, top_level_mod: s
         rg_utils.rad_gen_log(f"Warning: {flow_stage['name']} report path does not exist", rad_gen_log_fd)
     return results 
 
-def parse_output(rad_gen_settings: rg_ds.HighLvlSettings,top_level_mod: str, output_path: str):
+def parse_output(rad_gen_settings: rg_ds.HighLvlSettings, top_level_mod: str, output_path: str):
     syn_dir = "syn-rundir"
     par_dir = "par-rundir"
     pt_dir = "pt-rundir"
@@ -1591,7 +1701,6 @@ def run_hammer_flow(rad_gen_settings: rg_ds.HighLvlSettings, config_paths: List[
     if rad_gen_settings.asic_flow_settings.run_pt:
         write_pt_sdc(rad_gen_settings.asic_flow_settings.hammer_driver)
 
-
         # Check to see if sram parameters exist in the database
         try:
             sram_params = rad_gen_settings.asic_flow_settings.hammer_driver.database.get_setting("vlsi.inputs.sram_parameters")
@@ -1607,7 +1716,7 @@ def run_hammer_flow(rad_gen_settings: rg_ds.HighLvlSettings, config_paths: List[
             conversion_libs = []
             for timing_lib_path in timing_lib_paths:
                 conversion_libs += [os.path.join(timing_lib_path,f) for f in os.listdir(timing_lib_path) if f.endswith(".lib")]
-            # Run Synopsys logic compier to convert .lib to .db
+            # Run Synopsys logic compiler to convert .lib to .db
             lc_script_path = write_lc_lib_to_db_script(rad_gen_settings, conversion_libs)
             lc_run_cmd = f"lc_shell -f {lc_script_path}"
             # Change to pt-rundir
@@ -1622,17 +1731,17 @@ def run_hammer_flow(rad_gen_settings: rg_ds.HighLvlSettings, config_paths: List[
         os.chdir(os.path.join(rad_gen_settings.asic_flow_settings.hammer_driver.obj_dir,"pt-rundir"))
 
         # Run Timing
-        timing_stdout, timing_stderr = rg_utils.run_shell_cmd_no_logs("dc_shell-t -f pt_timing.tcl")
+        timing_stdout, timing_stderr = rg_utils.run_shell_cmd_no_logs("pt_shell -f pt_timing.tcl")
         with open("timing_stdout.log","w") as fd:
             fd.write(timing_stdout)
         with open("timing_stderr.log","w") as fd:
             fd.write(timing_stderr)
 
         # Run Power
-        power_stdout, power_stderr = rg_utils.run_shell_cmd_no_logs("dc_shell-t -f pt_power.tcl")
-        with open("timing_stdout.log","w") as fd:
+        power_stdout, power_stderr = rg_utils.run_shell_cmd_no_logs("pt_shell -f pt_power.tcl")
+        with open("power_stdout.log","w") as fd:
             fd.write(power_stdout)
-        with open("timing_stderr.log","w") as fd:
+        with open("power_stderr.log","w") as fd:
             fd.write(power_stderr)
 
 

@@ -44,27 +44,25 @@ import sys
 import math
 
 # Subcircuit Modules
-import COFFE.coffe.basic_subcircuits as basic_subcircuits
-import COFFE.coffe.mux_subcircuits as mux_subcircuits
-import COFFE.coffe.lut_subcircuits as lut_subcircuits
-import COFFE.coffe.ff_subcircuits as ff_subcircuits
-import COFFE.coffe.load_subcircuits as load_subcircuits
-import COFFE.coffe.memory_subcircuits as memory_subcircuits
-import COFFE.coffe.utils as utils
-import COFFE.coffe.tran_sizing as tran_sizing
+import src.coffe.basic_subcircuits as basic_subcircuits
+import src.coffe.mux_subcircuits as mux_subcircuits
+import src.coffe.lut_subcircuits as lut_subcircuits
+import src.coffe.ff_subcircuits as ff_subcircuits
+import src.coffe.load_subcircuits as load_subcircuits
+import src.coffe.memory_subcircuits as memory_subcircuits
+import src.coffe.utils as utils
+import src.coffe.tran_sizing as tran_sizing
 
 # Top level file generation module
-import COFFE.coffe.top_level as top_level
+import src.coffe.top_level as top_level
 
 # HSPICE handling module
-import COFFE.coffe.spice as spice
+import src.coffe.spice as spice
 
 # Rad Gen data structures
-import src.data_structs as rg_ds
+import src.common.data_structs as rg_ds
 
 # ASIC DSE imports
-import src.asic_dse.custom_flow as custom_flow
-import src.asic_dse.hammer_flow as hammer_flow
 import src.asic_dse.asic_dse as asic_dse
 
 

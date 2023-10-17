@@ -1,5 +1,5 @@
 
-from typing import List, Dict, Tuple, Set, Union, Any, Type
+from typing import List, Dict, Tuple, Set, Union, Any, Type, Callable
 import os, sys, yaml
 import argparse
 import datetime
@@ -18,7 +18,7 @@ import vlsi.hammer.hammer.tech as hammer_tech
 
 
 # RAD-Gen modules
-import src.data_structs as rg_ds
+import src.common.data_structs as rg_ds
 
 # COFFE modules
 import COFFE.coffe.utils as coffe_utils
@@ -245,7 +245,16 @@ def sanitize_config(config_dict) -> dict:
     return config_dict
 
 def get_df_output_lines(df: pd.DataFrame) -> List[str]:
-    cell_chars = 40
+    max_col_lens = max([len(str(col)) for col in df.columns])
+    row_strings = [0]
+    for col in df.columns:
+        for row_idx in df.index:
+            if isinstance(df[col].iloc[row_idx], str):
+                row_strings.append(len(df[col].iloc[row_idx]))
+    cell_chars = max(max_col_lens, max(row_strings) )
+
+
+    # cell_chars = 40
     ncols = len(df.columns)
     seperator = "+".join(["-"*cell_chars]*ncols)
     format_str = f"{{:^{cell_chars}}}"
@@ -308,25 +317,54 @@ def check_for_valid_path(path):
         raise FileNotFoundError(f"ERROR: {path} does not exist")
     return ret_val
 
-def handle_error(fn, expected_vals: set=None):
+def handle_error(fn, expected_vals: set = None):
     # for fn in funcs:
     if not fn() or (expected_vals is not None and fn() not in expected_vals):
         sys.exit(1)
-            
-def sanitize_config(config_dict) -> dict:
-    """
-        Modifies values of yaml config file to do the following:
-        - Expand relative paths to absolute paths
-    """    
-    for param, value in config_dict.copy().items():
-        if("path" in param or "sram_parameters" in param):
-            if isinstance(value, list):
-                config_dict[param] = [os.path.realpath(os.path.expanduser(v)) for v in value]
-            elif isinstance(value, str):
-                config_dict[param] = os.path.realpath(os.path.expanduser(value))
+
+
+def traverse_nested_dict(in_dict: Dict[str, Any], callable_fn: Callable) -> Dict[str, Any]:
+    assert callable(callable_fn), "callable_fn must be a function"
+    for k,v in in_dict.items():
+        if isinstance(v, dict):
+            in_dict[k] = traverse_nested_dict(v, callable_fn)
+        else:
+            # Callable function applies to each non dict element in nested dict
+            in_dict[k] = callable_fn(k, v)
+    return in_dict
+
+def sanitize_element(param: str, ele_val: Any):
+    # Here are the key matches which makes sanitizer think its a path
+    # TODO there may be a better way to do but this way you just have to list all path related keys below
+    path_keys = ["path", "sram_parameters", "file", "dir", "home"]
+    inv_path_keys = ["meta", "use_latest"] # even if path keys are in param if negative keys are in param then its not a path
+    is_param_path_lists = []
+    for path_key in path_keys:
+        is_param_path_list = []
+        for neg_key in inv_path_keys:
+            if path_key in param and neg_key not in param:
+                is_param_path_list.append(True)
             else:
-                pass
-    return config_dict
+                is_param_path_list.append(False)
+        is_param_path_lists.append(all(is_param_path_list))
+    if any( is_param_path_lists): #(path in param and neg not in param) for neg in inv_path_keys for path in path_keys ): # and neg not in param
+        if isinstance(ele_val, list):
+            ret_val = [clean_path(v) for v in ele_val]
+        elif isinstance(ele_val, str):
+            ret_val = clean_path(ele_val)
+        else:
+            raise ValueError(f"ERROR: (k, v) pair: ({param} {ele_val}) is wrong datatype for paths")
+    else:
+        ret_val = ele_val
+    return ret_val
+
+def sanitize_config(config_dict: Dict[str, Any]) -> dict:
+    """
+        Modifies values of a config file to do the following:
+            - Expand relative paths to absolute paths
+    """    
+
+    return traverse_nested_dict(config_dict, sanitize_element)
 
 def parse_yml_config(yaml_file: str) -> dict:
     """
@@ -441,7 +479,6 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
     
 
     # Default value dictionary for any arg that has a non None or False for default value
-    
     default_arg_vals = {}
 
     #     _   ___ ___ ___   ___  ___ ___     _   ___  ___ ___ 
@@ -455,7 +492,7 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
             "flow_mode": "hammer",
             "run_mode": "serial",
         }
-        parser.add_argument('-r', '--run_mode', help="mode in which asic flow is run, either parallel or serial", type=str, choices=["parallel", "serial"], default="serial")
+        parser.add_argument('-r', '--run_mode', help="mode in which asic flow is run, either parallel or serial", type=str, choices=["parallel", "serial", "gen_scripts"], default="serial")
         parser.add_argument('-m', "--flow_mode", help="option for backend tool to generate scripts & run asic flow with", type=str, choices=["custom", "hammer"], default=default_arg_vals["flow_mode"])
         parser.add_argument('-e', "--env_config_path", help="path to asic-dse env config file", type=str, default=None)
         parser.add_argument('-t', '--top_lvl_module', help="name of top level design in HDL", type=str, default=None)
@@ -493,9 +530,8 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
             "size_hb_interfaces": 0.0,
         }
 
-
         parser.add_argument('-f', '--fpga_arch_conf_path', help ="path to config file containing coffe FPGA arch information", type=str, default= None)
-        parser.add_argument('-hb', '--hb_flows_conf_path', type=float, default=None, help="top level hardblock flows config file, this specifies all hardblocks and asic flows used")
+        parser.add_argument('-hb', '--hb_flows_conf_path', type=str, default=None, help="top level hardblock flows config file, this specifies all hardblocks and asic flows used")
         parser.add_argument('-n', '--no_sizing', help="don't perform transistor sizing", action='store_true')
         parser.add_argument('-o', '--opt_type', type=str, choices=["global", "local"], default = default_arg_vals["opt_type"], help="choose optimization type")
         parser.add_argument('-s', '--initial_sizes', type=str, default = default_arg_vals["initial_sizes"], help="path to initial transistor sizes")
@@ -508,13 +544,11 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
         parser.add_argument('-q', '--quick_mode', type=float, default=-1.0, help="minimum cost function improvement for resizing")
         
                 
-        #arguments for ASIC flow 
+        #arguments for ASIC flow TODO integrate some of these into the asic_dse tool, functionality already exists just needs to be connected
         # parser.add_argument('-ho',"--hardblock_only",help="run only a single hardblock through the asic flow", action='store_true',default=False)
         # parser.add_argument('-g',"--gen_hb_scripts",help="generates all hardblock scripts which can be run by a user",action='store_true',default=False)
         # parser.add_argument('-p',"--parallel_hb_flow",help="runs the hardblock flow for current parameter selection in a parallel fashion",action='store_true',default=False)
         # parser.add_argument('-r',"--parse_pll_hb_flow",help="parses the hardblock flow from previously generated results",action='store_true',default=False)
-
-
 
     #   _______    ___ ___     _   ___  ___ ___ 
     #  |__ /   \  |_ _/ __|   /_\ | _ \/ __/ __|
@@ -525,7 +559,7 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
         parser.add_argument('-p', '--pdn_modeling', help="performs pdn modeling", action="store_true")
         parser.add_argument('-b', '--buffer_dse', help="brute forces the user provided range of stage ratio and number of stages for buffer sizing", action="store_true")
         parser.add_argument('-s', '--buffer_sens_study', help="sweeps parameters for buffer chain wire load, plots results", action="store_true")
-
+        parser.add_argument('-l', '--use_latest_obj_dir', help="for spice work dirs, old outputs are overriden rather than creating a new obj dir", action='store_true') 
         parser.add_argument('-c', '--input_config_path', help="top level input config file", type=str, default=None)
     
     args = parser.parse_args()
@@ -535,15 +569,15 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
 def init_structs_top(args: argparse.Namespace, gen_arg_keys: List[str], default_arg_vals: Dict[str, Any]) -> Dict[str, Any]:
     # ARGS CAN BE PASSED FROM CONFIG OR CLI
     # NOTE: CLI ARGS OVERRIDE CONFIG ARGS!
+
     top_conf = {}
     if args.top_config_path is not None:
         top_conf = parse_yml_config(args.top_config_path)
 
     cli_dict = vars(args)
 
-    # TODO include default values to be passed from the cli without overriding
     # Below currently parses the cli args and will always take the cli arg value over whats in the config file (if cli arg == None)
-    # TODO add a way to say if cli_arg == default_cli_value && key exists in the config file -> then use the config file instead of cli 
+    # If cli_arg == default_cli_value && key exists in the config file -> then tool will use the config file instead of cli 
 
     # Comparing two input param dicts one coming from cli and one from config file for each tool
     subtool_confs = {}
@@ -570,8 +604,8 @@ def init_structs_top(args: argparse.Namespace, gen_arg_keys: List[str], default_
         subtool_confs[subtool] = result_conf
 
     # Before this function make sure all of the parameters have been defined in the dict with default values if not specified
-    # TODO change the cli_dict to result dict wh
     rad_gen_info = {}
+
     # Loop through subtool keys and call init function to return data structures
     # init functions are in the form init_<subtool>_structs
     for subtool in subtool_confs.keys():
@@ -582,6 +616,31 @@ def init_structs_top(args: argparse.Namespace, gen_arg_keys: List[str], default_
             raise ValueError(f"ERROR: {subtool} is not a valid subtool ('init_{subtool}_structs' is not a defined function)")
     return rad_gen_info
     
+
+def init_asic_config(env: rg_ds.EnvSettings, conf_path: str) -> str:
+    """
+        This function is specifically to clean up the configs passed to hammer prior to initialization of the
+        ASICFlowSettings data structure.
+        Hammer only accepts absolute paths so we need to convert our paths with home dir to abspaths
+    """
+    # Generate the directories using the structure specifed in env
+    # Use the path of the config file to determine where they are created
+    conf_dir = os.path.dirname(conf_path)
+    conf_name = os.path.basename(os.path.splitext(conf_path)[0])
+    for dir in env.input_dir_struct["configs"].keys():
+        os.makedirs(os.path.join(conf_dir, dir), exist_ok=True)
+
+    # Our yaml parsing function should perform sanitization
+    conf_dict = parse_yml_config(conf_path)
+    conf_out_path = os.path.join(conf_dir, env.input_dir_struct["configs"]["mod"],conf_name + "_pre_proc.yml" )
+    with open(conf_out_path, "w" ) as f:
+        yaml.safe_dump(conf_dict, f, sort_keys = False)
+
+    return conf_out_path
+
+
+
+
 
 def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSettings:
     """
@@ -613,8 +672,13 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
     env_settings = init_dataclass(rg_ds.EnvSettings, env_conf["env"], env_inputs)
 
     # TODO we should get tech info from another place, but for determining ASAP7 rundir is kinda hard
-    tech_info = init_dataclass(rg_ds.TechInfo, env_conf["tech"], {})
+    if "tech" in env_conf.keys():
+        tech_info = init_dataclass(rg_ds.StdCellTechInfo, env_conf["tech"], {})
 
+    # Initialize optional parameters
+    custom_asic_flow_settings = None
+    
+    
     asic_flow_settings_input = {} # asic flow settings
     mode_inputs = {} # Set appropriate tool modes
     vlsi_mode_inputs = {} # vlsi flow modes
@@ -662,8 +726,13 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
         # Initializes Data structures to be used for running stages in ASIC flow
 
         design_sweep_infos = None
-        
+
+
         if asic_dse_conf["flow_config_paths"] != None:
+            # Before parsing asic flow config we should run them through pre processing thats general to all input files
+            for idx, path in enumerate(asic_dse_conf["flow_config_paths"]):
+                asic_dse_conf["flow_config_paths"][idx] = init_asic_config(env_settings, asic_dse_conf["flow_config_paths"][idx])
+            
             # enable asic flow to be run
             vlsi_mode_inputs["enable"] = True
             vlsi_mode_inputs["flow_mode"] = asic_dse_conf["flow_mode"]
@@ -683,7 +752,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
                 custom_asic_flow_settings = load_hb_params(clean_path(asic_dse_conf["flow_config_paths"][0]))
 
             elif asic_dse_conf["flow_mode"] == "hammer":
-                custom_asic_flow_settings = None
 
                 # Initialize a Hammer Driver, this will deal with the defaults & will allow us to load & manipulate configs before running hammer flow
                 driver_opts = HammerDriver.get_default_driver_options()
@@ -914,9 +982,13 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
     )
 
     esd_rc_params = ic_3d_conf["design_info"]["esd_load_rc_wire_params"]
-    add_wlens = ic_3d_conf["design_info"]["add_wire_lengths"]
+    if "add_wire_lengths" in ic_3d_conf["design_info"].keys():
+        add_wlens = ic_3d_conf["design_info"]["add_wire_lengths"]
+    else:
+        add_wlens = [0]
 
     # Other Spice Setup stuff
+    # These should be set as defined values rather than k,v pairs so each can be easily accessed from elsewhere
     process_data = rg_ds.SpProcessData(
         global_nodes = {
             "gnd": "gnd",
@@ -938,7 +1010,7 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
             "dvr_ic_in_cap" : "0.001f",
         },
         geometry_info = None, # These are set later
-        tech_info = None
+        tech_info = None # These are set later
     )
 
 
@@ -1023,8 +1095,12 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
             grid=None,
         )
     )
-
     
+    tx_sizing = rg_ds.TxSizing(
+        opt_mode = ic_3d_conf["d2d_buffer_dse"]["tx_sizing"]["opt_mode"],
+        pmos_sz= ic_3d_conf["d2d_buffer_dse"]["tx_sizing"]["pmos_sz"],
+        nmos_sz= ic_3d_conf["d2d_buffer_dse"]["tx_sizing"]["nmos_sz"],
+    )    
 
 
     ic3d_inputs = {
@@ -1039,6 +1115,8 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
         "stage_range": stage_range,
         "fanout_range": fanout_range,
         "cost_fx_exps": cost_fx_exps,
+        "tx_sizing": tx_sizing,
+        
         # previous globals from 3D IC TODO fix this to take required params from top conf
         # remove all these bs dataclasses I don't need
         "spice_info": rg_ds.SpInfo(),

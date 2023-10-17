@@ -45,3 +45,7 @@ done
 ## PYTHONPATH for COFFE
 pathadd $RAD_GEN_HOME/COFFE
 pathadd $RAD_GEN_HOME/COFFE/coffe
+
+
+## Conda env setup
+conda deactivate && conda activate rad-gen-env

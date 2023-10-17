@@ -3,13 +3,13 @@ import sys
 import argparse
 import time
 import src.coffe.fpga as fpga
-import COFFE.coffe.spice as spice
-import COFFE.coffe.tran_sizing as tran_sizing
-import COFFE.coffe.utils as utils
-import COFFE.coffe.vpr as coffe_vpr
+import src.coffe.spice as spice
+import src.coffe.tran_sizing as tran_sizing
+import src.coffe.utils as utils
+import src.coffe.vpr as coffe_vpr
 import datetime
 import math
-import src.data_structs as rg_ds
+import src.common.data_structs as rg_ds
 
 from collections import namedtuple
 from dataclasses import fields
