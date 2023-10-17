@@ -91,7 +91,9 @@ The following paper may be used as a general citation for RAD-Sim:
    :caption: RAD-Gen Documentation
    :maxdepth: 3
 
+   data_structures
    coffe-fpga-fabric
    rad-gen-quick-start
-..   asic-dse
+   asic-dse
+   ic-3d-dse
 ..   3d-ic-dse

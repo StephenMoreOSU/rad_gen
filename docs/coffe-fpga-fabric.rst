@@ -43,9 +43,10 @@ Memory Block Parameters
 ++++++++++++++++++++++++++++++++++++
 
 Memory block parameters are used if one wants to model the FPGA BRAM.
+
 .. image:: _static/coffe_mem_blk_params.png
-  :width: 1000
-  :alt: COFFE's expected input architecture parameters
+  :width: 700
+  :alt: COFFE's expected input sram parameters
 
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
 Additional Tx Sizing (Custom Circuit Flow) Parameters

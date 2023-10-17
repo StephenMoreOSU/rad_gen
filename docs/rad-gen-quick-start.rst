@@ -45,7 +45,7 @@ ASAP7 PDK Setup
     * genus → Synthesis
     * innovus → Place & Route
     * tempus → Static Timing Analysis
-    * Open Source: `OpenROAD <https://github.com/The-OpenROAD-Project/OpenROAD`_
+    * Open Source: `OpenROAD <https://github.com/The-OpenROAD-Project/OpenROAD>`_
 
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
 RAD-Gen ASIC Flow ASAP7 Specific Dependencies
