@@ -1,16 +1,3 @@
-
-# TODO find out what to do with these
-
-# TERMS AND CONDITIONS
-# Copyright (c) 2023, Synopsys, Inc.
-# All rights reserved.
-# These reference scripts should be used only as a reference for developing product-specific flow scripts for use in your design environment.  These scripts are not designed to run in their current form.
-# Internal use, with or without modification, is permitted.  Distribution and repackaging is not permitted.
-# THESE SCRIPTS ARE PROVIDED "AS IS" AND ANY EXPRESS, STATUTORY OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE OR NON INFRINGEMENT AND ANY WARRNTIES ARISING FROM A COURSE OF DEALING OR USAGE OF TRADE ARE DISCLAIMED. IN NO EVENT SHALL SYNOPSYS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THESE SCRIPTS, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-# By downloading these scripts you acknowledge and agree to these terms.
-
-
-
 # General modules
 from typing import List, Dict, Tuple, Set, Union, Any, Type
 import os, sys
