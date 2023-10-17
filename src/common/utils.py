@@ -229,7 +229,7 @@ def edit_config_file(config_fpath, config_dict):
         f.write(config_text)
 
 
-def sanitize_config(config_dict) -> dict:
+def sanitize_config_depr(config_dict) -> dict:
     """
         Modifies values of yaml config file to do the following:
         - Expand relative paths to absolute paths
@@ -323,21 +323,31 @@ def handle_error(fn, expected_vals: set = None):
         sys.exit(1)
 
 
-def traverse_nested_dict(in_dict: Dict[str, Any], callable_fn: Callable) -> Dict[str, Any]:
+def clean_path(unsafe_path: str, validate_path: bool = True) -> str:
+    """
+        Takes in possibly unsafe path and returns a sanitized path
+    """
+    safe_path = os.path.realpath(os.path.expanduser(unsafe_path))
+    # We want to turn off the path checker when loading in yaml files which may have invalid entries
+    if validate_path:
+        handle_error(lambda: check_for_valid_path(safe_path), {True : None})
+    return safe_path
+
+def traverse_nested_dict(in_dict: Dict[str, Any], callable_fn: Callable, *args, **kwargs) -> Dict[str, Any]:
     assert callable(callable_fn), "callable_fn must be a function"
     for k,v in in_dict.items():
         if isinstance(v, dict):
-            in_dict[k] = traverse_nested_dict(v, callable_fn)
+            in_dict[k] = traverse_nested_dict(v, callable_fn, *args, **kwargs)
         else:
             # Callable function applies to each non dict element in nested dict
-            in_dict[k] = callable_fn(k, v)
+            in_dict[k] = callable_fn(k, v, *args, **kwargs)
     return in_dict
 
-def sanitize_element(param: str, ele_val: Any):
+def sanitize_element(param: str, ele_val: Any, validate_paths: bool = True) -> Any:
     # Here are the key matches which makes sanitizer think its a path
     # TODO there may be a better way to do but this way you just have to list all path related keys below
     path_keys = ["path", "sram_parameters", "file", "dir", "home"]
-    inv_path_keys = ["meta", "use_latest"] # even if path keys are in param if negative keys are in param then its not a path
+    inv_path_keys = ["meta", "use_latest_obj_dir", "manual_obj_dir"] # even if path keys are in param if negative keys are in param then its not a path
     is_param_path_lists = []
     for path_key in path_keys:
         is_param_path_list = []
@@ -349,24 +359,24 @@ def sanitize_element(param: str, ele_val: Any):
         is_param_path_lists.append(all(is_param_path_list))
     if any( is_param_path_lists): #(path in param and neg not in param) for neg in inv_path_keys for path in path_keys ): # and neg not in param
         if isinstance(ele_val, list):
-            ret_val = [clean_path(v) for v in ele_val]
+            ret_val = [clean_path(v, validate_paths) for v in ele_val]
         elif isinstance(ele_val, str):
-            ret_val = clean_path(ele_val)
+            ret_val = clean_path(ele_val, validate_paths)
         else:
             raise ValueError(f"ERROR: (k, v) pair: ({param} {ele_val}) is wrong datatype for paths")
     else:
         ret_val = ele_val
     return ret_val
 
-def sanitize_config(config_dict: Dict[str, Any]) -> dict:
+def sanitize_config(config_dict: Dict[str, Any], validate_paths: bool = True) -> dict:
     """
         Modifies values of a config file to do the following:
             - Expand relative paths to absolute paths
     """    
 
-    return traverse_nested_dict(config_dict, sanitize_element)
+    return traverse_nested_dict(config_dict, sanitize_element, validate_paths)
 
-def parse_yml_config(yaml_file: str) -> dict:
+def parse_yml_config(yaml_file: str, validate_paths: bool = True) -> dict:
     """
         Takes in possibly unsafe path and returns a sanitized config
     """
@@ -374,15 +384,9 @@ def parse_yml_config(yaml_file: str) -> dict:
     with open(safe_yaml_file, 'r') as f:
         config = yaml.safe_load(f)
     
-    return sanitize_config(config)
+    return sanitize_config(config, validate_paths)
 
-def clean_path(unsafe_path: str) -> str:
-    """
-        Takes in possibly unsafe path and returns a sanitized path
-    """
-    safe_path = os.path.realpath(os.path.expanduser(unsafe_path))
-    handle_error(lambda: check_for_valid_path(safe_path), {True : None})
-    return safe_path
+
 
 """
 
@@ -427,7 +431,7 @@ def clean_path(unsafe_path: str) -> str:
 """
 
 
-def init_dataclass(dataclass_type: Type, input_yaml_config: dict, add_arg_config: dict = {}) -> dict:
+def init_dataclass(dataclass_type: Type, input_yaml_config: dict, add_arg_config: dict = {}, validate_paths: bool = True) -> dict:
     """
         Initializes dictionary values for fields defined in input data structure, basically acts as sanitation for keywords defined in data class fields
         Returns a instantiation of the dataclass
@@ -443,11 +447,9 @@ def init_dataclass(dataclass_type: Type, input_yaml_config: dict, add_arg_config
         if "path" in field and field in dataclass_inputs:
             if isinstance(dataclass_inputs[field], list):
                 for idx, path in enumerate(dataclass_inputs[field]):
-                    dataclass_inputs[field][idx] = os.path.realpath( os.path.expanduser(path) )
-                    handle_error(lambda: check_for_valid_path(dataclass_inputs[field][idx]), {True : None})
+                    dataclass_inputs[field][idx] = clean_path(path, validate_paths) 
             elif isinstance(dataclass_inputs[field], str):
-                dataclass_inputs[field] = os.path.realpath( os.path.expanduser(dataclass_inputs[field]) )
-                handle_error(lambda: check_for_valid_path(dataclass_inputs[field]), {True : None})
+                dataclass_inputs[field] = clean_path(dataclass_inputs[field], validate_paths) 
             else:
                 pass
     # return created dataclass instance
@@ -630,9 +632,9 @@ def init_asic_config(env: rg_ds.EnvSettings, conf_path: str) -> str:
     for dir in env.input_dir_struct["configs"].keys():
         os.makedirs(os.path.join(conf_dir, dir), exist_ok=True)
 
-    # Our yaml parsing function should perform sanitization
-    conf_dict = parse_yml_config(conf_path)
-    conf_out_path = os.path.join(conf_dir, env.input_dir_struct["configs"]["mod"],conf_name + "_pre_proc.yml" )
+    # Our yaml parsing function performs santization, there may be invalid paths so we don't want to look for them
+    conf_dict = parse_yml_config(conf_path, validate_paths = False)
+    conf_out_path = os.path.join(conf_dir, env.input_dir_struct["configs"]["mod"], conf_name + "_pre_proc.yml" )
     with open(conf_out_path, "w" ) as f:
         yaml.safe_dump(conf_dict, f, sort_keys = False)
 
@@ -809,7 +811,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
                     config_file_input = env_conf["asic_flow"]
                 else:
                     config_file_input = {}
-                asic_flow_settings = init_dataclass(rg_ds.ASICFlowSettings, config_file_input, asic_flow_settings_input)
+                asic_flow_settings = init_dataclass(rg_ds.ASICFlowSettings, config_file_input, asic_flow_settings_input, validate_paths = not vlsi_mode_inputs["config_pre_proc"] )
 
         else:
             print("ERROR: no flow config files provided, cannot run ASIC flow")

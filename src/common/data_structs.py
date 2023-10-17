@@ -33,8 +33,8 @@ class AsicDseCLI:
     flow_mode: str = None # mode in which asic flow is run "hammer" or "custom" modes
     top_lvl_module: str = None # top level module of design 
     hdl_path: str = None # path to directory containing hdl files 
-    flow_config_paths: List[str] = None
-    use_latest_obj_dir: bool = False
+    flow_config_paths: List[str] = None # Paths to flow config files, these can be either "custom" or "hammer" format
+    use_latest_obj_dir: bool = False 
     manual_obj_dir: str = None
     compile_results: bool = False
     synthesis: bool = False

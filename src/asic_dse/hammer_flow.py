@@ -369,7 +369,7 @@ def get_rad_gen_flow_cmd(rad_gen_settings: rg_ds.HighLvlSettings, config_path: s
         cmd = cmd + " -sram"
     return cmd
 
-def modify_config_file(rad_gen: rg_ds.HighLvlSettings):
+def modify_config_file(rad_gen: rg_ds.HighLvlSettings) -> str:
     # recursively get all files matching extension in the design directory
     exts = ['.v','.sv','.vhd',".vhdl"]
     design_files, design_dirs = rg_utils.rec_get_flist_of_ext(rad_gen.asic_flow_settings.hdl_path, exts)
@@ -400,33 +400,35 @@ def modify_config_file(rad_gen: rg_ds.HighLvlSettings):
     # Creates directory for modified config files and writes new config
     # Intermediate/Generated configs & RTL will be output to the following directory
     # Not perfect but this allows for top directory of input designs to be named arbitrarily
-    mod_config_outdir = None
     config_paths = rad_gen.asic_flow_settings.hammer_driver.options.project_configs
     for config_path in config_paths:
         # Read all configs and figure out which one contains the top level module info
         config_str = Path(config_path).read_text()
         is_yaml = config_path.endswith(".yml") or config_path.endswith(".yaml")
         config_dict = hammer_config.load_config_from_string(config_str, is_yaml, str(Path(config_path).resolve().parent))
+        # If top module exists in the synthesis inputs, write 
         if "synthesis.inputs.top_module" in config_dict.keys():
-            input_config_split = os.path.split(config_path)
-            config_fname = os.path.splitext(os.path.basename(config_path))[0]
-            mod_config_outdir = os.path.join(input_config_split[0], "gen")
-            modified_config_path = os.path.join(mod_config_outdir, f"{config_fname}_pre_proc.yml")
+            # TODO remove hardcoding of "_pre_proc" and replace with a variable linked to data struct
+            # _pre_proc is the key that tells us if the config file was initialized by rad_gen, if it was then we should just override the file 
+            if "_pre_proc" in config_path:
+                modified_config_path = config_path
+            else:
+                input_config_split = os.path.split(config_path)
+                config_fname = os.path.splitext(os.path.basename(config_path))[0]
+                mod_config_outdir = os.path.join(input_config_split[0], rad_gen.env_settings.input_dir_struct["configs"]["mod"])
+                modified_config_path = os.path.join(mod_config_outdir, f"{config_fname}_pre_proc.yml")
             break
     
-    # If it still can't find it, were just going to make the directory in the design input path with name of top level module
-    if mod_config_outdir == None:
-        rg_utils.rad_gen_log(f"ERROR: Can't find input design config, Exiting...")
-        sys.exit(1)
-
-    if not os.path.isdir( mod_config_outdir ):
-        os.makedirs(mod_config_outdir)
+    
+    # Make dirs to modified config path if they don't exist
+    os.makedirs(os.path.dirname(modified_config_path), exist_ok=True)
     
     with open(modified_config_path, 'w') as yml_file:
         yaml.safe_dump(design_config, yml_file, sort_keys=False) 
     
     # Update hammer driver with new config
     proj_config_dicts = []
+    # Appending it to the end gives the highest precedence in hammer
     for config in config_paths + [modified_config_path]:
         is_yaml = config.endswith(".yml") or config.endswith(".yaml")
         if not os.path.exists(config):
@@ -463,6 +465,13 @@ def replace_rtl_param(top_p_name_val, p_names, p_vals, base_config_path, base_pa
         rad_gen_config = yaml.safe_load(config_fd)
     rad_gen_config["synthesis"]["inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_path))
     mod_config_path = os.path.splitext(base_config_path)[0]+f'_{mod_param_dir_name}.yaml'
+    
+    # TODO remove hardcoding, connect to the "input_dir_struct" data structure in EnvSettings
+    # mod_configs_dir = os.path.join( os.path.dirname(base_config_path), "mod")
+    # mod_config_path = os.path.join(mod_configs_dir, os.path.splitext(base_config_path)[0]+f'_{mod_param_dir_name}.yaml')
+    # # make modified config dir if it doesnt exist
+    # os.makedirs(mod_configs_dir, exist_ok=True)
+    
     with open(mod_config_path,"w") as config_fd:
         yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
 
@@ -823,6 +832,7 @@ def sram_sweep_gen(rad_gen_settings: rg_ds.HighLvlSettings, design_id: int):
                     rg_utils.rad_gen_log(ret_str,rad_gen_log_fd)                        
                 
                 # Modify the mem_params.json file with the parameters specified in the design sweep config file
+                # Wherever the sram_parameters files are specified in base_config file we will create directories for generated results
                 mem_params_json_fpath = os.path.splitext(base_config["vlsi.inputs"]["sram_parameters"])[0]+f'_{mod_mem_params[0]["name"]}.json'
                 with open(os.path.splitext(os.path.expanduser(base_config["vlsi.inputs"]["sram_parameters"]))[0]+f'_{mod_mem_params[0]["name"]}.json', 'w') as fd:
                     json.dump(mod_mem_params, fd, sort_keys=False)
