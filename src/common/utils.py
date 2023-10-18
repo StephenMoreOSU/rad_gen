@@ -41,6 +41,27 @@ cur_env = os.environ.copy()
 # ╚██████╔╝███████╗██║ ╚████║███████╗██║  ██║██║  ██║███████╗    ╚██████╔╝   ██║   ██║███████╗███████║
 #  ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
 
+
+
+def key_val_2_report(key: str, val: Any) -> Tuple[str, Any]:
+    """
+        Converts various datatypes defined in RAD-Gen to thier report formats for stdout or csv writing
+    """
+    ret_key = key
+    if isinstance(val, float):
+        ret_val = float(val)
+    elif isinstance(val, rg_ds.SolderBumpInfo):
+        # if solder bump info we just want to print out pitch
+        ret_key = "ubump_pitch"
+        ret_val = val.pitch
+    elif isinstance(val, rg_ds.ProcessInfo):
+        # if process info we just want the name of the process
+        ret_key = "process"
+        ret_val = val.name
+    else:
+        ret_val = val
+    return ret_key, ret_val
+
 def rad_gen_log(log_str: str, file: str):
     """
     Prints to a log file and the console depending on level of verbosity
@@ -508,7 +529,7 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
         parser.add_argument('-o', '--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
         # parser.add_argument('-e', '--top_lvl_config', help="path to top level config file",  type=str, default=None)
         parser.add_argument('-s', '--design_sweep_config', help="path to config file containing design sweep parameters",  type=str, default=None)
-        parser.add_argument('-c', '--compile_results', help="path to dir", action='store_true') 
+        parser.add_argument('-c', '--compile_results', help="flag to compile results related a specific asic flow or sweep depending on additional provided configs", action='store_true') 
         parser.add_argument('-syn', '--synthesis', help="flag runs synthesis on specified design", action='store_true') 
         parser.add_argument('-par', '--place_n_route', help="flag runs place & route on specified design", action='store_true') 
         parser.add_argument('-pt', '--primetime', help="flag runs primetime on specified design", action='store_true') 

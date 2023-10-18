@@ -34,14 +34,14 @@ class AsicDseCLI:
     top_lvl_module: str = None # top level module of design 
     hdl_path: str = None # path to directory containing hdl files 
     flow_config_paths: List[str] = None # Paths to flow config files, these can be either "custom" or "hammer" format
-    use_latest_obj_dir: bool = False 
-    manual_obj_dir: str = None
-    compile_results: bool = False
-    synthesis: bool = False
-    place_n_route: bool = False
-    primetime: bool = False
-    sram_compiler: bool = False
-    make_build: bool = False
+    use_latest_obj_dir: bool = False  # uses latest obj / work dir found in the respective output_design_files/<top_module> dir
+    manual_obj_dir: str = None # uses user specified obj / work dir
+    compile_results: bool = False # flag to compile results related a specific asic flow or sweep depending on additional provided configs
+    synthesis: bool = False # flag to run synthesis
+    place_n_route: bool = False #flag to run place & route
+    primetime: bool = False # flag to run primetime (timing & power)
+    sram_compiler: bool = False # flag that must be provided if sram macros exist in design
+    make_build: bool = False # <TAG> <UNDER DEV> Generates a makefile to manage flow dependencies and execution
 
 
 @dataclass
@@ -1467,6 +1467,8 @@ class TxSizing:
 class SpTestingModel:
 
 
+
+
     # Design Info
     insts :  List[SpSubCktInst] # All nodes inside of the spice sim
     vsrcs: List[SpVoltageSrc]  = None # We create a basic voltage source for each instantiation to measure their power
@@ -1476,6 +1478,8 @@ class SpTestingModel:
     dut_out_node: str = "n_out" # output node (hanging or connected to non inst stimulus)
     
     # Simulation Info
+    opt_params: List[SpParam] = None # List of all optimization parameters used in simulation
+    static_params: List[SpParam] = None # List of all static parameters used in simulation
     sim_settings: SpLocalSimSettings = None # Simulation settings
     # target_freq: int = 1000 # freq in MHz
     # target_period: float = None # period in ns
@@ -1484,7 +1488,6 @@ class SpTestingModel:
     # FIELDS WHICH ARE ONLY HERE TO WORK WITH OLD FUNCTIONS THAT I DESIRE TO GET RID OF 
     target_freq: int = None # freq in MHz
 
-    opt_params: List[SpParam] = None # List of all optimization parameters used in simulation
     def __post_init__(self):
         if self.sim_settings != None:
             if self.sim_settings.dut_in_vsrc.out_node is None:
@@ -1671,7 +1674,6 @@ class Ic3dCLI:
 class Ic3d:
     # CLI arguments (for modes)
     cli_args: Ic3dCLI
-
 
     # Buffer DSE specific data 
     # Should go into design info tbh TODO
