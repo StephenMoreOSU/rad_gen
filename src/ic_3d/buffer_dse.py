@@ -183,8 +183,8 @@ def get_meas_lines_new(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.SpTesting
     inv_isnts_in_nodes = [inst.conns["in"] for inst in sp_testing_model.insts if inst.subckt.name == "inv"]
     inv_insts_out_nodes = [inst.conns["out"] for inst in sp_testing_model.insts if inst.subckt.name == "inv"]
     inv_insts_nodes = list(set(inv_insts_out_nodes + inv_isnts_in_nodes))
-    # first input is shape inverter so we start at the input of 2nd inverter
-    meas_range = [1,len(inv_isnts_in_nodes)-1]
+    # meas range starts at output of last shape inv and ends at output of last inverter
+    meas_range = [ic_3d_info.design_info.shape_nstages, len(inv_isnts_in_nodes)-1]
 
     sp_meas_lines = [
         *get_subckt_hdr_lines("Measurement"),
@@ -194,8 +194,8 @@ def get_meas_lines_new(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.SpTesting
 
         f'.PRINT ' + ' '.join([f"v({node})" for node in inv_insts_nodes ]),
         # Measure statements for optimization but still should be printed either way
-        f".measure tpd param='max(rising_prop_delay_{inv_isnts_in_nodes[1]}_{inv_insts_out_nodes[-1]},falling_prop_delay_{inv_isnts_in_nodes[1]}_{inv_insts_out_nodes[-1]})' goal = 0",
-        f".measure diff param='rising_prop_delay_{inv_isnts_in_nodes[1]}_{inv_insts_out_nodes[-1]} - falling_prop_delay_{inv_isnts_in_nodes[1]}_{inv_insts_out_nodes[-1]}' goal = 0",
+        f".measure tpd param='max(rising_prop_delay_{inv_isnts_in_nodes[ic_3d_info.design_info.shape_nstages]}_{inv_insts_out_nodes[-1]},falling_prop_delay_{inv_isnts_in_nodes[ic_3d_info.design_info.shape_nstages]}_{inv_insts_out_nodes[-1]})' goal = 0",
+        f".measure diff param='rising_prop_delay_{inv_isnts_in_nodes[ic_3d_info.design_info.shape_nstages]}_{inv_insts_out_nodes[-1]} - falling_prop_delay_{inv_isnts_in_nodes[ic_3d_info.design_info.shape_nstages]}_{inv_insts_out_nodes[-1]}' goal = 0",
 
         #f'.GRAPH v({driver_model_info.global_in_node}) ' + ' '.join([f"v({node})" for node in inv_insts_out_nodes[1:len(inv_insts_out_nodes)]]) + ' title "inv_out_node_voltage" '
         # f'.PRINT ' + ' '.join([f"cap({node})" for node in inv_isnts_in_nodes])  
@@ -1022,7 +1022,7 @@ def plot_sp_run(ic_3d_info: rg_ds.Ic3d, show_flags: dict, sp_run_info: dict, sp_
 
 
 
-def write_sp_buffer_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any], title: str, no_opt: bool = False) -> rg_ds.SpProcess:
+def write_sp_buffer_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any], title: str, inv_sizes: List[Dict[str, float]] = None) -> rg_ds.SpProcess:
     """
         Inputs: 
             - ic_3d_info: object containing high level information needed to write out files and interact w process / design parameters
@@ -1030,8 +1030,11 @@ def write_sp_buffer_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any]
         Outputs:
             - Writes out a spice file for this buffer simulation, returns a SpProcess object to run that simulation
     """
+    # Check for valid inv_sizes input
+    if isinstance(inv_sizes, list) and len(inv_sizes) != ic_3d_info.design_info.total_nstages:
+        raise ValueError(f"inv_sizes must be a list of dicts with length equal to the total number of stages in the buffer chain, {ic_3d_info.design_info.total_nstages}")
 
-    sp_testing_model = buffer_sim_setup_updated(ic_3d_info, sweep_params, no_opt)
+    sp_testing_model = buffer_sim_setup_updated(ic_3d_info, sweep_params, inv_sizes)
 
     sp_title = f"buffer-{title}-{rg_ds.create_timestamp()}"
 
@@ -1067,7 +1070,15 @@ def write_sp_buffer_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any]
     return sp_out_process
 
 
-def buffer_sim_setup_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any], no_opt: bool = False) -> rg_ds.SpTestingModel:
+def buffer_sim_setup_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any], inv_sizes: List[Dict[str, float]] = None) -> rg_ds.SpTestingModel:
+    # inv_sizes is a list of dicts in the following format
+    # [ 
+    #   {
+    #       "wn": float,
+    #       "wp": float,  
+    #   }
+    # ... ]
+
 
     # Metal Distance for top and bottom metal layers
     routing_mlayer_params = {
@@ -1076,43 +1087,65 @@ def buffer_sim_setup_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any
     }
 
     opt_params = []
-    if "P" in ic_3d_info.tx_sizing.opt_mode or no_opt:
-        wp_params = [ 
-            rg_ds.SpParam(
-                name = f"{ic_3d_info.pn_opt_model.wp_param}_{i}",
-                opt_settings = rg_ds.SpOptSettings(
-                    init = ic_3d_info.tx_sizing.p_opt_params["init"],
-                    range = ic_3d_info.tx_sizing.p_opt_params["range"],
-                    step = ic_3d_info.tx_sizing.p_opt_params["step"],
-                ),
-            ) for i in range(ic_3d_info.design_info.total_nstages)
-        ]
-        opt_params += wp_params
-    else:
-        wp_params = [ rg_ds.SpParam(
-                name = ic_3d_info.pn_opt_model.wp_param,
-                value = ic_3d_info.tx_sizing.pmos_sz
-            ) 
-        ] * ic_3d_info.design_info.total_nstages
-    if "N" in ic_3d_info.tx_sizing.opt_mode or no_opt:
-        wn_params = [ 
-            rg_ds.SpParam(
-                name = f"{ic_3d_info.pn_opt_model.wn_param}_{i}",
-                opt_settings = rg_ds.SpOptSettings(
-                    init = ic_3d_info.tx_sizing.n_opt_params["init"],
-                    range = ic_3d_info.tx_sizing.n_opt_params["range"],
-                    step = ic_3d_info.tx_sizing.n_opt_params["step"],
-                ),
-            ) for i in range(ic_3d_info.design_info.total_nstages)
-        ]
-        opt_params += wn_params
-    else:
-        wn_params = [ rg_ds.SpParam(
-                name = ic_3d_info.pn_opt_model.wn_param,
-                value = ic_3d_info.tx_sizing.pmos_sz
-            ) 
-        ] * ic_3d_info.design_info.total_nstages
+    static_params = []
 
+    # if inv_sizes is provided then, they will always be used rather than creating opt params
+    if inv_sizes == None:
+        # Pmos parameter definitions
+        if "P" in ic_3d_info.tx_sizing.opt_mode:
+            wp_params = [ 
+                rg_ds.SpParam(
+                    name = f"{ic_3d_info.pn_opt_model.wp_param}_{i}",
+                    opt_settings = rg_ds.SpOptSettings(
+                        init = ic_3d_info.tx_sizing.p_opt_params["init"],
+                        range = ic_3d_info.tx_sizing.p_opt_params["range"],
+                        step = ic_3d_info.tx_sizing.p_opt_params["step"],
+                    ),
+                ) for i in range(ic_3d_info.design_info.total_nstages)
+            ]
+            opt_params += wp_params
+        else:
+            wp_params = [ rg_ds.SpParam(
+                    name = f"{ic_3d_info.pn_opt_model.wp_param}_{i}",
+                    value = ic_3d_info.tx_sizing.pmos_sz
+                ) for i in range(ic_3d_info.design_info.total_nstages) 
+            ]
+            static_params += wp_params
+        # Nmos parameter definitions
+        if "N" in ic_3d_info.tx_sizing.opt_mode:
+            wn_params = [ 
+                rg_ds.SpParam(
+                    name = f"{ic_3d_info.pn_opt_model.wn_param}_{i}",
+                    opt_settings = rg_ds.SpOptSettings(
+                        init = ic_3d_info.tx_sizing.n_opt_params["init"],
+                        range = ic_3d_info.tx_sizing.n_opt_params["range"],
+                        step = ic_3d_info.tx_sizing.n_opt_params["step"],
+                    ),
+                ) for i in range(ic_3d_info.design_info.total_nstages)
+            ]
+            opt_params += wn_params
+        else:
+            wn_params = [ rg_ds.SpParam(
+                    name = f"{ic_3d_info.pn_opt_model.wn_param}_{i}",
+                    value = ic_3d_info.tx_sizing.nmos_sz
+                ) for i in range(ic_3d_info.design_info.total_nstages) 
+            ] 
+            static_params += wn_params
+    else:
+        # inv_sizes defined, meaning we want to assign specific values to transistors
+        wn_params = [
+            rg_ds.SpParam( 
+                name = f"{ic_3d_info.pn_opt_model.wn_param}_{i}",
+                value = inv_sizes[i]["wn"],
+            ) for i in range(ic_3d_info.design_info.total_nstages)
+        ]
+        wp_params = [
+            rg_ds.SpParam( 
+                name = f"{ic_3d_info.pn_opt_model.wp_param}_{i}",
+                value = inv_sizes[i]["wp"],
+            ) for i in range(ic_3d_info.design_info.total_nstages)
+        ]
+        static_params += wn_params + wp_params
 
     local_sim_settings = rg_ds.SpLocalSimSettings(
         target_freq = sweep_params["target_freq"],
@@ -1136,6 +1169,7 @@ def buffer_sim_setup_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any
     sp_testing_model = rg_ds.SpTestingModel(
         insts = None, 
         opt_params = opt_params,
+        static_params = static_params,
         sim_settings = local_sim_settings
     )
 
@@ -1253,33 +1287,38 @@ def get_sim_setup_lines_updated(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.
     dut_in_vsrc = sp_testing_model.sim_settings.dut_in_vsrc
 
 
-    if "P" in ic_3d_info.tx_sizing.opt_mode and "N" not in ic_3d_info.tx_sizing.opt_mode:
-        n_param_lines = [f".PARAM {ic_3d_info.pn_opt_model.wn_param} = {ic_3d_info.tx_sizing.nmos_sz}"]
-        ratio_meas_lines = [f".MEASURE best_ratio_{i} param='{ic_3d_info.pn_opt_model.wp_param}_{i}/{ic_3d_info.pn_opt_model.wn_param}'" for i in range(ic_3d_info.design_info.total_nstages)]
-    elif "N" in ic_3d_info.tx_sizing.opt_mode and "P" not in ic_3d_info.tx_sizing.opt_mode:
-        p_param_lines = [f".PARAM {ic_3d_info.pn_opt_model.wp_param} = {ic_3d_info.tx_sizing.pmos_sz}"]
-        n_param_lines =  [f".PARAM {opt_param.name} = optw( {opt_param.opt_settings.init}, {opt_param.opt_settings.range[0]}, {opt_param.opt_settings.range[1]}, {opt_param.opt_settings.step} )" for opt_param in sp_testing_model.opt_params]
+    # TODO define these static params in the sp_testing_model initialization
+    # if "P" in ic_3d_info.tx_sizing.opt_mode and "N" not in ic_3d_info.tx_sizing.opt_mode:
+    #     ratio_meas_lines = [f".MEASURE best_ratio_{i} param='{ic_3d_info.pn_opt_model.wp_param}_{i}/{ic_3d_info.pn_opt_model.wn_param}'" for i in range(ic_3d_info.design_info.total_nstages)]
+    # elif "N" in ic_3d_info.tx_sizing.opt_mode and "P" not in ic_3d_info.tx_sizing.opt_mode:
+    #     ratio_meas_lines = [f".MEASURE best_ratio_{i} param='{ic_3d_info.pn_opt_model.wp_param}/{ic_3d_info.pn_opt_model.wn_param}_{i}'" for i in range(ic_3d_info.design_info.total_nstages)]
+    # elif "N" in ic_3d_info.tx_sizing.opt_mode and "P" in ic_3d_info.tx_sizing.opt_mode:
+    #     ratio_meas_lines = [f".MEASURE best_ratio_{i} param='{ic_3d_info.pn_opt_model.wp_param}_{i}/{ic_3d_info.pn_opt_model.wn_param}_{i}'" for i in range(ic_3d_info.design_info.total_nstages)]
+    # else:
+    #     # best and only ratio
+    #     ratio_meas_lines = [f".MEASURE best_ratio param='{ic_3d_info.pn_opt_model.wp_param}/{ic_3d_info.pn_opt_model.wn_param}'" ]
 
-        ratio_meas_lines = [f".MEASURE best_ratio_{i} param='{ic_3d_info.pn_opt_model.wp_param}/{ic_3d_info.pn_opt_model.wn_param}_{i}'" for i in range(ic_3d_info.design_info.total_nstages)]
-    elif "N" in ic_3d_info.tx_sizing.opt_mode and "P" in ic_3d_info.tx_sizing.opt_mode:
-        ratio_meas_lines = [f".MEASURE best_ratio_{i} param='{ic_3d_info.pn_opt_model.wp_param}_{i}/{ic_3d_info.pn_opt_model.wn_param}_{i}'" for i in range(ic_3d_info.design_info.total_nstages)]
-    else:
-        # lol best and only ratio
-        ratio_meas_lines = [f".MEASURE best_ratio param='{ic_3d_info.pn_opt_model.wp_param}/{ic_3d_info.pn_opt_model.wn_param}'" ]
-        
 
-    param_setup_lines = [
-        "*** Param Setup",
-        f".PARAM {ic_3d_info.pn_opt_model.wn_param} = {ic_3d_info.tx_sizing.nmos_sz}",
-        f".PARAM {ic_3d_info.pn_opt_model.wp_param} = {ic_3d_info.tx_sizing.pmos_sz}",
+
+    static_param_setup_lines = [
+        "*** Static Param Setup",
+        *[f".PARAM {static_param.name} = {static_param.value}" for static_param in sp_testing_model.static_params],
     ]
+    # param_setup_lines = [
+    #     "*** Param Setup",
+    #     f".PARAM {ic_3d_info.pn_opt_model.wn_param} = {ic_3d_info.tx_sizing.nmos_sz}",
+    #     f".PARAM {ic_3d_info.pn_opt_model.wp_param} = {ic_3d_info.tx_sizing.pmos_sz}",
+    # ]
+
+
+
 
     opt_setup_lines = [
         "*** Opt setup ",
         # Assign opt params 
         *[f".PARAM {opt_param.name} = optw( {opt_param.opt_settings.init}, {opt_param.opt_settings.range[0]}, {opt_param.opt_settings.range[1]}, {opt_param.opt_settings.step} )" for opt_param in sp_testing_model.opt_params],
         f".MODEL optmod opt itropt={ic_3d_info.tx_sizing.iters}", # set up optimization model
-        *ratio_meas_lines,
+        *[f".MEASURE best_ratio_{i} param='{ic_3d_info.pn_opt_model.wp_param}_{i}/{ic_3d_info.pn_opt_model.wn_param}_{i}'" for i in range(ic_3d_info.design_info.total_nstages)],
     ]
 
     analysis_lines = [ f".TRAN {sp_testing_model.sim_settings.sim_prec}p {sp_testing_model.sim_settings.sim_time}n" ]
@@ -1298,13 +1337,15 @@ def get_sim_setup_lines_updated(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.
         # Create a voltage source for each inverter index to get current for each of them
         # TODO return this V_DRIVER_<idx>_SRC names somewhere so we can use it to generate measure statements
         *[f"V_DRIVER_{inv_idx}_SRC vdd_driver_{inv_idx} {ic_3d_info.sp_sim_settings.gnd_node} {ic_3d_info.sp_sim_settings.vdd_param}" for inv_idx in range(ic_3d_info.design_info.total_nstages)],
-        *param_setup_lines,
+        *static_param_setup_lines,
         *analysis_lines,
     ]
 
-    # Connect newly defined voltage sources to each instantiation
-    for idx, inst in enumerate(sp_testing_model.insts):
-        inst.conns["vdd"] = f"vdd_driver_{idx}"
+    ## TODO figure out why this causes the simulation to fail,
+    ## replacing the vdd connections with v_driver causes strange behavior, but is required for power measurements
+    ## Connect newly defined voltage sources to each instantiation
+    # for idx, inst in enumerate(sp_testing_model.insts):
+    #     inst.conns["vdd"] = f"vdd_driver_{idx}"
     
     return sim_setup_lines
 
@@ -1386,9 +1427,18 @@ def finfet_tx_area_model(num_fins: int) -> float: #nm^2
 def calc_cost(design_info: rg_ds.DesignInfo, cost_fx_exps: dict, sp_run_info: dict) -> float:
     # TODO check out this cost function (not being used to make important decisions rn as flow is brute forced)
     # prop delay in ps (1000ps is 1 unit of delay cost), area normalized to almost average sized buffer chain (5 tx sizes) (1 unit of area cost)
-    delay_cost_unit = 1000 #ps
-    area_cost_unit = 2 * 2 * finfet_tx_area_model(3) * design_info.process_info.tx_geom_info.min_width_tx_area * 1e-6 # minimum area inverter
+    delay_cost_unit = 100 #ps
+    area_cost_unit = 2 * 2 * finfet_tx_area_model(3) * design_info.process_info.tx_geom_info.min_width_tx_area * 1e-6 # minimum area inverter * 2 stages * 2 stage ratio
+    # TODO change the normalization factors on each term to be the geometric mean of a previous run (which will be saved somewhere)
     return ((sp_run_info["total_max_prop_delay"] / delay_cost_unit) ** cost_fx_exps["delay"] ) + ( (sp_run_info["inv_chain_area"] / area_cost_unit) ** (cost_fx_exps["area"]))
+
+def calc_cost_updated(design_info: rg_ds.DesignInfo, cost_fx_exps: dict, circuit_info: dict) -> float:
+    # TODO check out this cost function (not being used to make important decisions rn as flow is brute forced)
+    # prop delay in ps (1000ps is 1 unit of delay cost), area normalized to almost average sized buffer chain (5 tx sizes) (1 unit of area cost)
+    delay_cost_unit = 100 #ps
+    area_cost_unit = 2 * 2 * finfet_tx_area_model(3) * design_info.process_info.tx_geom_info.min_width_tx_area * 1e-6 # minimum area inverter * 2 stages * 2 stage ratio
+    # TODO change the normalization factors on each term to be the geometric mean of a previous run (which will be saved somewhere)
+    return ((circuit_info["max_prop_delay"] / delay_cost_unit) ** cost_fx_exps["delay"] ) + ( (circuit_info["area"] / area_cost_unit) ** (cost_fx_exps["area"]))
 
 
 
@@ -1610,7 +1660,7 @@ def unit_conversion(unit: str, val: float, unit_lookup: Dict[str, float], sig_fi
     return ret_val
 
 
-def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Dict[str, bool] = None) -> Tuple[pd.DataFrame, dict]:
+def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Dict[str, bool] = None) -> Tuple[pd.DataFrame, Dict[str, str], Dict[str, str]]:
     """
         Parses spice output ".lis" file
 
@@ -1624,6 +1674,9 @@ def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Di
             - measurements: list of dicts containing the measurement statement names, values, & triggers
 
     """
+    measurements = []
+    opt_params = []
+    plot_df = None # get from "plot" flag
     
     if parse_flags is None:
         parse_flags = {
@@ -1634,8 +1687,6 @@ def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Di
 
     with open(sp_process.sp_outfile,"r") as lis_fd:
         lis_text = lis_fd.read()
-
-    plot_df = None # get from "plot" flag
 
     # grab_tr_analysis_re_pattern = f"{res.sp_grab_tran_analysis_ub_str}{sp_process.title}"
     # grab_tr_analysis_re = re.compile(grab_tr_analysis_re_pattern, re.DOTALL)
@@ -1664,10 +1715,11 @@ def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Di
                 df = pd.read_csv(io.StringIO('\n'.join(data_lines)), delim_whitespace=True, skiprows=[0,1], header=None)
                 df.columns = header
                 dfs.append(df)
-            plot_df = reduce(lambda left, right: pd.merge(left , right, on="time"), dfs)
+            if len(dfs) > 0:
+                plot_df = reduce(lambda left, right: pd.merge(left , right, on="time"), dfs)
+
         if parse_flags.get("measure"):
             # measurement statement parsing
-            measurements = []
             line_number_skip_list = [0]
             for idx, line in enumerate(measure_text.split("\n")):
                 if idx in line_number_skip_list:
@@ -1687,10 +1739,19 @@ def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Di
         if parse_flags.get("opt"):
             # Think this regex is pretty safe so were gonna just use the raw text of the whole thing
             opt_matches = res.sp_grab_param_re.findall(lis_text)
+            for match in opt_matches:
+                # unpack match (contains 2 groups)
+                name, val = match
+                opt_dict = {
+                    "name": name, # opt param name
+                    "val": val, # opt param value
+                }
+                opt_params.append(opt_dict)
+
+        # Now we use the captured parameters
 
 
-
-        return plot_df, measurements
+        return plot_df, measurements, opt_params
 
 
 def plot_time_vs_voltage(sp_sim_settings: rg_ds.SpGlobalSimSettings, plot_df: pd.DataFrame):

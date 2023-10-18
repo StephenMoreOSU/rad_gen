@@ -140,8 +140,8 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
 
     # Tx sizing params
     ic_3d_info.tx_sizing.opt_goal = "tpd"
-    ic_3d_info.tx_sizing.nmos_sz = 1
-    ic_3d_info.tx_sizing.pmos_sz = 2
+    ic_3d_info.tx_sizing.nmos_sz = 2
+    ic_3d_info.tx_sizing.pmos_sz = 4
     ic_3d_info.tx_sizing.p_opt_params = {
         "init": 2,
         "range": [1, 16],
@@ -188,19 +188,22 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
 
             # Initial guess of target frequency for the inverter chain
             init_tfreq = 1000
-            final_df_rows = []
-            final_fig = subplots.make_subplots(cols = len(ic_3d_info.stage_range), rows=1)
-            cur_best_cost = sys.float_info.max 
-            best_sp_run = None
+            # final_report_rows = []
+            # final_fig = subplots.make_subplots(cols = len(ic_3d_info.stage_range), rows=1)
+            # cur_best_cost = sys.float_info.max 
+            # best_sp_run = None
 
+            csv_headers_written = False
+            # TODO instead of looping over specific values, look for all values specified bty users and sweep over those
             for add_wlen in ic_3d_info.add_wlens:
-                for stage_idx, n_stages in enumerate(ic_3d_info.stage_range):
+                for n_stages in ic_3d_info.stage_range:
                     ic_3d_info.design_info.dut_buffer_nstages = n_stages
                     # Init the parameters for this size of buffer chain
                     ic_3d_info.design_info.total_nstages = ic_3d_info.design_info.shape_nstages + ic_3d_info.design_info.dut_buffer_nstages + ic_3d_info.design_info.sink_die_nstages
 
-                    fanout_sweep_fig = go.Figure()
+                    # fanout_sweep_fig = go.Figure()
                     for buff_fanout in ic_3d_info.fanout_range:
+                        # final_report_row = {}
                         sweep_params = {
                             # sim params
                             "target_freq": init_tfreq,
@@ -213,24 +216,45 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
                             # process params
                             "process_info" : process_info,
                         }
-                        final_df_row = {}
                         ### OPT PN SIZES BEFORE RUNNING SIM ###
                         cur_tfreq = init_tfreq
                         sim_iters = 0
+                        inv_sizes = []
                         while True:
                             # print(f"Running sim for {n_stages} stages, {buff_fanout} fanout, {cur_tfreq} target freq")
                             pn_opt_process = buff_dse.write_sp_buffer_updated(ic_3d_info, sweep_params, "pn-opt")
                             buff_dse.run_spice(sp_process = pn_opt_process)
-                            plot_df, measurements = buff_dse.parse_spice(ic_3d_info.res, sp_process = pn_opt_process)
+                            # Measurements inputted in spice file are also our determination of simulation success, there should be no failed measurements
+                            plot_df, measurements, opt_params = buff_dse.parse_spice(ic_3d_info.res, sp_process = pn_opt_process)
                             # We probably don't want to plot the voltage waveforms for every run but if we did one would do it here
                             # Check to make sure all measurements are captured AND they all have non "failed" values
                             if any( [m["val"] == "failed" for m in measurements] ):
                                 cur_tfreq /= 2
+                                sweep_params["target_freq"] = cur_tfreq
                                 print(f"Delay measure statements not captured, trying again with target frequency {cur_tfreq}")
                             else:
                                 # Lets capture the optimized pn sizes and other information from measurements
-
-                                break # if all measurements are there we can break out of loop
+                                for opt_param in opt_params:
+                                    inv_size = {}
+                                    name = opt_param["name"]
+                                    # convert to int as we are using finfets
+                                    val = int(float(opt_param["val"]))
+                                    # we assume that wn & wp are somewhere in the optimization params
+                                    if "wn" in name:
+                                        inv_size["wn"] = val
+                                    elif "wp" in name:
+                                        inv_size["wp"] = val
+                                    else:
+                                        raise ValueError(f"Optimization parameter {name} not recognized")
+                                    # if the user defined a particular inv to be static we will use that value 
+                                    if "wn" not in inv_size.keys() and "N" not in ic_3d_info.tx_sizing.opt_mode:
+                                        inv_size["wn"] = ic_3d_info.tx_sizing.nmos_sz
+                                    if "wp" not in inv_size.keys() and "P" not in ic_3d_info.tx_sizing.opt_mode:
+                                        inv_size["wn"] = ic_3d_info.tx_sizing.pmos_sz
+                                    assert ("wn" in inv_size.keys() and "wp" in inv_size.keys() and len(inv_size.keys()) == 2), f"inv_size dict keys are malformed, got {inv_size.keys()}"
+                                    inv_sizes.append(inv_size)
+                                # if all measurements are there we can break out of loop
+                                break 
 
                             if sim_iters > 15:
                                 print(f"Failed to get delay measure statements after {sim_iters} iterations")
@@ -246,10 +270,111 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
                         # TODO come back to this to get delay plots working again
                         # buff_dse.plot_sp_run(ic_3d_info, show_flags, sp_run_info, sp_run_df)
 
-                        ### WRITE SIM WITH OPTIMIZED PN VALUES ###
-                        sized_buffer_process = buff_dse.write_sp_buffer_updated(ic_3d_info, sweep_params, "sized", no_opt=True)
-                        sys.exit(1)
+                        # Write the simulation with the optimized pn sizes found above, this is just to prevent weirdness between hspice opt commands and our results
+                        sized_buffer_process = buff_dse.write_sp_buffer_updated(ic_3d_info, sweep_params, "sized", inv_sizes)
+                        buff_dse.run_spice(sp_process = sized_buffer_process)
+                        plot_df, measurements, _ = buff_dse.parse_spice(ic_3d_info.res, sp_process = sized_buffer_process)
+                        
+                        ####################### CREATE CIRCUIT ITERATION INFO #######################
+                        # Store all measurements not found in key substrs into a dict
+                        circuit_info = {}
+                        # Create invs info list, this is a list of attributes for each inverter in the chain
+                        inv_infos = [{} for _ in range(ic_3d_info.design_info.total_nstages)]
+                        # Go through measurements dict and populate invs_info with relevant keys
+                        # TODO remove hardcoding of these strings
+                        neg_circuit_info_key_substrs = ["best_ratio", "falling_prop_delay", "rising_prop_delay", "tpd", "diff"]
+                        inv_info_key_substrs = ["rising_prop_delay", "falling_prop_delay", "max_prop_delay", "t_rise", "t_fall"]
+                        inv_idx = 0
+                        for meas in measurements:
+                            if any(f"{key_substr}_{inv_idx}" == meas["name"] for key_substr in inv_info_key_substrs):
+                                # Assumes not more than 1 key substr in a measurement name
+                                key = [key_substr for key_substr in inv_info_key_substrs if key_substr in meas["name"]][0]
+                                inv_infos[inv_idx][key] = float(meas["val"])                                
+                                # increment inverter we are saving data into once we get a copy of each key
+                                if len(inv_infos[inv_idx].keys()) == len(inv_info_key_substrs):
+                                    inv_idx += 1
+                            else:
+                                # TODO remove this hardcoding
+                                # This is just to not include the best ratios in circuit info, they should really be in inv_infos but dont want to break plotting
+                                if not any(key_substr in meas["name"] for key_substr in neg_circuit_info_key_substrs):
+                                    circuit_info[meas["name"]] = float(meas["val"])
+                        
+                        #    _   ___ ___   _      ___   _   _    ___ 
+                        #   /_\ | _ \ __| /_\    / __| /_\ | |  / __|
+                        #  / _ \|   / _| / _ \  | (__ / _ \| |_| (__ 
+                        # /_/ \_\_|_\___/_/ \_\  \___/_/ \_\____\___|
+                        inv_areas = []
+                        for i, inv_size in enumerate(inv_sizes):
+                            # Calculate the multiplier for the stage ratio of each stage, we reset the stage ratio back to 1 after the last stage of driver buffer, these are the sizes for inverters on the sink die
+                            inv_mult_factor = sweep_params["stage_ratio"] ** i if i < ic_3d_info.design_info.total_nstages - ic_3d_info.design_info.sink_die_nstages else buff_fanout ** (i - ic_3d_info.design_info.sink_die_nstages)
+                            # multiply the fanout factor by the width of the n/pmos tx 
+                            nfet_numfins = int(float(inv_size["wn"]) * inv_mult_factor)
+                            pfet_numfins = int(float(inv_size["wp"]) * inv_mult_factor)
+                            # area of a specific inverter uses f(nfet) + f(pfet) * min_tx_area
+                            # min_width_tx_area is in nm^2 so we need to convert to um^2 -> 1e-6 
+                            # TODO <TAG> <CONVERT CLEANUP>
+                            inv_area = (buff_dse.finfet_tx_area_model(nfet_numfins) + buff_dse.finfet_tx_area_model(pfet_numfins))*(ic_3d_info.design_info.process_info.tx_geom_info.min_width_tx_area*1e-6)
+                            inv_areas.append(inv_area)
+                            # update inv_infos w/ area info
+                            inv_infos[i]["area"] = inv_area
+                        
+                        # Select only the inverters which we want to evaluate results for (i.e. not the shape inverters) as we include sink inverters in model
+                        meas_invs = inv_infos[ic_3d_info.design_info.shape_nstages:len(inv_infos)]
+                        circuit_info["area"] = sum( [ inv["area"] for inv in meas_invs] )                        
+                        circuit_info["cost"] = buff_dse.calc_cost_updated(ic_3d_info.design_info, ic_3d_info.cost_fx_exps, circuit_info)         
+                        # convert circuit_info to a report format
+                        # circuit_report = {}
+                        # for key, val in circuit_info.items():
+                        #     if 
+                        # Create a df for printout of the sweep parameters used in this run
+                        sweep_param_report = {}
+                        for key, val in sweep_params.items():
+                            ret_key, ret_val = rg_utils.key_val_2_report(key, val)
+                            sweep_param_report[ret_key] = ret_val 
 
+                        # vertically concat dfs for reporting
+                        sw_iter_report_df = pd.concat([ 
+                            pd.DataFrame(sweep_param_report, index=[0]),
+                            pd.DataFrame(circuit_info, index=[0]),    
+                        ], axis=1)
+
+                        invs_df = pd.DataFrame(inv_infos)
+                        
+                        # buff_dse.unit_conversion(ic_3d_info.sp_sim_settings.unit_lookup_factors["time"], x, ic_3d_info.sp_sim_settings.abs_unit_lookups, sig_figs = 5)
+                        sw_iter_report_lines = rg_utils.get_df_output_lines(sw_iter_report_df)
+                        for lines in rg_utils.create_bordered_str("Circuit Sweep Iteration Information") + sw_iter_report_lines:
+                            print(lines)
+                        
+                        inv_report_lines = rg_utils.get_df_output_lines(invs_df)
+                        for lines in rg_utils.create_bordered_str("Buffer Chain Inverter Information") + inv_report_lines:
+                            print(lines)
+
+                        # Output to csv
+                        report_output = "buffer_dse_reports"
+                        os.makedirs(report_output, exist_ok=True)
+                        if not csv_headers_written:
+                            with open(f"{report_output}/buffer_summary_report.csv", "w", newline="") as csvfile:
+                                writer = csv.DictWriter(csvfile, fieldnames=sw_iter_report_df.columns)
+                                writer.writeheader()
+                            with open(f"{report_output}/buffer_inv_report.csv", "w", newline="") as csvfile:
+                                writer = csv.DictWriter(csvfile, fieldnames=invs_df.columns)
+                                writer.writeheader()
+                            csv_headers_written = True
+                        
+                        sw_iter_report_df.to_csv(os.path.join(report_output, f"buffer_summary_report.csv"), mode = "a", header=False, index=False)
+                        invs_df.to_csv(os.path.join(report_output, f"buffer_inv_report.csv"), mode = "a", header=False, index=False)
+                        
+
+                        
+                        
+
+
+                        
+                    
+                
+
+                            
+                            
 
 
 def run_buffer_dse(ic_3d_info: rg_ds.Ic3d):
@@ -429,7 +554,7 @@ def run_spice_debug(ic_3d_info: rg_ds.Ic3d, spProcess: rg_ds.SpProcess):
         "plot": True,
         "measure": True
     }
-    plot_df, measurements = buff_dse.parse_spice(ic_3d_info.res, spProcess, parse_flags)
+    plot_df, measurements, _ = buff_dse.parse_spice(ic_3d_info.res, spProcess, parse_flags)
     # Unit conversion
     plot_df["time"] = buff_dse.unit_conversion(ic_3d_info.sp_sim_settings.unit_lookup_factors["time"], plot_df["time"], ic_3d_info.sp_sim_settings.abs_unit_lookups )
     for key in plot_df.columns[1:]:
@@ -461,9 +586,9 @@ def run_spice_debug(ic_3d_info: rg_ds.Ic3d, spProcess: rg_ds.SpProcess):
     delay_df.loc[:, 'targ'] = delay_df.loc[:,'targ'].apply(lambda x: buff_dse.unit_conversion(ic_3d_info.sp_sim_settings.unit_lookup_factors["time"], x, ic_3d_info.sp_sim_settings.abs_unit_lookups, sig_figs = 5)) 
     delay_df.loc[:, 'trig'] = delay_df.loc[:,'trig'].apply(lambda x: buff_dse.unit_conversion(ic_3d_info.sp_sim_settings.unit_lookup_factors["time"], x, ic_3d_info.sp_sim_settings.abs_unit_lookups, sig_figs = 5)) 
     
-    # df[["time"]].applymap(lambda x: convert_value(x[:-1], x[-1], ic_3d_info.sp_sim_settings.unit_lookups["time"]))
-    for l in rg_utils.get_df_output_lines(delay_df):
-        print(l)
+    print(delay_df)
+    # for l in rg_utils.get_df_output_lines(delay_df):
+    #     print(l)
 
 
 def run_ic_3d_dse(ic_3d_cli: rg_ds.Ic3dCLI) -> Tuple[float]:
