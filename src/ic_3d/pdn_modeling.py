@@ -382,17 +382,8 @@ def get_c4_placements(design_pdn: rg_ds.DesignPDN, pdn_dims: List[int]) -> Tuple
 
 
 def get_tsv_placements(design_pdn: rg_ds.DesignPDN, dims: List[int]) -> Tuple[rg_ds.GridPlacement]:
-    # # res = (tsv_info["height"]*tsv_info["resistivity"])/((np.pi)*(dim**2)*(tsv_info["diameter"]/2)**2)
-    
-    # tsv_bb_area = ((tsv_info["diameter"]/2)**2)
-    ## area for a single 
-    # koz_bb_area = (((tsv_info["KoZ"] + tsv_info["diameter"]/2))*2)**2
-    # koz_bb_2_bb_overlap_area = 2*(tsv_info["diameter"]/2 + tsv_info["KoZ"] - tsv_info["pitch"]/2)*((tsv_info["diameter"]/2 + tsv_info["KoZ"])*2)
-    # inn_sq_area = ((tsv_info["diameter"]/2 + tsv_info["KoZ"] - tsv_info["pitch"]/2)*2)**2
-    # total_area = koz_bb_area*(dim**2) - (((dim)*(dim-1)*2)*koz_bb_2_bb_overlap_area + inn_sq_area*((dim-1)**2) )
-    # tsv_area_ratio = (tsv_bb_area*dim**2)/total_area
-    # print(f"TSV Vals: R: {res} Dim: {dim}, Area: {total_area}, KoZ Area: {koz_bb_area}, % TSV Area: {tsv_area_ratio}")
-    # init tsv grid (outer grid)
+
+    # Dense refers to creating a grid of TSVs that are spaced by thier pitch
     if design_pdn.tsv_info.placement_setting == "dense":
         # TSV PLACEMENTS
         tsv_grid = rg_ds.GridPlacement(
@@ -404,7 +395,7 @@ def get_tsv_placements(design_pdn: rg_ds.DesignPDN, dims: List[int]) -> Tuple[rg
             dims=dims,
             tag="TSV",
         )
-        # KOZ PLACEMENTS
+        # Keep out zone (KOZ) Placements
         koz_grid = rg_ds.GridPlacement(
             start_coord = rg_ds.GridCoord(-design_pdn.tsv_info.single_tsv.keepout_zone, -design_pdn.tsv_info.single_tsv.keepout_zone),
             h = design_pdn.tsv_info.single_tsv.diameter + design_pdn.tsv_info.single_tsv.keepout_zone*2,
@@ -468,39 +459,11 @@ def get_tsv_placements(design_pdn: rg_ds.DesignPDN, dims: List[int]) -> Tuple[rg
             tsv_grids["KOZ"] = [tsv_koz_outer_grid]
     
     return tsv_grids  
-
-# def get_total_poly_area(boxes: List[sh.Polygon]) -> float:
-#     """ 
-#         Get total area of polygons, subtracts overlap area bw two bboxes (if any)
-#     """
-
-#     # Create polygons for each rectangle
-#     polygons = [sh.Polygon(box.exterior.coords) for box in boxes]
-
-#     # Compute the total area of all polygons
-#     total_area = sum(poly.area for poly in polygons)
-
-#     # Compute the area of intersection between each pair of rectangles,
-#     # skipping pairs that have already been checked
-#     intersection_area = 0
-#     checked_pairs = set()
-#     for box1, box2 in combinations(range(len(boxes)), 2):
-#         if (box1, box2) in checked_pairs or (box2, box1) in checked_pairs:
-#             continue
-#         if polygons[box1].intersects(polygons[box2]):
-#             intersection_area += polygons[box1].intersection(polygons[box2]).area
-#         checked_pairs.add((box1, box2))
-
-#     # Subtract the area of intersection to get the total area covered by boxes
-#     total_coverage_area = total_area - intersection_area
-#     # print(f"total area: {total_area}, intersection area: {intersection_area}, total coverage area: {total_coverage_area}")
-#     return total_coverage_area
-
-
-
-# def tsv_calc(tsv_grid: GridPlacement, koz_grid: GridPlacement) -> dict:
     
 def tsv_calc(tsv_grids: dict) -> dict:
+    """
+        Returns a dict containing TSV and KOZ areas and bounding boxes
+    """
     return_dict = {
         "TSV":
         {
@@ -519,9 +482,7 @@ def tsv_calc(tsv_grids: dict) -> dict:
     ############ THESE TAKE WAY TOO LONG ############
     # TODO take this function out of data structs, just don't want to rn cus of import loop 
     koz_area = rg_ds.get_total_poly_area(KoZ_poly_bbs)
-    #tsv_area = get_total_poly_area(tsv_poly_bbs)
     tsv_area = sum(rect.area for rect in tsv_poly_bbs)
-    # koz_area = sum(rect.area for rect in KoZ_poly_bbs)
 
     # bounding box of all Polygons for KoZs and TSVs 
     koz_bb_poly = sh.Polygon(
@@ -650,7 +611,7 @@ def get_res_info_from_dims(design_pdn: rg_ds.DesignPDN, dims: List[int], metal_r
 
 
 
-    total_ir_drop = sum(x_ir_drops)
+    #total_ir_drop = sum(x_ir_drops)
 
 
     ####################### IR DROP USING DISCRETE INTEGRALS AND HOLISTIC APPROACH #######################
@@ -686,7 +647,7 @@ def get_res_info_from_dims(design_pdn: rg_ds.DesignPDN, dims: List[int], metal_r
         ir_drops.append(ir_metal)
 
     # sum all ir drops measured discretely and add an additional ir drop from via stack resistance
-    #total_ir_drop = sum(ir_drops) + (single_via_stack_res) * current_per_via_stack
+    total_ir_drop = sum(ir_drops) + (single_via_stack_res) * current_per_via_stack
     # 
     single_rail_res = crit_path_distance * design_pdn.process_info.mlayers[-1].wire_res_per_um
     single_rail_path_res = single_rail_res + single_via_stack_res
@@ -734,9 +695,10 @@ def get_res_info_from_dims(design_pdn: rg_ds.DesignPDN, dims: List[int], metal_r
 
 
 
-def find_tsv_info(design_pdn: rg_ds.DesignPDN, in_dims: List[int], axis: int):
+def find_tsv_info(design_pdn: rg_ds.DesignPDN, in_dims: List[int], axis: int) -> Tuple[List[dict], List[int]]:
     """
-    axis = 0 rows 
+        axis = 0 rows 
+        axis = 1 cols 
     """
     tsv_out_infos = []
     ncols = in_dims[0]
@@ -749,10 +711,11 @@ def find_tsv_info(design_pdn: rg_ds.DesignPDN, in_dims: List[int], axis: int):
         tsv_grids = get_tsv_placements(design_pdn, test_dims)
         calc_info = tsv_calc(tsv_grids)
 
+        # Check to see if the bounds of the KoZ (larger than TSVs by definition) would be larger than the area defined by the user for TSV area
         koz_bounds = [(calc_info["KOZ"]["bb"].bounds[2] - calc_info["KOZ"]["bb"].bounds[0]), (calc_info["KOZ"]["bb"].bounds[3] - calc_info["KOZ"]["bb"].bounds[1])] # x, y bb dimensions
-
         if koz_bounds[axis] > design_pdn.tsv_info.area_bounds[axis] or koz_bounds[axis] > design_pdn.c4_info.single_c4.diameter:
             break
+        # Save results from this run to our output variables
         out_dims = test_dims
         tsv_rects = [ rect for t_grid in tsv_grids["TSV"] for rows in t_grid.grid for rect in rows ]
         koz_rects = [ rect for k_grid in tsv_grids["KOZ"] for rows in k_grid.grid for rect in rows ]
@@ -771,10 +734,11 @@ def find_tsv_info(design_pdn: rg_ds.DesignPDN, in_dims: List[int], axis: int):
             tag = "KOZ"
         )
 
+        # Update design_pdn object with new placement info
         design_pdn.tsv_info.tsv_rect_placements = tsv_rect_placements
         design_pdn.tsv_info.koz_rect_placements = koz_rect_placements
 
-        # uncomment below to calculate res using resistivity and tsv dimensions
+        # Calculates resistance of TSV grid based on number of TSVs in Grid and Res of single TSV
         design_pdn.tsv_info.resistance = design_pdn.tsv_info.calc_resistance()
         
         # print(f"TSV Grid resistance {design_pdn.tsv_info.resistance*1e3} mOhms")
@@ -786,18 +750,19 @@ def find_tsv_info(design_pdn: rg_ds.DesignPDN, in_dims: List[int], axis: int):
         elif design_pdn.tsv_info.placement_setting == "checkerboard":
             tsv_out_info["total_tsvs"] = math.prod(out_dims) + math.prod([dim-1 for dim in out_dims])
         else:
-            raise Exception("Invalid TSV placement setting")
+            raise ValueError("Invalid TSV placement setting")
 
         tsv_out_info["tsv_grid_area (um^2)"] = calc_info["TSV"]["area"]
         tsv_out_info["koz_grid_area (um^2)"] = calc_info["KOZ"]["area"]
-        tsv_out_info["grid_resistance (mOhm)"] = round(design_pdn.tsv_info.resistance*1e3,4)
+        tsv_out_info["grid_resistance (mOhm)"] = round(design_pdn.tsv_info.resistance*1e3, 4)
         tsv_out_infos.append(tsv_out_info)
+
         if axis == 0:
             ncols += 1
         elif axis == 1:
             nrows += 1
         else:
-            raise Exception("Invalid axis") 
+            raise ValueError("Invalid axis") 
 
     return tsv_out_infos, out_dims
 
@@ -1343,6 +1308,8 @@ def calc_tsv_grid_to_top_metal_via_stack(design_pdn: rg_ds.DesignPDN, pwr_rail_p
     pwr_rail_pitch is in nm and is the distance between parallel wires in power grid layer
     """
 
+    # TODO add more configurability with respect to via stacks and the number of vias per tsv
+
     # Assume that pwr_rail_pitch > top metal via pitch
 
     ######################################## INTERMEDIATE VIA STACKS ########################################
@@ -1358,12 +1325,13 @@ def calc_tsv_grid_to_top_metal_via_stack(design_pdn: rg_ds.DesignPDN, pwr_rail_p
     via_stacks_per_tsv = math.floor(via_stacks_per_sq_um * design_pdn.tsv_info.single_tsv.area)
     # calculate # vias to intermediate metal layer
     inter_vias_per_tsv_grid = via_stacks_per_tsv * len(design_pdn.tsv_info.tsv_rect_placements.rects)
-    inter_via_stack_res = sum([via_stack.res for via_stack in design_pdn.process_info.via_stack_infos[:-2]])
+    inter_via_stack_res = sum([via_stack.res for via_stack in design_pdn.process_info.via_stack_infos[:-1]])
     inter_via_grid_res = inter_via_stack_res / inter_vias_per_tsv_grid
     # Now calc via stack from inter via grid to actual power rail
     ######################################## TOP VIA STACKS ########################################
     pwr_connecting_via_stack = design_pdn.process_info.via_stack_infos[-1]
     # pwr_connecting_via_pitch = design_pdn.process_info.mlayers[pwr_connecting_via_stack.mlayer_range[-1]].via_pitch
+    # TODO Make sure this is correct, I think the via pitch would be equal to the PDN metal layer pitch though
     via_stacks_per_sq_um = 1 / ((pwr_rail_pitch*1e-3)**2)
     # Assuming that we dedicate the metal area on intermediate layer equivalent to TSV area for the upper vias
     via_stacks_per_tsv = math.floor(via_stacks_per_sq_um * design_pdn.tsv_info.single_tsv.area)
@@ -1378,20 +1346,29 @@ def calc_tsv_grid_to_top_metal_via_stack(design_pdn: rg_ds.DesignPDN, pwr_rail_p
 
 
 def pdn_modeling(ic_3d_info: rg_ds.Ic3d):
+
+    ############################### FINDING TSV GRID DIMENSIONS ############################### 
     # Look at single grid of TSVs (unseperated by C4 bumps)
     tsv_out_infos = []
     # starting dimension to look for TSV grid
-    ncols = 1        
+    ncols = 1
     nrows = 1
     # koz_bounds = [0, 0]
     dims = [ncols, nrows]
 
+    # TODO let the user simply specify the grid / checkerboard dimensions of TSVs they want, the current way basically does the same thing but requires knowledge of TSV pitch
+
+    # Find the largest TSV grid that fits in user defined area
+    # First increasing rows, then cols ...
     tsv_out_infos_cols, out_dims = find_tsv_info(ic_3d_info.design_pdn, dims, axis = 0)
     tsv_out_infos_rows, out_dims = find_tsv_info(ic_3d_info.design_pdn, out_dims, axis = 1)
 
     tsv_out_infos = tsv_out_infos_cols + tsv_out_infos_rows
-        
+    
+    # Update design_pdn object
     ic_3d_info.design_pdn.tsv_info.dims = out_dims
+    
+    # Print TSV grid info
     print("************************ CONSTANT INFO ************************")
     tsv_constants = {
         "Placement Parameter": ic_3d_info.design_pdn.tsv_info.placement_setting,
@@ -1404,6 +1381,7 @@ def pdn_modeling(ic_3d_info: rg_ds.Ic3d):
     for l in rg_utils.get_df_output_lines(tsv_output_df): 
         print(l)
 
+    # Plot Single TSV grid over C4 bump
     if ic_3d_info.pdn_sim_settings.plot_settings["tsv_grid"]:
         fig = go.Figure()
         ic_3d_info.design_pdn.tsv_info.koz_rect_placements.gen_fig(fig, fill_color = "red", opacity = 0.1)
@@ -1417,11 +1395,11 @@ def pdn_modeling(ic_3d_info: rg_ds.Ic3d):
         )
         fig.show()
 
+    # Find the maximum number of power rails per um by taking the inverse of highest metal layer pitch
     # Multiply the pitch by 2 to simulate interleaving of pwr and ground rails TODO make this a setting
     max_rails_per_um = 1 / (ic_3d_info.design_pdn.process_info.mlayers[-1].pitch * 2 * 1e-3)
 
-    # Determine pitch of metal rail regions based on the user inputted metal layer usage
-    ################## USING FACTORS OF CPP AND USER INPUTTED MLAYER USAGE TO DETERMINE PWR RAILS PER UM ##################
+    ################## USING USER INPUTTED MLAYER USAGE TO DETERMINE PWR RAILS PER UM ##################
     mlayer_usage = 1.00
     pitch_factor = 1
     pwr_rails_per_um = 1 / (ic_3d_info.design_pdn.process_info.mlayers[-1].pitch*pitch_factor*1e-3)
@@ -1443,24 +1421,22 @@ def pdn_modeling(ic_3d_info: rg_ds.Ic3d):
     """
     # Now we have accurate RC for whatever percentage of the pitch metal width we want
 
-    # pwr_rail_pitch = None
+    # Determine pitch of metal rail regions based on the user inputted metal layer usage
     while True:
         # Doesnt make sense to use cpp when the layers are in factor of top metal pitch
-        pwr_rails_per_um = (1 / (ic_3d_info.design_pdn.process_info.mlayers[-1].pitch*pitch_factor*1e-3) )
+        pwr_rails_per_um = (1 / (ic_3d_info.design_pdn.process_info.mlayers[-1].pitch * pitch_factor * 1e-3) )
+        # percentage of metal layer used 
         mlayer_usage = pwr_rails_per_um / max_rails_per_um
         if mlayer_usage <= ic_3d_info.design_pdn.pwr_rail_info.mlayer_dist[-1]:
             break
         pitch_factor += 1
 
+    # Now we have the pitch factor which will be used to space the power rails
     pwr_rail_pitch = ic_3d_info.design_pdn.process_info.mlayers[-1].pitch*pitch_factor
 
-    # Assume we need 2 metal layers for each set of PWR/GND power rails (X,Y directions)
+    # Assume we need 2 metal layers for each set of PWR/GND rails (X,Y directions)
     pwr_rails_per_um *= (ic_3d_info.design_pdn.pwr_rail_info.num_mlayers / 2)
-    # Based on the number of rails per sq um 
-    # CPP
-    ## via_stacks_per_sq_um = 1 / ((design_pdn.process_info.contact_poly_pitch*cpp_factor*1e-3) ** 2) # 1 via stack per pitch of metal rail (32 x CPP) = 32x54nm
-    ## pwr_rails_per_um = 1 / (design_pdn.process_info.contact_poly_pitch*cpp_factor*1e-3)
-    # PITCH
+    
 
     ###################################### VIA RES INFO ######################################
     via_grid_res = calc_tsv_grid_to_top_metal_via_stack(ic_3d_info.design_pdn, pwr_rail_pitch)
@@ -1486,7 +1462,7 @@ def pdn_modeling(ic_3d_info: rg_ds.Ic3d):
     # current A / um ^ 2
     current_per_sq_um = (ic_3d_info.design_pdn.power_budget / ic_3d_info.design_pdn.supply_voltage) / (ic_3d_info.design_pdn.floorplan.area)
 
-
+    # TODO hook up this ubump pitch sweep to the ubump info we get for the design
     ############## TOP DIE PDN ##############
     # We want to do the same thing as on the bottom die except using the top die's ubumps as the C4 based power regions
     ubump_pitches = [55, 40, 36, 25, 10 ,5 , 1] 
@@ -1509,7 +1485,6 @@ def pdn_modeling(ic_3d_info: rg_ds.Ic3d):
         ir_drop_out_infos = []
         # C4 Dimension Sweep
         c4_dim = 1
-        # c4_dim_y = 1
         # Ubump Dimension Sweep
         dim = 1
 

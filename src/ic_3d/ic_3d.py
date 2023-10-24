@@ -13,6 +13,7 @@ import copy
 import math
 import pandas as pd
 import csv
+import random
 
 
 import plotly.subplots as subplots
@@ -139,9 +140,9 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
     ic_3d_info.design_info.sink_die_nstages = 1
 
     # Tx sizing params
-    ic_3d_info.tx_sizing.opt_goal = "tpd"
-    ic_3d_info.tx_sizing.nmos_sz = 2
-    ic_3d_info.tx_sizing.pmos_sz = 4
+    ic_3d_info.tx_sizing.opt_goal = "diff"
+    ic_3d_info.tx_sizing.nmos_sz = 1
+    ic_3d_info.tx_sizing.pmos_sz = 2
     ic_3d_info.tx_sizing.p_opt_params = {
         "init": 2,
         "range": [1, 16],
@@ -170,6 +171,7 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
     sp.run(["mkdir", "-p", f"{ic_3d_info.spice_info.subckt_lib_dir}"])
     sp.run(["mkdir", "-p", f"{ic_3d_info.spice_info.includes_dir}"])
 
+    csv_headers_written = False
     for process_info in ic_3d_info.process_infos:
         ####################### INIT DATA STRUCTS #######################
         ic_3d_info.design_info.process_info = process_info
@@ -193,7 +195,6 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
             # cur_best_cost = sys.float_info.max 
             # best_sp_run = None
 
-            csv_headers_written = False
             # TODO instead of looping over specific values, look for all values specified bty users and sweep over those
             for add_wlen in ic_3d_info.add_wlens:
                 for n_stages in ic_3d_info.stage_range:
@@ -239,6 +240,8 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
                                     name = opt_param["name"]
                                     # convert to int as we are using finfets
                                     val = int(float(opt_param["val"]))
+                                    # Make sure the result is actually an int in the first place
+                                    assert int(float(opt_param["val"])) == float(opt_param["val"]), f"Finfet Width {name} is not an integer, got {opt_param['val']}, check your HSpice optimization settings"
                                     # we assume that wn & wp are somewhere in the optimization params
                                     if "wn" in name:
                                         inv_size["wn"] = val
@@ -317,6 +320,17 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
                             inv_areas.append(inv_area)
                             # update inv_infos w/ area info
                             inv_infos[i]["area"] = inv_area
+                             # update inv_infos w/ P/N sizes and inv_idx
+                            inv_infos[i]["Wp"] = inv_size['wp']
+                            inv_infos[i]["Wn"] = inv_size['wn']
+                            inv_infos[i]["inv_idx"] = i
+                            # Add buffer chain related info (duplication of whats in circuit_info) useful for sorting later
+                            inv_infos[i]["n_stages"] = sweep_params["n_stages"]
+                            inv_infos[i]["stage_ratio"] = sweep_params["stage_ratio"]
+                            inv_infos[i]["add_wlen"] = sweep_params["add_wlen"]
+                            inv_infos[i]["ubump_pitch"] = sweep_params["ubump_info"].pitch
+                            inv_infos[i]["process"] = sweep_params["process_info"].name
+
                         
                         # Select only the inverters which we want to evaluate results for (i.e. not the shape inverters) as we include sink inverters in model
                         meas_invs = inv_infos[ic_3d_info.design_info.shape_nstages:len(inv_infos)]

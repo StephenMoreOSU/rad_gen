@@ -17,6 +17,62 @@ import math
 from itertools import combinations
 
 
+
+# ██████╗  █████╗ ██████╗        ██████╗ ███████╗███╗   ██╗
+# ██╔══██╗██╔══██╗██╔══██╗      ██╔════╝ ██╔════╝████╗  ██║
+# ██████╔╝███████║██║  ██║█████╗██║  ███╗█████╗  ██╔██╗ ██║
+# ██╔══██╗██╔══██║██║  ██║╚════╝██║   ██║██╔══╝  ██║╚██╗██║
+# ██║  ██║██║  ██║██████╔╝      ╚██████╔╝███████╗██║ ╚████║
+# ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝        ╚═════╝ ╚══════╝╚═╝  ╚═══╝
+
+def create_timestamp(fmt_only_flag: bool = False) -> str:
+    """
+        Creates a timestamp string in below format
+    """
+    now = datetime.now()
+
+    # Format timestamp
+    timestamp_format = "{year:04}--{month:02}--{day:02}--{hour:02}--{minute:02}--{second:02}--{milliseconds:03}"
+    formatted_timestamp = timestamp_format.format(
+        year=now.year,
+        month=now.month,
+        day=now.day,
+        hour=now.hour,
+        minute=now.minute,
+        second=now.second,
+        milliseconds=int(now.microsecond // 1e3)
+    )
+    dt_format = "%Y--%m--%d--%H--%M--%S--%f"
+
+    retval = dt_format if fmt_only_flag else formatted_timestamp
+    return retval
+
+
+@dataclass
+class CommonSettings:
+    """
+        Path related settings which could be relevant to multiple subtools
+    """
+    # Paths
+    rad_gen_home_path: str = None
+    # openram_home_path: str = None
+    input_tree_top_path: str = None
+    output_tree_top_path: str = None
+
+    # Logging
+    log_file: str = f"rad-gen-{create_timestamp()}.log" # path to log file for current RAD Gen run
+    logger: logging.Logger = logging.getLogger(log_file) # logger for RAD Gen
+    # Verbosity level
+    # 0 - Brief output
+    # 1 - Brief output + I/O + command line access
+    # 2 - Hammer and asic tool outputs will be printed to console 
+    log_verbosity: int = 1 # verbosity level for log file 
+
+
+
+
+
+
 #  █████╗ ███████╗██╗ ██████╗    ██████╗ ███████╗███████╗
 # ██╔══██╗██╔════╝██║██╔════╝    ██╔══██╗██╔════╝██╔════╝
 # ███████║███████╗██║██║         ██║  ██║███████╗█████╗  
@@ -90,29 +146,6 @@ class RadGenCLI:
                     else:
                         cmd_str, sys_args = self.decode_dataclass_to_cli(obj = self.subtool_cli, sys_args = sys_args, cmd_str = cmd_str, _field = _field)
         return cmd_str, sys_args
-
-
-def create_timestamp(fmt_only_flag: bool = False) -> str:
-    """
-        Creates a timestamp string in below format
-    """
-    now = datetime.now()
-
-    # Format timestamp
-    timestamp_format = "{year:04}--{month:02}--{day:02}--{hour:02}--{minute:02}--{second:02}--{milliseconds:03}"
-    formatted_timestamp = timestamp_format.format(
-        year=now.year,
-        month=now.month,
-        day=now.day,
-        hour=now.hour,
-        minute=now.minute,
-        second=now.second,
-        milliseconds=int(now.microsecond // 1e3)
-    )
-    dt_format = "%Y--%m--%d--%H--%M--%S--%f"
-
-    retval = dt_format if fmt_only_flag else formatted_timestamp
-    return retval
 
 
 @dataclass
@@ -355,7 +388,7 @@ class EnvSettings:
     # OpenRAM 
     # openram_path: str  # path to openram repository
     
-    # Top level input
+    # Top level input # TODO remove this, deprecated config path
     top_lvl_config_path: str = None # high level rad gen configuration file path
     
     # Name of directory which stores parameter sweep headers
@@ -886,8 +919,6 @@ class ProcessInfo:
     num_mlayers: int
     mlayers: List[MlayerInfo]
     contact_poly_pitch: float # nm
-    # min_width_tx_area: float # nm^2
-    # tx_dims: List[float] #nm
     via_stack_infos: List[ViaStackInfo]
     tx_geom_info: TxGeometryInfo
 
@@ -995,6 +1026,9 @@ class SingleTSVInfo:
 
 @dataclass
 class PolyPlacements:
+    """
+        This dataclass is used for representing a list of polygons in a 2D space
+    """
     # grid start and end in um
     rects: List[RectBB] = None
     tag: str = None # used to identify what this grid is for
@@ -1041,7 +1075,6 @@ class TSVInfo:
     
     def calc_resistance(self) -> float:
         return self.single_tsv.resistance / len(self.tsv_rect_placements.rects)
-        # return self.single_tsv.resistivity * self.single_tsv.height / self.tsv_rect_placements.area
 
 
 
@@ -1326,85 +1359,9 @@ class DesignPDN:
 
     def update(self) -> None:
         self.design_pdn_post_init()
-        # if self.tsv_info.placement_setting == "dense":
-        #     self.c4_info.max_c4_dims = [
-        #         math.floor(((self.floorplan.bounds[2] - self.floorplan.bounds[0]) - self.c4_info.margin*2 + self.c4_info.single_c4.diameter) / self.c4_info.single_c4.pitch),
-        #         math.floor(((self.floorplan.bounds[3] - self.floorplan.bounds[1]) - self.c4_info.margin*2 + self.c4_info.single_c4.diameter) / self.c4_info.single_c4.pitch) 
-        #     ] 
-        #     self.ubump_info.max_dims = [
-        #         math.floor(((self.floorplan.bounds[2] - self.floorplan.bounds[0]) - self.ubump_info.margin*2 + self.ubump_info.single_ubump.diameter) / self.ubump_info.single_ubump.pitch),
-        #         math.floor(((self.floorplan.bounds[3] - self.floorplan.bounds[1]) - self.ubump_info.margin*2 + self.ubump_info.single_ubump.diameter) / self.ubump_info.single_ubump.pitch) 
-        #     ] 
-        # elif self.tsv_info.placement_setting == "checkerboard":
-        #     self.c4_info.max_c4_dims = [
-        #         math.floor(((self.floorplan.bounds[2] - self.floorplan.bounds[0]) - self.c4_info.margin*2 + self.c4_info.single_c4.diameter) / self.c4_info.single_c4.pitch * 2),
-        #         math.floor(((self.floorplan.bounds[3] - self.floorplan.bounds[1]) - self.c4_info.margin*2 + self.c4_info.single_c4.diameter) / self.c4_info.single_c4.pitch * 2) 
-        #     ] 
-        #     self.ubump_info.max_dims = [
-        #         math.floor(((self.floorplan.bounds[2] - self.floorplan.bounds[0]) - self.ubump_info.margin*2 + self.ubump_info.single_ubump.diameter) / self.ubump_info.single_ubump.pitch * 2),
-        #         math.floor(((self.floorplan.bounds[3] - self.floorplan.bounds[1]) - self.ubump_info.margin*2 + self.ubump_info.single_ubump.diameter) / self.ubump_info.single_ubump.pitch * 2) 
-        #     ] 
-        # # get resistance target
-        # self.resistance_target = (self.power_budget / self.supply_voltage) / self.ir_drop_budget
 
     def __post_init__(self):
         self.design_pdn_post_init()
-        # if self.tsv_info.placement_setting == "dense":
-        #     ######################################### MAX C4 GRID PLACEMENT INIT #########################################
-        #     self.c4_info.max_c4_dims = [
-        #         math.floor(((self.floorplan.bounds[2] - self.floorplan.bounds[0]) - self.c4_info.margin*2 + self.c4_info.single_c4.diameter) / self.c4_info.single_c4.pitch),
-        #         math.floor(((self.floorplan.bounds[3] - self.floorplan.bounds[1]) - self.c4_info.margin*2 + self.c4_info.single_c4.diameter) / self.c4_info.single_c4.pitch) 
-        #     ] 
-        #     self.ubump_info.max_dims = [
-        #         math.floor(((self.floorplan.bounds[2] - self.floorplan.bounds[0]) - self.ubump_info.margin*2 + self.ubump_info.single_ubump.diameter) / self.ubump_info.single_ubump.pitch),
-        #         math.floor(((self.floorplan.bounds[3] - self.floorplan.bounds[1]) - self.ubump_info.margin*2 + self.ubump_info.single_ubump.diameter) / self.ubump_info.single_ubump.pitch) 
-        #     ]
-        #     c4_grid_placement = GridPlacement(
-        #         start_coord=GridCoord(self.c4_info.margin,self.c4_info.margin),
-        #         h=self.c4_info.single_c4.diameter,
-        #         v=self.c4_info.single_c4.diameter,
-        #         s_h=self.c4_info.single_c4.pitch,
-        #         s_v=self.c4_info.single_c4.pitch,
-        #         dims=self.c4_info.max_c4_dims,
-        #         tag="C4"
-        #     )
-        #     self.c4_info.max_c4_placements = init_placement([c4_grid_placement])
-        # elif self.tsv_info.placement_setting == "checkerboard":
-        #     ######################################### MAX C4 GRID PLACEMENT INIT #########################################
-        #     self.c4_info.max_c4_dims = [
-        #         math.floor(((self.floorplan.bounds[2] - self.floorplan.bounds[0]) - self.c4_info.margin*2 + self.c4_info.single_c4.diameter) / self.c4_info.single_c4.pitch * 2),
-        #         math.floor(((self.floorplan.bounds[3] - self.floorplan.bounds[1]) - self.c4_info.margin*2 + self.c4_info.single_c4.diameter) / self.c4_info.single_c4.pitch * 2) 
-        #     ] 
-        #     self.ubump_info.max_dims = [
-        #         math.floor(((self.floorplan.bounds[2] - self.floorplan.bounds[0]) - self.ubump_info.margin*2 + self.ubump_info.single_ubump.diameter) / self.ubump_info.single_ubump.pitch * 2),
-        #         math.floor(((self.floorplan.bounds[3] - self.floorplan.bounds[1]) - self.ubump_info.margin*2 + self.ubump_info.single_ubump.diameter) / self.ubump_info.single_ubump.pitch * 2) 
-        #     ] 
-        #     # Setting MAX C4 Grid
-        #     c4_outer_grid = GridPlacement(
-        #         start_coord=GridCoord(self.c4_info.margin,self.c4_info.margin),
-        #         h=self.c4_info.single_c4.diameter,
-        #         v=self.c4_info.single_c4.diameter,
-        #         s_h=self.c4_info.single_c4.pitch*2,
-        #         s_v=self.c4_info.single_c4.pitch*2,
-        #         dims=self.c4_info.max_c4_dims,
-        #         tag="C4"
-        #     )
-        #     c4_inner_grid = GridPlacement(
-        #         start_coord=GridCoord(self.c4_info.margin + self.c4_info.single_c4.pitch, self.c4_info.margin + self.c4_info.single_c4.pitch),
-        #         h=self.c4_info.single_c4.diameter,
-        #         v=self.c4_info.single_c4.diameter,
-        #         s_h=self.c4_info.single_c4.pitch*2,
-        #         s_v=self.c4_info.single_c4.pitch*2,
-        #         dims=self.c4_info.max_c4_dims-1,
-        #         tag="C4"
-        #     )
-        #     self.c4_info.max_c4_placements = init_placement([c4_outer_grid, c4_inner_grid])
-        
-        # # get resistance target
-        # self.resistance_target = (self.power_budget / self.supply_voltage) / self.ir_drop_budget
-        # # get num txs in design
-        # self.num_txs = math.floor(self.floorplan.area / (self.process_info.tx_geom_info.min_width_tx_area*1e-6))
-        # self.current_per_tx = (self.power_budget / self.supply_voltage) / self.num_txs
 
 
 @dataclass

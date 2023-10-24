@@ -3,6 +3,8 @@ from typing import List, Dict, Tuple, Set, Union, Any, Type, Callable
 import os, sys, yaml
 import argparse
 import datetime
+import shutil
+
 import logging
 import flatdict
 
@@ -498,6 +500,12 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
     parser.add_argument("-tc", "--top_config_path", help="path to RAD-GEN top level config file", type=str, default=None)
     # Subtool options are "coffe" "asic-dse" "3d-ic"
     parser.add_argument("-st", "--subtools", help="subtool to run", nargs="*", type=str, default=None)
+    # Common args for all subtools
+    # parser.add_argument('--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
+    # Optional arguments only used in the case of manual 
+    parser.add_argument('--input_tree_top_path', help="path to top level dir containing input designs", type=str, default=None)
+    parser.add_argument('--output_tree_top_path', help="path to top level dir which outputs will be produced into, will have a subdir for each subtool", type=str, default=None)
+
     parsed_args, remaining_args = parser.parse_known_args()
     
 
@@ -678,6 +686,13 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
     """ 
 
     # For each CLI / config input we need to check that it exists in dict and is not None
+    # if asic_dse_conf["input_tree_top_path"] != None:
+    #     input_tree_top_path = clean_path(asic_dse_conf["input_tree_top_path"])
+    # if asic_dse_conf["output_tree_top_path"] != None:
+    #     output_tree_top_path = clean_path(asic_dse_conf["output_tree_top_path"])
+        
+    
+
     if asic_dse_conf["env_config_path"] != None:
         env_conf = parse_yml_config(asic_dse_conf["env_config_path"])
     else:
@@ -783,6 +798,14 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
                 driver_opts = driver_opts._replace(project_configs = list(asic_dse_conf["flow_config_paths"]))
                 hammer_driver = HammerDriver(driver_opts)
 
+                # Instantiating a hammer driver class creates an obj_dir named "obj_dir" in the current directory, as a quick fix we will delete this directory after its created
+                # TODO this should be fixed somewhere
+
+                dummy_obj_dir_path = os.path.join(os.getcwd(),"obj_dir")
+                if os.path.isdir(dummy_obj_dir_path):
+                    # Please be careful changing things here, always scary when you're calling "rm -rf"
+                    shutil.rmtree(dummy_obj_dir_path)
+
                 # if cli provides a top level module and hdl path, we will modify the provided design config file to use them
                 if asic_dse_conf["top_lvl_module"] != None and asic_dse_conf["hdl_path"] != None:
                     vlsi_mode_inputs["config_pre_proc"] = True
@@ -796,7 +819,9 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
                 out_dir = os.path.join(env_settings.design_output_path, asic_flow_settings_input["top_lvl_module"])
                 obj_dir_fmt = f"{asic_flow_settings_input['top_lvl_module']}-{rg_ds.create_timestamp()}"
                 
-                # TODO restrict input to only accept one of below two options
+                # Throw error if both obj_dir options are specified
+                assert not (asic_dse_conf["use_latest_obj_dir"] and asic_dse_conf["manual_obj_dir"] != None), "ERROR: cannot use both latest obj dir and manual obj dir arguments for ASIC-DSE subtool"
+                
                 obj_dir_path = None
                 # Users can specify a specific obj directory
                 if asic_dse_conf["manual_obj_dir"] != None:
@@ -916,8 +941,6 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
             name=process_info["name"],
             num_mlayers=process_info["mlayers"],
             contact_poly_pitch=process_info["contact_poly_pitch"],
-            # min_width_tx_area=process_info["min_width_tx_area"],
-            # tx_dims=process_info["tx_dims"],
             mlayers=[
                 rg_ds.MlayerInfo(
                     idx=layer,
@@ -994,7 +1017,6 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
         logic_block = rg_ds.HwModuleInfo(
             name = "logic_block",
             area = float(ic_3d_conf["design_info"]["logic_block_info"]["area"]),
-            # dims = ic_3d_conf["design_info"]["logic_block_info"]["dims"],
             width = float(ic_3d_conf["design_info"]["logic_block_info"]["dims"][0]),
             height = float(ic_3d_conf["design_info"]["logic_block_info"]["dims"][1]),
         ),
@@ -1021,14 +1043,14 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
             "supply_v": "0.7"
         },
         driver_info = {
-            **{
-                key : val
-                for stage_idx in range(10)
-                for key, val in {
-                    f"init_Wn_{stage_idx}" : "1",
-                    f"init_Wp_{stage_idx}" : "2"
-                }.items()
-            },
+            # **{
+            #     key : val
+            #     for stage_idx in range(10)
+            #     for key, val in {
+            #         f"init_Wn_{stage_idx}" : "1",
+            #         f"init_Wp_{stage_idx}" : "2"
+            #     }.items()
+            # },
             "dvr_ic_in_res" : "1m",
             "dvr_ic_in_cap" : "0.001f",
         },
