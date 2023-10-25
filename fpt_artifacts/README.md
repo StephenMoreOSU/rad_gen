@@ -35,7 +35,10 @@ cd ~/rad_gen/vlsi/hammer
 python3 -m pip install -e .
 ```
 
+
 ## Generating Fig 6. a & b Results
+
+**Note: To add ESD area to results just add 1.048 um^2 to each area result**
 
 ```bash
 # Change to the directory with all input configurations required to generate artifacts
