@@ -6,7 +6,6 @@ import datetime
 import shutil
 
 import logging
-import flatdict
 
 
 import shapely as sh
@@ -23,7 +22,7 @@ import vlsi.hammer.hammer.tech as hammer_tech
 import src.common.data_structs as rg_ds
 
 # COFFE modules
-import COFFE.coffe.utils as coffe_utils
+import src.coffe.utils as coffe_utils
 
 import csv
 import re
