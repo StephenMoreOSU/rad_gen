@@ -501,10 +501,10 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
     # Subtool options are "coffe" "asic-dse" "3d-ic"
     parser.add_argument("-st", "--subtools", help="subtool to run", nargs="*", type=str, default=None)
     # Common args for all subtools
-    # parser.add_argument('--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
+    # parser.add_argument('-mo','--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
     # Optional arguments only used in the case of manual 
-    parser.add_argument('--input_tree_top_path', help="path to top level dir containing input designs", type=str, default=None)
-    parser.add_argument('--output_tree_top_path', help="path to top level dir which outputs will be produced into, will have a subdir for each subtool", type=str, default=None)
+    # parser.add_argument('--input_tree_top_path', help="path to top level dir containing input designs", type=str, default=None)
+    # parser.add_argument('--output_tree_top_path', help="path to top level dir which outputs will be produced into, will have a subdir for each subtool", type=str, default=None)
 
     parsed_args, remaining_args = parser.parse_known_args()
     
@@ -617,23 +617,30 @@ def init_structs_top(args: argparse.Namespace, gen_arg_keys: List[str], default_
         for k_cli, v_cli in cli_dict.items():
             # We only want the parameters relevant to the subtool we're running (exclude top level args)
             # If one wanted to exclude other subtool args they could do it here
-            if k_cli not in gen_arg_keys:
-                if args.top_config_path != None:
-                    for k_conf, v_conf in top_conf[subtool].items():
-                        if k_conf == k_cli:
-                            # If the cli key is not a default value or None/False AND cli key is not in the cli default values dictionary then we will use the cli value
-                            if v_cli != None and v_cli != False and v_cli != default_arg_vals[k_cli]:
-                                result_conf[k_conf] = v_cli
-                            else:
-                                result_conf[k_conf] = v_conf
-                    # if the cli key was not loaded into result config 
-                    # meaning it didnt exist in config file, we use whatever value was in cli
-                    if k_cli not in result_conf.keys():
-                        result_conf[k_cli] = v_cli 
-                else:
-                    result_conf[k_cli] = v_cli
-        subtool_confs[subtool] = result_conf
+            # if user passed in top lvl conf file
+            if args.top_config_path != None:
+                for k_conf, v_conf in top_conf[subtool].items():
+                    if k_conf == k_cli:
+                        # If the cli key is not a default value or None/False AND cli key is not in the cli default values dictionary then we will use the cli value
+                        if v_cli != None and v_cli != False and v_cli != default_arg_vals[k_cli]:
+                            result_conf[k_conf] = v_cli
+                        else:
+                            result_conf[k_conf] = v_conf
+                # if the cli key was not loaded into result config 
+                # meaning it didnt exist in config file, we use whatever value was in cli
+                if k_cli not in result_conf.keys():
+                    result_conf[k_cli] = v_cli 
+            else:
+                # if only cli args provided
+                result_conf[k_cli] = v_cli
 
+        # init common structs for all subtools
+
+        subtool_confs[subtool] = {
+            #"common": init_common_structs(result_conf),
+            **result_conf,
+        }
+        
     # Before this function make sure all of the parameters have been defined in the dict with default values if not specified
     rad_gen_info = {}
 
@@ -669,6 +676,99 @@ def init_asic_config(env: rg_ds.EnvSettings, conf_path: str) -> str:
 
     return conf_out_path
 
+
+
+def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
+    rad_gen_home = os.environ.get("RAD_GEN_HOME")
+    if rad_gen_home is None:
+        raise RuntimeError("RAD_GEN_HOME environment variable not set, please source <rad_gen_top>/env_setup.sh")
+    else:
+        rad_gen_home = clean_path(rad_gen_home)
+
+    # This implies that hammer home must be set even when not running hammer, thats fine for now its assumed users have to recursivley clone repo
+    # TODO if we want to change this we can just make hammer home optional 
+    hammer_home = os.environ.get("HAMMER_HOME")
+    if hammer_home is None:
+        raise RuntimeError("HAMMER_HOME environment variable not set, please source <rad_gen_top>/env_setup.sh")
+    else:
+        hammer_home = clean_path(hammer_home)
+
+    # For the below directory structures we have dicts with keys and values being the same
+    # This is really for readability as when these directories are accessed further in the flow 
+    # we will use the keys/dir names which are descriptive of thier purpose
+
+    # Setup input and output directory structures instantiated under <rad_gen_home>
+    input_tree_struct = rg_ds.Tree(  
+        os.path.join(rad_gen_home, "inputs"),
+        [
+            rg_ds.Tree("asic_dse", 
+                [
+                    rg_ds.Tree("sys_configs")
+                ]),
+            rg_ds.Tree("coffe"),
+            rg_ds.Tree("ic_3d"),
+        ]
+    )
+
+    output_tree_struct = rg_ds.Tree(  
+        os.path.join(rad_gen_home, "outputs"),
+        [
+            rg_ds.Tree("asic_dse"),
+            rg_ds.Tree("coffe"),
+            rg_ds.Tree("ic_3d"),
+        ]
+    )
+
+    # Input dir structure for asic-dse asic flow, instantiated under <user_defined_design_name> dir under "asic_dse" in input tree
+    asic_input_tree_struct = rg_ds.Tree(
+        # No root here as this structure exists for each user defined design
+        None,
+        [
+            rg_ds.Tree("configs", 
+                [
+                    rg_ds.Tree("gen"),
+                    rg_ds.Tree("mod"),
+                ]),
+            rg_ds.Tree("rtl", 
+                [
+                    rg_ds.Tree("gen"),
+                    rg_ds.Tree("src"),
+                    rg_ds.Tree("include"),
+                    rg_ds.Tree("verif"),
+                    rg_ds.Tree("build"),
+                ]),
+        ]
+    )
+    asic_output_tree_struct = rg_ds.Tree(
+        # No root here as this structure exists for <top_level_module>
+        None,
+        [
+            rg_ds.Tree("hammer", 
+                [
+                    rg_ds.Tree("scripts"), # scripts to run hammer flow in parallel 
+                    rg_ds.Tree("obj_dir", tag="obj"), # hammer obj dir, will contain all outputs/scripts/reports from flow
+                ], tag="hammer"),
+            rg_ds.Tree("custom",
+                           
+            )
+        ]
+    )
+
+    # asic_input_tree_struct.__init__(os.path.join(top_input_path, asic_dse, user_defined_design), asic_input_tree_struct.subtrees)
+    # Coffe does not necessarily have an input tree, as it only requires configuration files
+
+    # Output dir structure for coffe flow, instantiated under <user_defined_design_name> dir under "coffe" in input tree
+    coffe_output_tree_struct = {
+        # Stores 
+        "fpga_fabric_sizing" : "fpga_fabric_sizing"
+    }
+
+
+
+
+
+
+    log_file = os.path.join(rad_gen_home, "logs", "rad_gen.log")
 
 
 
@@ -1109,7 +1209,7 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
                 diameter=int(ic_3d_conf["package_info"]["tsv"]["diameter"]), #um
                 pitch=int(ic_3d_conf["package_info"]["tsv"]["pitch"]), #um
                 resistivity=float(ic_3d_conf["package_info"]["tsv"]["resistivity"]), #Ohm*um (1.72e-8 * 1e6)
-                keepout_zone=int(ic_3d_conf["package_info"]["tsv"]["keepout_zone"]), # um     
+                keepout_zone=float(ic_3d_conf["package_info"]["tsv"]["keepout_zone"]), # um     
                 resistance=float(ic_3d_conf["package_info"]["tsv"]["resistance"]), #Ohm
             ),
             area_bounds = ic_3d_conf["design_info"]["pwr_placement"]["tsv_area_bounds"],

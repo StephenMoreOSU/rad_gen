@@ -1,7 +1,9 @@
 env:
   rad_gen_home_path: ~/rad_gen
+  
   # Path to hammer github repo
   hammer_home_path: ~/rad_gen/vlsi/hammer
+
   # CAD tool related env vars (hammer format)
   env_paths: [ ~/rad_gen/unit_tests/inputs/asic_dse/sys_configs/env.yaml ]
   design_input_path: ~/rad_gen/unit_tests/inputs/asic_dse

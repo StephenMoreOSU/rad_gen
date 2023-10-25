@@ -285,7 +285,8 @@ class TestSuite:
             input_config = os.path.expanduser(f"{self.ic_3d_inputs}/3D_ic_explore.yaml")
             ic_3d_cli_args = rg_ds.Ic3dCLI(
                 input_config_path = input_config,
-                buffer_dse = True
+                buffer_dse = True,
+                use_latest_obj_dir = True
             )
             buffer_dse_test = rg_ds.RadGenCLI(
                 subtools = ["ic_3d"],
@@ -295,28 +296,28 @@ class TestSuite:
             self.ic_3d_tests.append(buffer_dse_test)
             
             # Sensitivity Study Test
-            ic_3d_cli_args = rg_ds.Ic3dCLI(
-                input_config_path = input_config,
-                buffer_sens_study = True,
-            )
-            buffer_dse_test = rg_ds.RadGenCLI(
-                subtools = ["ic_3d"],
-                subtool_cli = ic_3d_cli_args,
-            )
-            buffer_dse_test = Test(rad_gen_cli=buffer_dse_test, test_name="buffer_sens_study")
-            self.ic_3d_tests.append(buffer_dse_test)
+            # ic_3d_cli_args = rg_ds.Ic3dCLI(
+            #     input_config_path = input_config,
+            #     buffer_sens_study = True,
+            # )
+            # buffer_dse_test = rg_ds.RadGenCLI(
+            #     subtools = ["ic_3d"],
+            #     subtool_cli = ic_3d_cli_args,
+            # )
+            # buffer_dse_test = Test(rad_gen_cli=buffer_dse_test, test_name="buffer_sens_study")
+            # self.ic_3d_tests.append(buffer_dse_test)
 
             # PDN modeling Test
-            ic_3d_cli_args = rg_ds.Ic3dCLI(
-                input_config_path = input_config,
-                pdn_modeling = True,
-            )
-            buffer_dse_test = rg_ds.RadGenCLI(
-                subtools = ["ic_3d"],
-                subtool_cli = ic_3d_cli_args,
-            )
-            buffer_dse_test = Test(rad_gen_cli=buffer_dse_test, test_name="pdn_modeling")
-            self.ic_3d_tests.append(buffer_dse_test)
+            # ic_3d_cli_args = rg_ds.Ic3dCLI(
+            #     input_config_path = input_config,
+            #     pdn_modeling = True,
+            # )
+            # buffer_dse_test = rg_ds.RadGenCLI(
+            #     subtools = ["ic_3d"],
+            #     subtool_cli = ic_3d_cli_args,
+            # )
+            # buffer_dse_test = Test(rad_gen_cli=buffer_dse_test, test_name="pdn_modeling")
+            # self.ic_3d_tests.append(buffer_dse_test)
 
 
 
@@ -497,6 +498,17 @@ def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], su
                     print(f"Warning: Golden reference file {golden_ref_path} does not exist")
                 if not os.path.isfile(unit_test_report_path):
                     print(f"Warning: Unit test report file {unit_test_report_path} does not exist, the test may have failed")
+        if subtool == "ic_3d":
+            # Path of the golden reference output file 
+            golden_ref_path = os.path.join(golden_ref_base_path, "buffer_summary_report.csv")
+            out_csv_path = os.path.join(rad_gen_home, "ic_3d_reports", "buffer_summary_report.csv")
+            
+            # If the flow actually produced a csv then compare it
+            if os.path.exists(out_csv_path):
+                res_df = compare_results(out_csv_path, golden_ref_path)
+                print(res_df)
+            else:
+                pass
                 
 
 

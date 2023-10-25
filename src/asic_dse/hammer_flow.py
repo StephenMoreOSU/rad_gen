@@ -1666,7 +1666,8 @@ def run_hammer_flow(rad_gen_settings: rg_ds.HighLvlSettings, config_paths: List[
             # If using asap7 run the gds scaling scripts
             flow_report["gds_area"] = run_asap7_gds_scaling_scripts(rad_gen_settings, rad_gen_settings.asic_flow_settings.hammer_driver.obj_dir, rad_gen_settings.asic_flow_settings.hammer_driver.database.get_setting("par.inputs.top_module"))
         else:
-            stdcells_fpath = os.path.join( rad_gen_settings.asic_flow_settings.hammer_driver.tech.cache_dir, "stdcells.txt")
+            tech_cache_dir = os.path.basename(rad_gen_settings.asic_flow_settings.hammer_driver.tech.cache_dir)
+            stdcells_fpath = os.path.join( rad_gen_settings.asic_flow_settings.hammer_driver.obj_dir, tech_cache_dir, "stdcells.txt")
             # This data structure assumes cadence tools ("output_gds_filename")
             scaled_gds_fpath = os.path.join(rad_gen_settings.asic_flow_settings.hammer_driver.obj_dir, "par-rundir", f"{rad_gen_settings.asic_flow_settings.top_lvl_module}_drc.gds")
             # calls a function which uses a gds tool to return area from file rather than virtuoso

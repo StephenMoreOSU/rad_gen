@@ -7,6 +7,7 @@ pathadd() {
     fi
 }
 
+# set env vars for RAD-Gen
 RAD_GEN_HOME=$PWD
 VLSI_HOME=$PWD/vlsi
 HAMMER_HOME=$VLSI_HOME/hammer
@@ -43,8 +44,9 @@ done
 
 
 ## PYTHONPATH for COFFE
-pathadd $RAD_GEN_HOME/COFFE
-pathadd $RAD_GEN_HOME/COFFE/coffe
+# pathadd $RAD_GEN_HOME/COFFE
+# pathadd $RAD_GEN_HOME/COFFE/coffe
+
 
 
 ## Conda env setup

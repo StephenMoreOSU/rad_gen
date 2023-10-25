@@ -100,8 +100,8 @@ def main(args: Optional[List[str]] = None) -> None:
         coffe.run_coffe_flow(rad_gen_info["coffe"])
     elif "ic_3d" in rad_gen_info.keys():
         if rad_gen_info["ic_3d"].cli_args.buffer_dse:
-            ic_3d.run_buffer_dse(rad_gen_info["ic_3d"])
-            # ic_3d.run_buffer_dse_updated(rad_gen_info["ic_3d"]) 
+            # ic_3d.run_buffer_dse(rad_gen_info["ic_3d"])
+            ic_3d.run_buffer_dse_updated(rad_gen_info["ic_3d"]) 
         if rad_gen_info["ic_3d"].cli_args.pdn_modeling:
             ic_3d.run_pdn_modeling(rad_gen_info["ic_3d"])
         if rad_gen_info["ic_3d"].cli_args.buffer_sens_study:

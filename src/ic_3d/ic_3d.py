@@ -309,7 +309,7 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
                         inv_areas = []
                         for i, inv_size in enumerate(inv_sizes):
                             # Calculate the multiplier for the stage ratio of each stage, we reset the stage ratio back to 1 after the last stage of driver buffer, these are the sizes for inverters on the sink die
-                            inv_mult_factor = sweep_params["stage_ratio"] ** i if i < ic_3d_info.design_info.total_nstages - ic_3d_info.design_info.sink_die_nstages else buff_fanout ** (i - ic_3d_info.design_info.sink_die_nstages)
+                            inv_mult_factor = sweep_params["stage_ratio"] ** i if i < ic_3d_info.design_info.total_nstages - ic_3d_info.design_info.sink_die_nstages else buff_fanout ** (i - (ic_3d_info.design_info.total_nstages - ic_3d_info.design_info.sink_die_nstages) )
                             # multiply the fanout factor by the width of the n/pmos tx 
                             nfet_numfins = int(float(inv_size["wn"]) * inv_mult_factor)
                             pfet_numfins = int(float(inv_size["wp"]) * inv_mult_factor)
@@ -364,7 +364,7 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
                             print(lines)
 
                         # Output to csv
-                        report_output = "buffer_dse_reports"
+                        report_output = "ic_3d_reports"
                         os.makedirs(report_output, exist_ok=True)
                         if not csv_headers_written:
                             with open(f"{report_output}/buffer_summary_report.csv", "w", newline="") as csvfile:

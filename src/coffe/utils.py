@@ -197,7 +197,7 @@ def print_area_and_delay(report_file, fpga_inst):
             str(round(fpga_inst.carrychaininter.trise/1e-12,4)).ljust(MIDL_COL_WIDTH) + "n/a".ljust(LAST_COL_WIDTH))
         # total carry chain area
         print_and_write(report_file, "  " + "total_carry_chain_area".ljust(FIRS_COL_WIDTH) + str(round(area_dict["total_carry_chain"]/1e6,3)).ljust(MIDL_COL_WIDTH) + 
-        + "n/a".ljust(MIDL_COL_WIDTH) + "n/a".ljust(MIDL_COL_WIDTH) + "n/a".ljust(MIDL_COL_WIDTH) +  "n/a".ljust(LAST_COL_WIDTH))
+            "n/a".ljust(MIDL_COL_WIDTH) + "n/a".ljust(MIDL_COL_WIDTH) + "n/a".ljust(MIDL_COL_WIDTH) +  "n/a".ljust(LAST_COL_WIDTH))
         
 
         if fpga_inst.specs.carry_chain_type == "skip":
@@ -484,15 +484,15 @@ def print_hardblock_info(report_file, fpga_inst):
     print_and_write(report_file, "  ---------------------")
 
     for hardblock in fpga_inst.hardblocklist:
-        print_and_write(report_file, "  name: " + hardblock.name)
+        print_and_write(report_file, "  Name: " + hardblock.name)
         # The areas in area_dict and in the objects in fpga.py are in nm^2. But in this table,
         # we report areas in um^2. That's why we divide each value by 10^6.
-        print_and_write(report_file, "  core_area: " + str(hardblock.area/1000000))
-        print_and_write(report_file, "  local_mux_area: " + str(hardblock.parameters['num_gen_inputs'] * fpga_inst.area_dict[hardblock.mux.name]/1000000))
-        print_and_write(report_file, "  local_mux_area_with_sram: " + str(hardblock.parameters['num_gen_inputs'] * fpga_inst.area_dict[hardblock.mux.name + "_sram"]/1000000))
+        print_and_write(report_file, "  Core_area: " + str(hardblock.area/1000000))
+        print_and_write(report_file, "  Local_mux_area: " + str(hardblock.parameters['num_gen_inputs'] * fpga_inst.area_dict[hardblock.mux.name]/1000000))
+        print_and_write(report_file, "  Local_mux_area_with_sram: " + str(hardblock.parameters['num_gen_inputs'] * fpga_inst.area_dict[hardblock.mux.name + "_sram"]/1000000))
         if hardblock.parameters['num_dedicated_outputs'] > 0:
-            print_and_write(report_file, "  dedicated_output_routing_area: " + str(hardblock.parameters['num_dedicated_outputs'] * fpga_inst.area_dict[hardblock.name + "_ddriver"]/1000000))
-        print_and_write(report_file, "  total_area: " + str(fpga_inst.area_dict[hardblock.name + "_sram"]/1000000))
+            print_and_write(report_file, "  Dedicated_output_routing_area: " + str(hardblock.parameters['num_dedicated_outputs'] * fpga_inst.area_dict[hardblock.name + "_ddriver"]/1000000))
+        print_and_write(report_file, "  Total_area: " + str(fpga_inst.area_dict[hardblock.name + "_sram"]/1000000))
         print_and_write(report_file, "")
 
 

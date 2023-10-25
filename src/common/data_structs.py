@@ -2,11 +2,16 @@ from dataclasses import dataclass, field, fields
 import os, sys
 
 import re
-from typing import Pattern, Dict, List, Any, Tuple
+from typing import Pattern, Dict, List, Any, Tuple, Union, Generator, Optional, Callable, Type
 from datetime import datetime
 import logging
+from pathlib import Path
+
+
+
 
 from vlsi.hammer.hammer.vlsi.driver import HammerDriver
+
 
 # IC 3D imports
 import shapely as sh
@@ -15,7 +20,6 @@ import plotly.subplots as subplots
 import plotly.express as px
 import math
 from itertools import combinations
-
 
 
 # ██████╗  █████╗ ██████╗        ██████╗ ███████╗███╗   ██╗
@@ -48,17 +52,164 @@ def create_timestamp(fmt_only_flag: bool = False) -> str:
     return retval
 
 
+class DisplayablePath(object):
+
+    # Usage Example:
+    # paths_gen = DisplayablePath.make_tree(Path('/fs1/eecg/vaughn/morestep/rad_gen/unit_tests/outputs/coffe'), criteria=lambda p: p.is_dir())
+    # path_strs = [gen.path.absolute() for gen in paths_gen]
+
+    display_filename_prefix_middle = '├──'
+    display_filename_prefix_last = '└──'
+    display_parent_prefix_middle = '    '
+    display_parent_prefix_last = '│   '
+
+    def __init__(self: 'DisplayablePath', path: Path, parent_path: Optional['DisplayablePath'], is_last: bool):
+        self.path = Path(str(path))
+        self.parent = parent_path
+        self.is_last = is_last
+        if self.parent:
+            self.depth = self.parent.depth + 1
+        else:
+            self.depth = 0
+
+    @property
+    def displayname(self : 'DisplayablePath'):
+        if self.path.is_dir():
+            return self.path.name + '/'
+        return self.path.name
+
+    @classmethod
+    def make_tree(cls: Type['DisplayablePath'], root: Path, parent: Optional['DisplayablePath'] = None, is_last: bool = False, criteria: Optional[Callable[[Any], bool]]=None) -> Generator['DisplayablePath', None, None]:
+        root = Path(str(root))
+        criteria = criteria or cls._default_criteria
+
+        displayable_root = cls(root, parent, is_last)
+        yield displayable_root
+
+        children = sorted(list(path
+                               for path in root.iterdir()
+                               if criteria(path)),
+                          key=lambda s: str(s).lower())
+        count = 1
+        for path in children:
+            is_last = count == len(children)
+            if path.is_dir():
+                yield from cls.make_tree(path,
+                                         parent=displayable_root,
+                                         is_last=is_last,
+                                         criteria=criteria)
+            else:
+                yield cls(path, displayable_root, is_last)
+            count += 1
+
+    @classmethod
+    def _default_criteria(cls, path: Path) -> bool:
+        return True
+
+    @property
+    def displayname(self):
+        if self.path.is_dir():
+            return self.path.name + '/'
+        return self.path.name
+
+    def displayable(self):
+        if self.parent is None:
+            return self.displayname
+
+        _filename_prefix = (self.display_filename_prefix_last
+                            if self.is_last
+                            else self.display_filename_prefix_middle)
+
+        parts = ['{!s} {!s}'.format(_filename_prefix,
+                                    self.displayname)]
+
+        parent = self.parent
+        while parent and parent.parent is not None:
+            parts.append(self.display_parent_prefix_middle
+                         if parent.is_last
+                         else self.display_parent_prefix_last)
+            parent = parent.parent
+
+        return ''.join(reversed(parts))
+
+
+
+class Tree:
+    """
+        Linux directory structure for building directory trees and referencing them
+    
+        Tags for parent trees apply to subtrees like so:
+            parent_tag/subtree_tag
+
+        Tags:
+            - obj : object directory
+            - 
+    """
+
+
+    def __init__(self, root: str, subtrees: List['Tree'] = None, tag: str = None):
+        self.root : Union[str, None] = root
+        self.basename : Union[str, None] = os.path.basename(root) if root else None
+        self.subtrees : Union[List['Tree'], None] = subtrees
+        self.tag : Union[str, None] = tag
+        self.is_leaf : bool = False
+        
+        if self.subtrees == None:
+            self.is_leaf = True
+        else:
+            self.is_leaf = False
+    
+        if self.subtrees:
+            for subdir in self.subtrees:
+                # Recursively goes down all depths
+                self.update_subdir_paths(subdir, self.root)
+
+    def update_subdir_paths(self, dir, parent_path):
+        if parent_path:
+            dir.root = os.path.join(parent_path, dir.root)
+
+        if dir.subtrees:
+            for subdir in dir.subtrees:
+                subdir.root = os.path.join(parent_path, subdir.root)
+                self.update_subdir_paths(subdir, subdir.root)
+
+    def display_tree(self):
+        paths = DisplayablePath.make_tree(Path(self.root))
+        for path in paths:
+            print(path.displayable())
+
+
+# Accessing the directory structure like a dictionary
+def get_dir(directory: Tree, *keys):
+    if not keys:
+        return directory
+
+    key_to_find = keys[0]
+    if directory.subtrees:
+        for subdir in directory.subtrees:
+            if subdir.basename == key_to_find:
+                return get_dir(subdir, *keys[1:])
+
+    return None
+
+
 @dataclass
-class CommonSettings:
+class CommonCLI:
     """
         Path related settings which could be relevant to multiple subtools
     """
-    # Paths
-    rad_gen_home_path: str = None
-    # openram_home_path: str = None
+    gen_log: bool = False # generate log file
     input_tree_top_path: str = None
     output_tree_top_path: str = None
 
+
+
+@dataclass
+class Common:
+    # Paths
+    rad_gen_home_path: str = None
+    hammer_home_path: str = None
+    # openram_home_path: str = None
     # Logging
     log_file: str = f"rad-gen-{create_timestamp()}.log" # path to log file for current RAD Gen run
     logger: logging.Logger = logging.getLogger(log_file) # logger for RAD Gen
@@ -67,6 +218,31 @@ class CommonSettings:
     # 1 - Brief output + I/O + command line access
     # 2 - Hammer and asic tool outputs will be printed to console 
     log_verbosity: int = 1 # verbosity level for log file 
+
+    obj_dir : str = None # path to obj directory for current RAD Gen run
+    
+    # Output directory structure
+    output_tree_top_struct: dict = None
+
+    # ASIC-DSE
+    # Directory structure for asic-dse hammer asic flow
+    input_dir_struct: dict = field(default_factory = lambda: {
+        # Design configuration files
+        "configs": {
+            # Auto-generated configuration files from sweep
+            "gen" : "gen",
+            # Tmp directory for storing modified configuration files by user passing in top_lvl & hdl_path & original config 
+            "mod" : "mod",
+        },
+        # Design RTL files
+        "rtl" : {
+            "gen" : "gen", # Auto-generated directories containing RTL
+            "src" : "src", # Contains design RTL files
+            "include": "include", # Contains design RTL header files
+            "verif" : "verif", # verification related files
+            "build" : "build", # build related files for this design
+        }
+    })
 
 
 
@@ -1016,7 +1192,7 @@ class SingleTSVInfo:
     diameter: int #um
     pitch: int #um
     resistivity: float # Ohm * um
-    keepout_zone: int #um (adds to diameter)
+    keepout_zone: float #um (adds to diameter)
     area: float = None # um^2
     resistance: float = None # Ohm
     def __post_init__(self):

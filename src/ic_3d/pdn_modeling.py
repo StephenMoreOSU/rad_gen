@@ -1741,10 +1741,21 @@ def pdn_modeling(ic_3d_info: rg_ds.Ic3d):
                 fig.show()
             ######################## GENERATING FPGA SECTOR FLOORPLAN ########################
         #generate_fpga_sectors(design_pdn)
+
+    # For each Ubump Pitch and C4 dims we calculate the % of die used 
+
     summary_out_infos_df = pd.DataFrame(summary_out_infos)
+    base_die_areas = []
+    for idx, row in summary_out_infos_df.iterrows():
+        num_c4_bumps = 2*(int(row["C4 Dims"].split("x")[0].strip())**2)
+        num_tsvs = math.prod(ic_3d_info.design_pdn.tsv_info.dims)
+        single_tsv_area = (ic_3d_info.design_pdn.tsv_info.single_tsv.keepout_zone*2 + ic_3d_info.design_pdn.tsv_info.single_tsv.diameter)**2
+        perc_base_die_area = (num_c4_bumps * single_tsv_area* num_tsvs) / ic_3d_info.design_pdn.floorplan.area
+        base_die_areas.append(round(perc_base_die_area,4))
+    summary_out_infos_df["Base Die Area (%)"] = base_die_areas
     print(f"************************ SUMMARY INFO ************************")
     for l in rg_utils.get_df_output_lines(summary_out_infos_df):
         print(l)
-        
-        
+
+
         
