@@ -1,0 +1,114 @@
+designs:
+  - base_config_path: ~/rad_gen/unit_tests/inputs/asic_dse/sram/configs/sram.yml
+    # These two args are required for each run of hammer flow
+    top_lvl_module: sram_wrapper
+    rtl_dir_path: ~/rad_gen/unit_tests/inputs/asic_dse/sram/rtl
+    type: "sram"
+    # Unused for now but may be required as we figure out a way to specify PDK related files
+    sram_memory_path: ~/hammer/src/hammer-vlsi/technology/asap7/sram_compiler/memories
+    # params below this line are specific to the "sram" design type
+    base_rtl_path: ~/rad_gen/unit_tests/inputs/asic_dse/sram/rtl/sram.sv
+    # Sram compiler will replace rtl_module with 
+    # Small depth = 128, med = 512, large = 2048
+    mems :
+      ################## DEPTH 512 ##################
+      [
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 1024,
+          "d": 256
+        },
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 256,
+          "d": 512
+        },
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 512,
+          "d": 512
+        },
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 1024,
+          "d": 512
+        },
+        # # ################## DEPTH 1024 ##################
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 256,
+          "d": 1024
+        },
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 512,
+          "d": 1024
+        },
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 1024,
+          "d": 1024
+        },
+        # ################## DEPTH 2048 ##################
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 256,
+          "d": 2048
+        },
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 512,
+          "d": 2048
+        },
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 1024,
+          "d": 2048
+        },
+        ################## DEPTH 64 ##################
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 256,
+          "d": 64
+        },
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 512,
+          "d": 64
+        },
+        {
+          # for now this will only support RW not either R or W
+          "rw_ports": 2,
+          # size in [w,d]
+          "w": 1024,
+          "d": 64
+        }
+      ]
+    # svh_header_path: ~/rad_gen/input_designs/sram/rtl/sram.svh  
+    rw_ports: [1, 2]  
+    depths: [16, 128, 256, 512, 1024, 2048, 4096]
+    widths: [8, 16, 32, 64, 128]

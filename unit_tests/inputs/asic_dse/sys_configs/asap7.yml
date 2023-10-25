@@ -1,0 +1,16 @@
+technology.asap7:
+  tarball_dir: ~/asap7
+
+vlsi.core:
+  synthesis_tool_path: [~/rad_gen/vlsi/hammer/hammer/synthesis]
+  synthesis_tool: genus
+  
+  par_tool_path: [~/rad_gen/vlsi/hammer/hammer/par]
+  par_tool: innovus
+
+  sram_generator_tool: "sram_compiler"
+  sram_generator_tool_path: [~/rad_gen/vlsi/hammer/hammer/technology/asap7]
+  sram_generator_tool_path_meta: "append"
+  #technology
+  technology: asap7
+  max_threads: 4

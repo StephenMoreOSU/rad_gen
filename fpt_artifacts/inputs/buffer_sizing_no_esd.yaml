@@ -1,0 +1,217 @@
+# Die to die buffer domain space exploration parameters
+d2d_buffer_dse:
+  # Stage range represents the number of inverters driving the D2D load
+  stage_range: [2, 3]
+  stage_ratio_range: [2, 12]
+  
+  tx_sizing:
+    opt_mode: "P" # "P" for pmos sizing, "N" for nmos sizing, "PN" for both, if not below sizes will be used
+    nmos_sz: 1
+    pmos_sz: 2
+
+  # cost function weights
+  cost_fx_exps:
+    area: 1
+    delay: 1 
+    power: 1
+
+
+
+process_infos:
+- name: "ASAP7"
+  mlayers: 12
+  contact_poly_pitch: 54 # nm
+
+  # FinFET Geometry parameters for ASAP7
+  geometry_info:
+    # hfin: 32 #nm
+    min_tx_contact_width : 7 #nm
+    tx_diffusion_length: 25 #nm
+    gate_length: 20 #nm
+    min_width_tx_area: 13122 #nm^2 (nm per tx)
+    tx_dims: [81, 162] # width, length (x,y) (nm)
+
+  mlayer_lists: 
+    # M1, M2, M3, M4, M5, M6, M7, M8, M9
+    pitch: [36, 36, 36, 48, 48, 64, 64, 80, 80, 648, 648, 648]
+    wire_res_per_um: [131.2, 131.2, 131.2, 58.49, 58.49, 27.08, 27.08, 15.27, 15.27, 0.14, 0.14, 0.14]
+    wire_cap_per_um: [0.23, 0.23, 0.23, 0.23, 0.23, 0.23, 0.23, 0.23, 0.23, 0.23, 0.23, 0.23]
+    #wire_cap_per_um: [0.22, 0.22, 0.22, 0.22, 0.22, 0.24, 0.24, 0.24, 0.24, 0.24, 0.24, 0.24]
+    # low level wire parameters
+    wcu: [16.8, 16.8, 16.8, 23.4, 23.4, 32.2, 32.2, 41, 41, 353.4, 353.4, 353.4]
+    hcu: [38.1, 38.1, 38.1, 51.3, 51.3, 68.9, 68.9, 86.5, 86.5, 711.3, 711.3, 711.3]
+    dy: [18.3, 18.3, 18.3, 24.9, 24.9, 33.7, 33.7, 42.5, 42.5, 354.9, 354.9, 354.9]
+    t_barrier: [1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]
+  via_lists:
+    # -> M0, -> M1, -> M2, -> M3, -> M4, -> M5, -> M6, -> M7, -> M8, -> M9
+    via_res: [13.08, 13.08, 13.08, 9.17, 7.31, 5.17, 4.19, 3.22, 2.77, 0.29, 0.12, 0.12]
+    # Using half the values for metal capacitance per um, vias should have small cap, hopefully this is conservative
+    via_cap: [0.11, 0.11, 0.11, 0.11, 0.11, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.12]
+    via_pitch: [39.6, 39.6, 39.6, 39.6, 52.8, 52.8, 70.4, 70.4, 88, 712.4, 712.4, 712.4]
+  via_stacks: [ 
+      # -> = via
+      # Mx = metal layer
+      {
+        # -> M0 -> M1 -> M2 ->
+        mlayer_range: [0, 2],
+        res: 33.95,
+        height: 198 #nm
+      },
+      {
+        # M3 -> M4 ->
+        mlayer_range: [3, 4],
+        res: 14.56,
+        height: 158.4 #nm
+      },
+      {
+        # M5 -> M6 ->
+        mlayer_range: [5, 6],
+        res: 9.59,
+        height: 211 #nm
+      },
+      {
+        # M7 -> M8 ->
+        mlayer_range: [7, 8],
+        res: 0.84,
+        height: 264 #nm
+      },
+      {
+        # M9 -> M12
+        mlayer_range: [9, 11],
+        res: 0.68,
+        height: 2851.2 #nm
+      }
+    ]
+
+package_info:
+  tsv: 
+    height: 70 #um
+    diameter: 7 #um
+    pitch: 10 #um
+    resistivity: 1.72e-2 #Ohm*um (1.72e-8 * 1e6)
+    keepout_zone: 1.5 #um (added from edge of tsv)
+    resistance: 4.70e-2 #Ohm
+  c4: 
+    height: 80 #um
+    diameter: 80 #um
+    pitch: 100 #um
+    resistance: 13.0e-3 # Ohm
+    # where the c4 bump grid begins from edge of device
+    margin: 0 #um
+  ubump:
+    # Sweeping ubump variables representing changes in technology
+    sweeps:
+      pitch: [55, 40, 36, 25, 10, 5, 1] #um 
+      # diameter assumed to be half pitch
+      cap: [164.6, 87.04, 70.5, 34, 3, 0.1, 0.07] # [164.6, 87.04, 70.5, 34, 3, 0.1, 0.07] #fF 
+      height: [22.5, 20, 18, 12.5, 5, 0.17, 0.17] #um 
+      res: [8.26, 15.63, 19.29, 40, 99, 17, 97] #mOhm 
+    height: 22.5 #um
+    diameter: 22.5 #um
+    pitch: 55 # um
+    resistivity: 1.72e-2 #Ohm*um (1.72e-8 * 1e6)
+    # where the ubump grid begins from edge of device
+    margin: 0 #um
+
+
+design_info:
+  # dimensions
+  #dims: [2e4, 2e4] # XY [width, height] um
+  #dims: [2e3, 2e3]
+  #69.12e3
+  #dims: [76.032e3, 69.120e3]
+  #dims: [9.504e3, 9.504e3]
+  #dims: [8.640e3, 8.640e3]
+  dims: [1080, 1080]
+  
+  # TSV and C4 grid settings
+  # "dense" or "checker" 
+  # dense -> tsvs are placed as tightly as possible
+  # checker -> tsvs are placed in a checkerboard pattern (this leaves more space in between)
+  pwr_placement:
+    tsv_area_bounds: [40, 60] #um
+    tsv_grid: "dense"
+    c4_grid: "dense"
+
+  ############ FPGA INFO ############
+  # FPGA specific info
+  fpga_info:
+    sector_dims: [8, 8]
+    lbs: 
+      total_num: 82944
+      abs_area: 660
+      abs_width: 22
+      abs_height: 30
+      rel_area : 1
+    dsps:
+      # cols: 3 
+      total_num: 4608
+      abs_area: 1458.7
+      rel_area : 3 
+    brams: 
+      # cols: 4
+      total_num: 6912
+      abs_area: 2640
+      rel_area : 4
+      
+
+    
+
+  ############ PDN INFO ############
+  #power_budget: 45 #W
+  power_budget: 0.703125 #W
+  supply_voltage: 0.7 #V
+  ir_drop_budget: 5 # mV
+  pwr_rail_info: 
+    # How many layers used for power grid at the top mlayers
+    num_mlayers: 2
+    mlayer_dist:
+      top: 0.5
+      bot: 0.2
+  ##################### USED FOR DIE 2 DIE DELAY MEASUREMENTS #####################
+  esd_load_rc_wire_params: {
+    Rw : "0", # Ohm
+    Cw : "0f", # fF 
+  }
+  buffer_routing_mlayer_idx: 11
+  macro_infos:
+    - name: "M20K"
+      dims: [16, 51.84] # [30.348, 25.92] -> bloated to make M20K as these come from 16K um (x,y)
+      
+  # noc_infos:
+    # - area: 25384.44 #um^2
+    #   rtl_params : {
+    #     flit_width: 131,
+    #     vc_buffer_depth: 8,
+    #     num_vcs: 5,        
+    #   }
+    # - area: 35015.11 #um^2
+    #   rtl_params : {
+    #     flit_width: 195,
+    #     vc_buffer_depth: 8,
+    #     num_vcs: 5,        
+    #   }
+    # - area: 58895.95 #um^2
+    #   rtl_params : {
+    #     flit_width: 323,
+    #     vc_buffer_depth: 8,
+    #     num_vcs: 5,        
+    #   }
+
+  add_wire_lengths: [0] # um # [270, 330, 600]
+  logic_block_info:
+    area: 600 # um^2
+    dims: [30, 20] # um
+  
+    
+
+
+
+# PDN settings
+pdn_sim_settings:
+  plot:
+    tsv_grid: False 
+    c4_grid: False
+    power_region: False
+    pdn_sens_study: False
+  

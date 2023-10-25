@@ -1,0 +1,26 @@
+# Byte-compiled / optimized / DLL files
+__pycache__
+*.pyc
+.mypy_cache
+src/test/.coverage
+src/test/htmlcov
+dist/
+.tox/
+
+# C extensions
+*.so
+
+# Sphinx documentation
+docs/_build/
+
+# Configuration files unless overridden
+*.yml
+*.yaml
+*.json
+
+# RAD-Gen outputs
+*.csv
+*.png
+
+# ASIC tool generated files
+/DVEfiles

@@ -1,0 +1,43 @@
+# synthesis settings
+synthesis:
+  #### Inputs between these comments are changed with -v and -t arguments of rad-gen, if they don't look correct in this file pass in those respective arguments ####
+  inputs.input_files: [ 
+    ~/rad_gen/unit_tests/inputs/asic_dse/alu/rtl/alu.sv,
+    ~/rad_gen/unit_tests/inputs/asic_dse/alu/rtl/dff.sv
+   ]
+  inputs.top_module: alu_ver
+  inputs.hdl_search_paths: [ ~/rad_gen/unit_tests/inputs/asic_dse/alu/rtl ]
+  #### Inputs between these comments are changed with -v and -t arguments of rad-gen, if they don't look correct in this file pass in those respective arguments ####
+
+  clock_gating_mode: "empty"
+  
+
+# place and route settings
+par.innovus:
+  floorplan_mode: "manual"
+  floorplan_script_contents: "create_floorplan -core_margins_by die -flip f -die_size_by_io_height max -site asap7sc7p5t -stdcell_density_size {1.0 0.7 10 10 10 10}"
+  design_flow_effort: "express"
+
+vlsi.inputs:
+  power_spec_mode: "auto"
+  power_spec_type: "cpf"
+  clocks : [
+    {
+      name: "clk",
+      period: "2 ns",
+    }
+  ]
+  # These placement constraints will not be used if the "manual" floorplan mode is used in the "par" section, but they may still be required by hammer so we keep them in
+  placement_constraints:
+  - path: alu_ver ## RAD-Gen -t argument
+    type: toplevel
+    x: 20
+    y: 20
+    width: 500
+    height: 500
+    margins:
+      left: 0
+      right: 0
+      top: 0
+      bottom: 0
+

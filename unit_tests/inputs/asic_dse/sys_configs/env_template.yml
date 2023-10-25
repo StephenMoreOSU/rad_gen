@@ -1,0 +1,12 @@
+# Base path to where Mentor tools are installed
+mentor.mentor_home: "<your path to mentor home>/mentor"
+# Mentor license server/file
+synopsys.MGLS_LICENSE_FILE: ""
+# Base path to where Cadence tools are installed
+cadence.cadence_home: "<your path to cadence home>/cadence"
+# Cadence license server/file
+cadence.CDS_LIC_FILE: ""
+# Base path to where Synopsys tools are installed
+synopsys.synopsys_home: ""
+# Synopsys license server/files
+synopsys.SNPSLMD_LICENSE_FILE: ""

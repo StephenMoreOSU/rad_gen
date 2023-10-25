@@ -1,0 +1,18 @@
+env:
+  rad_gen_home_path: ~/rad_gen
+  
+  # Path to hammer github repo
+  hammer_home_path: ~/rad_gen/vlsi/hammer
+
+  # CAD tool related env vars (hammer format)
+  env_paths: [ ~/rad_gen/unit_tests/inputs/asic_dse/sys_configs/env.yaml ]
+  design_input_path: ~/rad_gen/unit_tests/inputs/asic_dse
+  design_output_path: ~/rad_gen/unit_tests/outputs/asic_dse
+
+# TODO remove this soon, it doesnt make sense to have this info at this level, we also shouldnt need this if we just want to use the gds python libs for 28nm -> 7nm scaling
+tech:
+  name: asap7
+  pdk_rundir_path: ~/ASAP_7_IC/asap7_rundir
+  
+# scripts:
+#   virtuoso_setup_path: ~/auto_asic_flow/setup_virtuoso_env.sh
