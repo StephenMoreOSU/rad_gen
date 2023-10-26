@@ -36,13 +36,46 @@ python3 -m pip install -e .
 ```
 
 
+
+## Generating Fig 3. a & b Results
+```bash
+# Change to the directory with all input configurations required to generate artifacts
+cd ~/rad_gen/fpt_artifacts
+
+# For pass gate m6 d = 1 results
+python3 ../rad_gen.py -st coffe -f inputs/finfet_7nm_pt_asap7_L4_m6_rl_10.yaml -i 4 -d 1 -a 1 | tee fpga_fabric_sizing_pass_gate_m6_d1.log
+
+# For pass gate m6 d = 2 results
+python3 ../rad_gen.py -st coffe -f inputs/finfet_7nm_pt_asap7_L4_m6_rl_10.yaml -i 4 -d 2 -a 1 | tee fpga_fabric_sizing_pass_gate_m6_d2.log
+
+# For pass gate m8 d = 1 results
+python3 ../rad_gen.py -st coffe -f inputs/finfet_7nm_pt_asap7_L4_m8_rl_10.yaml -i 4 -d 1 -a 1 | tee fpga_fabric_sizing_pass_gate_m8_d1.log
+
+# For pass gate m8 d = 2 results
+python3 ../rad_gen.py -st coffe -f inputs/finfet_7nm_pt_asap7_L4_m8_rl_10.yaml -i 4 -d 2 -a 1 | tee fpga_fabric_sizing_pass_gate_m8_d2.log
+
+# For transmission gate m6 d = 1 results
+python3 ../rad_gen.py -st coffe -f inputs/finfet_7nm_tg_asap7_L4_m6_rl_5.yaml -i 4 -d 1 -a 1 | tee fpga_fabric_sizing_transmission_gate_m6_d1.log
+
+# For transmission gate m6 d = 2 results
+python3 ../rad_gen.py -st coffe -f inputs/finfet_7nm_tg_asap7_L4_m6_rl_5.yaml -i 4 -d 2 -a 1 | tee fpga_fabric_sizing_transmission_gate_m6_d2.log
+
+# For transmission gate m8 d = 1 results
+python3 ../rad_gen.py -st coffe -f inputs/finfet_7nm_tg_asap7_L4_m8_rl_5.yaml -i 4 -d 1 -a 1 | tee fpga_fabric_sizing_transmission_gate_m8_d1.log
+
+# For transmission gate m8 d = 2 results
+python3 ../rad_gen.py -st coffe -f inputs/finfet_7nm_tg_asap7_L4_m8_rl_5.yaml -i 4 -d 2 -a 1 | tee fpga_fabric_sizing_transmission_gate_m8_d2.log
+
+```
+
+
+
 ## Generating Fig 6. a & b Results
 
 **Note: To add ESD area to results just add 1.048 um^2 to each area result**
 
 ```bash
-# Change to the directory with all input configurations required to generate artifacts
-cd ~/rad_gen/fpt_artifacts
+
 
 # For Die to Die Area / Delay Buffer Modeling (Figure 6a):
 

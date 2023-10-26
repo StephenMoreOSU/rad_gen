@@ -10,13 +10,15 @@ vlsi.core:
   - /fs1/eecg/vaughn/morestep/hammer/src/hammer-vlsi/technology/asap7
   sram_generator_tool_path_meta: append
   technology: asap7
+  max_threads: 8
 synthesis:
   inputs.input_files:
-  - - /fs1/eecg/vaughn/morestep/rad_gen/input_designs/sram/rtl/SRAM1RW1024x8/sram_SRAM1RW1024x8.sv
-  - - /fs1/eecg/vaughn/morestep/rad_gen/input_designs/sram/rtl/SRAM1RW1024x8
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/sram/rtl/SRAM1RW1024x8/sram_SRAM1RW1024x8.sv
   inputs.top_module: sram_wrapper
   clock_gating_mode: empty
-par.innovus.design_flow_effort: standard
+  inputs.hdl_search_paths:
+  - /autofs/fs1.ece/fs1.eecg.vaughn/morestep/rad_gen/input_designs/sram/rtl/SRAM1RW1024x8
+par.innovus.design_flow_effort: express
 vlsi.inputs:
   sram_parameters: /fs1/eecg/vaughn/morestep/rad_gen/input_designs/sram/configs/mem_params_SRAM1RW1024x8.json
   sram_parameters_meta:
@@ -25,15 +27,15 @@ vlsi.inputs:
   power_spec_mode: auto
   power_spec_type: cpf
   clocks:
-  - name: RW0_clk
+  - name: clk
     period: 0.0 ns
   placement_constraints:
   - path: sram_wrapper
     type: toplevel
     x: 0
     y: 0
-    width: 400
-    height: 400
+    width: 91.088
+    height: 142.832
     margins:
       left: 0
       right: 0
@@ -41,8 +43,8 @@ vlsi.inputs:
       bottom: 0
   - path: sram_wrapper/mem_0_0
     type: hardmacro
-    x: 20
-    y: 20
+    x: 15
+    y: 15
     orientation: r0
     top_layer: M4
     master: SRAM1RW1024x8
@@ -51,6 +53,6 @@ vlsi.inputs:
   pin.assignments:
   - pins: '*'
     layers:
+    - M5
     - M7
-    - M9
-    side: bottom
+    side: left

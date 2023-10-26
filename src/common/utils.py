@@ -978,30 +978,33 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
 
 def init_coffe_structs(coffe_conf: Dict[str, Any]):
     fpga_arch_conf = load_arch_params(clean_path(coffe_conf["fpga_arch_conf_path"]))
-    hb_flows_conf =  parse_yml_config(coffe_conf["hb_flows_conf_path"])
-    ###################### SETTING UP ASIC TOOL ARGS FOR HARDBLOCKS ######################
-    # Build up the cli args used for calling the asic-dse tool
-    asic_dse_cli_args_base = {}        
+    if "hb_flows_conf_path" in coffe_conf.keys() and coffe_conf["hb_flows_conf_path"] != None:
+        hb_flows_conf =  parse_yml_config(coffe_conf["hb_flows_conf_path"])
+        ###################### SETTING UP ASIC TOOL ARGS FOR HARDBLOCKS ######################
+        # Build up the cli args used for calling the asic-dse tool
+        asic_dse_cli_args_base = {}        
 
-    # Asic flow args (non design specific) that can be passed from hb_flows_conf
-    for k, v in hb_flows_conf.items():
-        # if key is not hardblocks, then it should be part of asic_dse cli args
-        if k != "hardblocks":
-            asic_dse_cli_args_base[k] = v
+        # Asic flow args (non design specific) that can be passed from hb_flows_conf
+        for k, v in hb_flows_conf.items():
+            # if key is not hardblocks, then it should be part of asic_dse cli args
+            if k != "hardblocks":
+                asic_dse_cli_args_base[k] = v
 
-    hardblocks = []
-    # if user did not specify any hardblocks in config then don't use any
-    if "hardblocks" in hb_flows_conf.keys():
-        hb_confs = [ parse_yml_config(hb_flow_conf["hb_config_path"]) for hb_flow_conf in hb_flows_conf["hardblocks"] ]
-        for hb_conf in hb_confs:
-            # pray this is pass by copy not reference
-            asic_dse_cli_args = { **asic_dse_cli_args_base }
-            asic_dse_cli_args["flow_config_paths"] = hb_conf["flow_config_paths"]
-            asic_dse_cli = init_dataclass(rg_ds.AsicDseCLI, asic_dse_cli_args)
-            hb_inputs = {
-                "asic_dse_cli": asic_dse_cli
-            }
-            hardblocks.append( init_dataclass(rg_ds.Hardblock, hb_conf, hb_inputs) )
+        hardblocks = []
+        # if user did not specify any hardblocks in config then don't use any
+        if "hardblocks" in hb_flows_conf.keys():
+            hb_confs = [ parse_yml_config(hb_flow_conf["hb_config_path"]) for hb_flow_conf in hb_flows_conf["hardblocks"] ]
+            for hb_conf in hb_confs:
+                # pray this is pass by copy not reference
+                asic_dse_cli_args = { **asic_dse_cli_args_base }
+                asic_dse_cli_args["flow_config_paths"] = hb_conf["flow_config_paths"]
+                asic_dse_cli = init_dataclass(rg_ds.AsicDseCLI, asic_dse_cli_args)
+                hb_inputs = {
+                    "asic_dse_cli": asic_dse_cli
+                }
+                hardblocks.append( init_dataclass(rg_ds.Hardblock, hb_conf, hb_inputs) )
+        else:
+            hardblocks = None
     else:
         hardblocks = None
     ###################### SETTING UP ASIC TOOL ARGS FOR HARDBLOCKS ######################
