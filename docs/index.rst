@@ -50,6 +50,26 @@ With the IC-3D subtool in RAD-Gen we can perform both of these tasks, and be abl
 We can also create floorplans respecting the "swiss cheese" holes and enabling easier integration of our new 3D device into something like `VTR <https://docs.verilogtorouting.org/en/latest/>`_  for 3D CAD-tool evaluations. 
 
 
+
+
+
+How to Cite
+-----------
+
+The following paper may be used as a general citation for RAD-Gen:
+
+.. code-block:: bibtex
+
+   @inproceedings{rad-flow-dlrm,
+      title = {{A Whole New World: How to Architect Beyond?FPGA Reconfigurable Acceleration Devices?}},
+      author = {Boutros, Andrew and More, Stephen and Betz, Vaughn},
+      eventtitle = {2023 33nd International Conference on Field-Programmable Logic and Applications ({FPL})},
+      booktitle = {2023 33nd International Conference on Field-Programmable Logic and Applications ({FPL})},
+      date = {2023-09},
+      publisher={IEEE}
+   }
+
+
 .. - **RAD-Sim:** A SystemC simulator for rapid design space exploration and architecture-application co-design
 
 .. - **RAD-Gen:** A push button tool for silicon area/timing/power implementation results of hard (ASIC) RAD components, FPGA fabric circuitry, and different 3D considerations (Under development)

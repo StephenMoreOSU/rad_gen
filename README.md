@@ -1,3 +1,21 @@
 # RAD GEN 
 
-Docs found at: https://bronzed-spaghetti-147.notion.site/RAD-Gen-Documentation-f9e0413e09ec4ae5a3c3562b4795521e?pvs=4
+
+## Documentation
+Docs can be found [here](https://rad-gen.readthedocs.io/en/latest/index.html).
+
+
+## How to Cite
+
+Bibtex:
+```
+@inproceedings{rad-flow-dlrm,
+    title = {{A Whole New World: How to Architect Beyond?FPGA Reconfigurable Acceleration Devices?}},
+    author = {Boutros, Andrew and More, Stephen and Betz, Vaughn},
+    eventtitle = {2023 33nd International Conference on Field-Programmable Logic and Applications ({FPL})},
+    booktitle = {2023 33nd International Conference on Field-Programmable Logic and Applications ({FPL})},
+    date = {2023-09},
+    publisher={IEEE}
+}
+```
+
