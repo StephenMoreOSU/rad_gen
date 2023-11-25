@@ -3,3 +3,6 @@
 	url = git@github.com:StephenMoreOSU/hammer.git
 
 
+[submodule "fpga21-scaled-tech"]
+	path = third_party/fpga21-scaled-tech
+	url = git@github.com:StephenMoreOSU/fpga21-scaled-tech.git

@@ -24,7 +24,7 @@ fpga_arch_params:
   Fcin : 0.2
   Fcout : 0.025
 
-  arch_out_folder : ~/rad_gen/fpt_artifacts/coffe_outputs/finfet_m6_L4_new_7nm_pt_rest_len_10_flut_cc_gnlwires_less_cb_span_100mvboost_sram6/arch_out_dir
+  arch_out_folder : ~/rad_gen/fpt_artifacts/coffe_outputs/finfet_m6_L4_new_7nm_pt_rest_len_10_flut_cc_gnlwires_less_cb_span_100mvboost_sram6/arch_out_dir_d2
 
   # The following architecture parameters are new and help COFFE describe
   # a more flexible BLE. See [1] for more details.
@@ -91,7 +91,7 @@ fpga_arch_params:
   # This parameter controls the gate length of PMOS level-restorers. For example, setting this paramater 
   # to 4 sets the gate length to 4x the value of 'gate_legnth'. Increasing the gate length weakens the 
   # PMOS level-restorer, which is sometimes necessary to ensure proper switching.
-  rest_length_factor  :  10
+  rest_length_factor  :  5
 
   # For FinFETs, minimum transistor refers to the contact width of a single-fin transistor (nm). 
   # COFFE uses this when it calculates source/drain parasitic capacitances.
