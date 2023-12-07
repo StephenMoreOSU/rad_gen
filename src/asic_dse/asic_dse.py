@@ -27,7 +27,7 @@ rad_gen_log_fd = "asic_dse.log"
 log_verbosity = 2
 cur_env = os.environ.copy()
 
-def compile_results(rad_gen_settings: rg_ds.HighLvlSettings):
+def compile_results(rad_gen_settings: rg_ds.AsicDSE):
     # read in the result config file
     report_search_dir = rad_gen_settings.env_settings.design_output_path
     csv_lines = []
@@ -67,7 +67,7 @@ def compile_results(rad_gen_settings: rg_ds.HighLvlSettings):
     csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(rad_gen_settings.sweep_config_path))[0] )
     rg_utils.write_dict_to_csv(csv_lines,csv_fname)
 
-def design_sweep(rad_gen_settings: rg_ds.HighLvlSettings):
+def design_sweep(rad_gen_settings: rg_ds.AsicDSE):
     # Starting with just SRAM configurations for a single rtl file (changing parameters in header file)
     rg_utils.rad_gen_log(f"Running design sweep from config file {rad_gen_settings.sweep_config_path}",rad_gen_log_fd)
     
@@ -150,7 +150,7 @@ def design_sweep(rad_gen_settings: rg_ds.HighLvlSettings):
             permission_cmd = f"chmod +x {script_path}"
             rg_utils.run_shell_cmd_no_logs(permission_cmd)
 
-def run_asic_flow(rad_gen_settings: rg_ds.HighLvlSettings) -> Dict[str, Any]:
+def run_asic_flow(rad_gen_settings: rg_ds.AsicDSE) -> Dict[str, Any]:
     if rad_gen_settings.mode.vlsi_flow.flow_mode == "custom":
         if rad_gen_settings.mode.vlsi_flow.run_mode == "serial":
             for hb_settings in rad_gen_settings.custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]:

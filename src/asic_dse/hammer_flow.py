@@ -85,7 +85,7 @@ def write_pt_sdc(hammer_driver: HammerDriver):
     fd.close()
 
 
-def pt_init(rad_gen_settings: rg_ds.HighLvlSettings) -> Tuple[str]:
+def pt_init(rad_gen_settings: rg_ds.AsicDSE) -> Tuple[str]:
     """
         Performs actions required prior to running PrimeTime for Power or Timing
     """
@@ -107,7 +107,7 @@ def pt_init(rad_gen_settings: rg_ds.HighLvlSettings) -> Tuple[str]:
 
     return pt_outpath, report_path, unparse_report_path, pnr_design_outpath
 
-def write_pt_power_script(rad_gen_settings: rg_ds.HighLvlSettings):
+def write_pt_power_script(rad_gen_settings: rg_ds.AsicDSE):
     pt_outpath, report_path, unparse_report_path, pnr_design_outpath = pt_init(rad_gen_settings)
 
     # Make sure that the $STDCELLS env var is set and use it to find the .lib files to use for Primetime
@@ -198,7 +198,7 @@ def write_pt_power_script(rad_gen_settings: rg_ds.HighLvlSettings):
     fd.close()
 
 
-def write_pt_timing_script(rad_gen_settings: rg_ds.HighLvlSettings):
+def write_pt_timing_script(rad_gen_settings: rg_ds.AsicDSE):
     """
     writes the tcl script for timing analysis using Synopsys Design Compiler, tested under 2017 version
     This should look for setup/hold violations using the worst case (hold) and best case (setup) libs
@@ -346,7 +346,7 @@ def run_hammer_stage(asic_flow: rg_ds.ASICFlowSettings, flow_stage: str, config_
 # ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝      ╚═════╝ ╚══════╝╚═╝  ╚═══╝     ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
 
 
-def get_rad_gen_flow_cmd(rad_gen_settings: rg_ds.HighLvlSettings, config_path: str, sram_flag = False, top_level_mod = None, hdl_path = None):
+def get_rad_gen_flow_cmd(rad_gen_settings: rg_ds.AsicDSE, config_path: str, sram_flag = False, top_level_mod = None, hdl_path = None):
     if top_level_mod is None and hdl_path is None:
         cmd = f'python3 rad_gen.py -e {rad_gen_settings.env_settings.top_lvl_config_path} -p {config_path}'
     else:
@@ -356,7 +356,7 @@ def get_rad_gen_flow_cmd(rad_gen_settings: rg_ds.HighLvlSettings, config_path: s
         cmd = cmd + " -sram"
     return cmd
 
-def modify_config_file(rad_gen: rg_ds.HighLvlSettings) -> str:
+def modify_config_file(rad_gen: rg_ds.AsicDSE) -> str:
     # recursively get all files matching extension in the design directory
     exts = ['.v','.sv','.vhd',".vhdl"]
     design_files, design_dirs = rg_utils.rec_get_flist_of_ext(rad_gen.asic_flow_settings.hdl_path, exts)
@@ -535,7 +535,7 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
 
     return mod_parameter_paths, mod_config_paths
 
-def read_in_rtl_proj_params(rad_gen_settings: rg_ds.HighLvlSettings, rtl_params, top_level_mod, rtl_dir_path, sweep_param_inc_path=False):
+def read_in_rtl_proj_params(rad_gen_settings: rg_ds.AsicDSE, rtl_params, top_level_mod, rtl_dir_path, sweep_param_inc_path=False):
 
     # Find all parameters which will be used in the design (ie find top level module rtl, parse include files top to bottom and get those values )
     """ FIND TOP LEVEL MODULE IN RTL FILES """
@@ -762,7 +762,7 @@ def modify_mem_params(mem_params: dict, width: int, depth: int, num_ports: int) 
         mem_params[0]["ports"][1]["address port name"] = "A2"
         mem_params[0]["ports"][1]["address port polarity"] = "active high"
 
-def gen_compiled_srams(rad_gen_settings: rg_ds.HighLvlSettings, design_id: int, base_config: dict):
+def gen_compiled_srams(rad_gen_settings: rg_ds.AsicDSE, design_id: int, base_config: dict):
     cur_design = rad_gen_settings.design_sweep_infos[design_id]
     for mem in cur_design.type_info.mems:
         # The path in hammer to directory containing srams.txt file (describes the available macros in the pdk)
@@ -784,7 +784,7 @@ def gen_compiled_srams(rad_gen_settings: rg_ds.HighLvlSettings, design_id: int, 
         
         # get mapping and find the macro in lib, instantiate that many and
 
-def sram_sweep_gen(rad_gen_settings: rg_ds.HighLvlSettings, design_id: int):
+def sram_sweep_gen(rad_gen_settings: rg_ds.AsicDSE, design_id: int):
     # current design
     cur_design = rad_gen_settings.design_sweep_infos[design_id]
     base_config = rg_utils.sanitize_config(yaml.safe_load(open(cur_design.base_config_path,"r")))
@@ -899,7 +899,7 @@ def sram_sweep_gen(rad_gen_settings: rg_ds.HighLvlSettings, design_id: int):
                 rg_utils.rad_gen_log(f"INFO: Writing rad_gen yml config to {modified_config_path}",rad_gen_log_fd)
                 rg_utils.rad_gen_log(get_rad_gen_flow_cmd(rad_gen_settings, modified_config_path, sram_flag=True),rad_gen_log_fd)
 
-def get_sram_macro_sizes(rad_gen_settings: rg_ds.HighLvlSettings, macro_fname: str) -> list:
+def get_sram_macro_sizes(rad_gen_settings: rg_ds.AsicDSE, macro_fname: str) -> list:
     for file in os.listdir(os.path.join(rad_gen_settings.tech_info.sram_lib_path,"lef")):
         m_sizes = []
         if macro_fname in file:
@@ -915,7 +915,7 @@ def get_sram_macro_sizes(rad_gen_settings: rg_ds.HighLvlSettings, macro_fname: s
     return m_sizes
 
 
-def mod_rad_gen_config_from_rtl(rad_gen_settings: rg_ds.HighLvlSettings, base_config: dict, sram_map_info: dict, rtl_path: str) -> dict:
+def mod_rad_gen_config_from_rtl(rad_gen_settings: rg_ds.AsicDSE, base_config: dict, sram_map_info: dict, rtl_path: str) -> dict:
     config_out_path = rad_gen_settings.sram_compiler_settings.config_out_path
     if not os.path.exists(config_out_path):
         os.mkdir(config_out_path)
@@ -998,7 +998,7 @@ def mod_rad_gen_config_from_rtl(rad_gen_settings: rg_ds.HighLvlSettings, base_co
 # ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝      ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
 
 
-def parse_gds_to_area_output(rad_gen: rg_ds.HighLvlSettings, obj_dir_path: str):
+def parse_gds_to_area_output(rad_gen: rg_ds.AsicDSE, obj_dir_path: str):
 
     gds_to_area_log_fpath = os.path.join(rad_gen.tech_info.pdk_rundir_path, rad_gen.env_settings.scripts_info.gds_to_area_fname + ".log")
     fd = open(gds_to_area_log_fpath, 'r')
@@ -1018,7 +1018,7 @@ def parse_gds_to_area_output(rad_gen: rg_ds.HighLvlSettings, obj_dir_path: str):
     
     return area
 
-def get_macro_info(rad_gen: rg_ds.HighLvlSettings, obj_dir: str, sram_num_bits: int = None) -> dict:
+def get_macro_info(rad_gen: rg_ds.AsicDSE, obj_dir: str, sram_num_bits: int = None) -> dict:
     """ Looking for SRAM Macros """
     report_dict = {}
     sram_macros = []
@@ -1040,7 +1040,7 @@ def get_macro_info(rad_gen: rg_ds.HighLvlSettings, obj_dir: str, sram_num_bits: 
 
     return report_dict
 
-def parse_report_c(rad_gen_settings: rg_ds.HighLvlSettings, top_level_mod: str, report_path: str, rep_type: str, flow_stage: dict, summarize: bool = False):
+def parse_report_c(rad_gen_settings: rg_ds.AsicDSE, top_level_mod: str, report_path: str, rep_type: str, flow_stage: dict, summarize: bool = False):
     """
         This specifically parses reports and looks for keywords to grab the values and put them into a list of dicts 
         The list is indexed based on the number of values present in the report file.
@@ -1237,7 +1237,7 @@ def parse_report_c(rad_gen_settings: rg_ds.HighLvlSettings, top_level_mod: str, 
     return report_list
 
 
-def get_report_results(rad_gen_settings: rg_ds.HighLvlSettings, top_level_mod: str, report_dir_path: str, flow_stage: dict) -> dict:
+def get_report_results(rad_gen_settings: rg_ds.AsicDSE, top_level_mod: str, report_dir_path: str, flow_stage: dict) -> dict:
     """
         This function will parse the specified report_dir_path which should contain .rpt report files for various stages of asic flow
         Functional for:
@@ -1259,7 +1259,7 @@ def get_report_results(rad_gen_settings: rg_ds.HighLvlSettings, top_level_mod: s
         rg_utils.rad_gen_log(f"Warning: {flow_stage['name']} report path does not exist", rad_gen_log_fd)
     return results 
 
-def parse_output(rad_gen_settings: rg_ds.HighLvlSettings, top_level_mod: str, output_path: str):
+def parse_output(rad_gen_settings: rg_ds.AsicDSE, top_level_mod: str, output_path: str):
     syn_dir = "syn-rundir"
     par_dir = "par-rundir"
     pt_dir = "pt-rundir"
@@ -1273,7 +1273,7 @@ def parse_output(rad_gen_settings: rg_ds.HighLvlSettings, top_level_mod: str, ou
     return syn_results, par_results, pt_results
 
 
-def get_gds_area_from_rpt(rad_gen: rg_ds.HighLvlSettings, obj_dir: str):
+def get_gds_area_from_rpt(rad_gen: rg_ds.AsicDSE, obj_dir: str):
     with open(os.path.join(obj_dir, rad_gen.env_settings.report_info.gds_area_fname),"r") as f:
         for line in f:
             if "Area" in line:
@@ -1417,7 +1417,7 @@ def noc_prse_area_brkdwn(report):
 
 
 
-def gen_reports(rad_gen_settings: rg_ds.HighLvlSettings, design: rg_ds.DesignSweepInfo , top_level_mod: str, report_dir: str, sram_num_bits: int = None):
+def gen_reports(rad_gen_settings: rg_ds.AsicDSE, design: rg_ds.DesignSweepInfo , top_level_mod: str, report_dir: str, sram_num_bits: int = None):
     """
         Generates reports and runs post processing scripts to generate csv files containing final values for a design point
         Takes a hammer generated obj directory as its input report dir 
@@ -1480,7 +1480,7 @@ def gen_reports(rad_gen_settings: rg_ds.HighLvlSettings, design: rg_ds.DesignSwe
     return report_dict
 
 
-def gen_parse_reports(rad_gen_settings: rg_ds.HighLvlSettings, report_search_dir: str, top_level_mod: str, design: rg_ds.DesignSweepInfo = None, sram_num_bits: int = None):
+def gen_parse_reports(rad_gen_settings: rg_ds.AsicDSE, report_search_dir: str, top_level_mod: str, design: rg_ds.DesignSweepInfo = None, sram_num_bits: int = None):
     """
         Searches through the specified search directory and will compile a list of all reports from specified design
         TODO allow for users to more easily parse reports from multiple designs or design points ie specify filter for designs users would like to parse
@@ -1507,7 +1507,7 @@ def gen_parse_reports(rad_gen_settings: rg_ds.HighLvlSettings, report_search_dir
 # ██║  ██║███████║██║╚██████╗    ██║     ███████╗╚██████╔╝╚███╔███╔╝
 # ╚═╝  ╚═╝╚══════╝╚═╝ ╚═════╝    ╚═╝     ╚══════╝ ╚═════╝  ╚══╝╚══╝ 
 
-def write_virtuoso_gds_to_area_script(rad_gen_settings: rg_ds.HighLvlSettings, gds_fpath: str):
+def write_virtuoso_gds_to_area_script(rad_gen_settings: rg_ds.AsicDSE, gds_fpath: str):
     # skill_fname = "get_area.il"
     skill_script_lines = [
         f"system(\"strmin -library {rad_gen_settings.tech_info.cds_lib} -strmFile {gds_fpath} -logFile strmIn.log\")",
@@ -1533,7 +1533,7 @@ def write_virtuoso_gds_to_area_script(rad_gen_settings: rg_ds.HighLvlSettings, g
     fd.close()
 
 
-def write_lc_lib_to_db_script(rad_gen_settings: rg_ds.HighLvlSettings, in_libs_paths: List[str]):
+def write_lc_lib_to_db_script(rad_gen_settings: rg_ds.AsicDSE, in_libs_paths: List[str]):
     """ Takes in a list of abs paths for libs that need to be converted to .dbs """
     lc_script_name = "lc_lib_to_db.tcl"
     pt_outpath = os.path.join(rad_gen_settings.asic_flow_settings.obj_dir_path, "pt-rundir")
@@ -1559,7 +1559,7 @@ def write_lc_lib_to_db_script(rad_gen_settings: rg_ds.HighLvlSettings, in_libs_p
     return os.path.abspath(lc_script_path)
 
 
-def run_asap7_gds_scaling_scripts(rad_gen: rg_ds.HighLvlSettings, obj_dir: str, top_lvl_mod: str):
+def run_asap7_gds_scaling_scripts(rad_gen: rg_ds.AsicDSE, obj_dir: str, top_lvl_mod: str):
     """
         This function will run gds scaling from the par outputs for asap7 pdk
         - It uses Cadence Virtuoso skill scripts to read in the gds output (which is scaled using gdspy or gdstk tools)
@@ -1580,7 +1580,7 @@ def run_asap7_gds_scaling_scripts(rad_gen: rg_ds.HighLvlSettings, obj_dir: str, 
     return gds_area
 
 
-def run_hammer_flow(rad_gen_settings: rg_ds.HighLvlSettings, config_paths: List[str]) -> Tuple[float]:
+def run_hammer_flow(rad_gen_settings: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[float]:
     """
         This runs the entire RAD-Gen flow depending on user specified parameters, the following stages can be run in user specified combination:
         - SRAM generation (kinda)

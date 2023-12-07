@@ -67,7 +67,7 @@ cur_env = os.environ.copy()
 # ██║  ██║██║  ██║██████╔╝    ╚██████╔╝███████╗██║ ╚████║    ███████╗██╔╝ ██╗███████╗╚██████╗    ██║ ╚═╝ ██║╚██████╔╝██████╔╝███████╗███████║
 # ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝      ╚═════╝ ╚══════╝╚═╝  ╚═══╝    ╚══════╝╚═╝  ╚═╝╚══════╝ ╚═════╝    ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝
 
-def main(args: Optional[List[str]] = None) -> None:
+def main(args: Optional[argparse.Namespace] = None) -> None:
     global cur_env
     global rad_gen_log_fd
     global log_verbosity
@@ -79,10 +79,10 @@ def main(args: Optional[List[str]] = None) -> None:
     # Parse command line arguments
     # args = parse_cli_args()
 
-    args, gen_arg_keys, default_arg_vals = rg_utils.parse_rad_gen_top_cli_args()
+    args, default_arg_vals = rg_utils.parse_rad_gen_top_cli_args(args)
 
     # rad_gen_settings = init_structs(args)
-    rad_gen_info = rg_utils.init_structs_top(args, gen_arg_keys, default_arg_vals)
+    rad_gen_info = rg_utils.init_structs_top(args, default_arg_vals)
 
     cur_env = os.environ.copy()
 

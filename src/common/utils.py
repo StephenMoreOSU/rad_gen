@@ -11,6 +11,8 @@ import logging
 import shapely as sh
 
 
+from dataclasses import fields, field
+
 #Import hammer modules
 import vlsi.hammer.hammer.config as hammer_config
 from vlsi.hammer.hammer.vlsi.hammer_vlsi_impl import HammerVLSISettings 
@@ -481,11 +483,39 @@ def init_dataclass(dataclass_type: Type, input_yaml_config: dict, add_arg_config
 
 
 
-def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[str, Any]]:
+def convert_namespace(in_namespace: argparse.Namespace) -> List[str]:
+    """
+        Converts a namespace to an arg list of cli strings (space seperated)
+    """
+    if in_namespace != None:
+        arg_list = []
+        for key, val in vars(in_namespace).items():
+            if val != None and val != False:
+                if isinstance(val, list):
+                    arg_list.append(f"--{key}")
+                    arg_list += val
+                    # arg_list.append(" ".join(val))
+                elif isinstance(val, bool) and val:
+                    arg_list.append(f"--{key}")
+                elif isinstance(val, str) or isinstance(val, int) or isinstance(val, float):
+                    arg_list.append(f"--{key}")
+                    arg_list.append(f"{val}")
+    else:
+        arg_list = None
+
+    return arg_list
+
+def parse_rad_gen_top_cli_args(in_args: argparse.Namespace = None) -> Tuple[argparse.Namespace, Dict[str, Any]]:
     """ 
         Parses the top level RAD-Gen args
-    """                                   
-    parser = argparse.ArgumentParser()
+    """                 
+    # converting namespace to list of cli arguments
+    arg_list = convert_namespace(in_args)
+
+    # List containing all the CLI objects
+    # cli_objs: List[Any] = []
+
+    parser = argparse.ArgumentParser(description="RAD-Gen top level CLI args")
 
     # TODO see if theres a better way to do this but for now we have to manually define which args go to which tool with a list of tags
     # Define general tags, assuming we only call a single tool each time we should be able to seperate them from the subtool being run
@@ -496,111 +526,179 @@ def parse_rad_gen_top_cli_args() -> Tuple[argparse.Namespace, List[str], Dict[st
     ]
 
     # TOP LEVEL CONFIG ARG
-    parser.add_argument("-tc", "--top_config_path", help="path to RAD-GEN top level config file", type=str, default=None)
+    #parser.add_argument("-tc", "--top_config_path", help="path to RAD-GEN top level config file", type=str, default=None)
     # Subtool options are "coffe" "asic-dse" "3d-ic"
-    parser.add_argument("-st", "--subtools", help="subtool to run", nargs="*", type=str, default=None)
+    #parser.add_argument("-st", "--subtools", help="subtool to run", nargs="*", type=str, default=None)
+    
+    # Adding Common CLI args
+    common_cli = rg_ds.RadGenCLI()
+    # cli_objs.append(common_cli)
+    for cli_arg in common_cli.cli_args:
+        rg_ds.add_arg(parser, cli_arg)
+    
+    
     # Common args for all subtools
     # parser.add_argument('-mo','--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
     # Optional arguments only used in the case of manual 
     # parser.add_argument('--input_tree_top_path', help="path to top level dir containing input designs", type=str, default=None)
     # parser.add_argument('--output_tree_top_path', help="path to top level dir which outputs will be produced into, will have a subdir for each subtool", type=str, default=None)
 
-    parsed_args, remaining_args = parser.parse_known_args()
-    
+    if in_args == None and arg_list == None:
+        parsed_args, remaining_args = parser.parse_known_args()
+    else:
+        parsed_args, remaining_args = parser.parse_known_args(args = arg_list, namespace = in_args)
 
-    # Default value dictionary for any arg that has a non None or False for default value
-    default_arg_vals = {}
 
     #     _   ___ ___ ___   ___  ___ ___     _   ___  ___ ___ 
     #    /_\ / __|_ _/ __| |   \/ __| __|   /_\ | _ \/ __/ __|
     #   / _ \\__ \| | (__  | |) \__ \ _|   / _ \|   / (_ \__ \
     #  /_/ \_\___/___\___| |___/|___/___| /_/ \_\_|_\\___|___/
     if "asic_dse" in parsed_args.subtools:
-        
-        default_arg_vals = {
-            **default_arg_vals,
-            "flow_mode": "hammer",
-            "run_mode": "serial",
-        }
-        parser.add_argument('-r', '--run_mode', help="mode in which asic flow is run, either parallel or serial", type=str, choices=["parallel", "serial", "gen_scripts"], default="serial")
-        parser.add_argument('-m', "--flow_mode", help="option for backend tool to generate scripts & run asic flow with", type=str, choices=["custom", "hammer"], default=default_arg_vals["flow_mode"])
-        parser.add_argument('-e', "--env_config_path", help="path to asic-dse env config file", type=str, default=None)
-        parser.add_argument('-t', '--top_lvl_module', help="name of top level design in HDL", type=str, default=None)
-        parser.add_argument('-v', '--hdl_path', help="path to directory containing HDL files", type=str, default=None)
-        parser.add_argument('-p', '--flow_config_paths', 
-                            help="list of paths to hammer design specific config.yaml files",
-                            nargs="*",
-                            type=str,
-                            default=None)
-        parser.add_argument('-l', '--use_latest_obj_dir', help="uses latest obj dir found in rad_gen dir", action='store_true') 
-        parser.add_argument('-o', '--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
-        # parser.add_argument('-e', '--top_lvl_config', help="path to top level config file",  type=str, default=None)
-        parser.add_argument('-s', '--design_sweep_config', help="path to config file containing design sweep parameters",  type=str, default=None)
-        parser.add_argument('-c', '--compile_results', help="flag to compile results related a specific asic flow or sweep depending on additional provided configs", action='store_true') 
-        parser.add_argument('-syn', '--synthesis', help="flag runs synthesis on specified design", action='store_true') 
-        parser.add_argument('-par', '--place_n_route', help="flag runs place & route on specified design", action='store_true') 
-        parser.add_argument('-pt', '--primetime', help="flag runs primetime on specified design", action='store_true') 
-        parser.add_argument('-sram', '--sram_compiler', help="flag enables srams to be run in design", action='store_true') 
-        parser.add_argument('-make', '--make_build', help="flag enables make build system for asic flow", action='store_true') 
+        # Adding ASIC DSE CLI args
+        asic_cli = rg_ds.AsicDseCLI()
+        # cli_objs.append(asic_cli)
+        for cli_arg in asic_cli.cli_args:
+            rg_ds.add_arg(parser, cli_arg)
 
+        """
+            default_arg_vals = {
+                **default_arg_vals,
+                "flow_mode": "hammer",
+                "run_mode": "serial",
+            }
+            parser.add_argument('-r', '--run_mode', help="mode in which asic flow is run, either parallel or serial", type=str, choices=["parallel", "serial", "gen_scripts"], default="serial")
+            parser.add_argument('-m', "--flow_mode", help="option for backend tool to generate scripts & run asic flow with", type=str, choices=["custom", "hammer"], default=default_arg_vals["flow_mode"])
+            parser.add_argument('-e', "--env_config_path", help="path to asic-dse env config file", type=str, default=None)
+            parser.add_argument('-t', '--top_lvl_module', help="name of top level design in HDL", type=str, default=None)
+            parser.add_argument('-v', '--hdl_path', help="path to directory containing HDL files", type=str, default=None)
+            parser.add_argument('-p', '--flow_config_paths', 
+                                help="list of paths to hammer design specific config.yaml files",
+                                nargs="*",
+                                type=str,
+                                default=None)
+            parser.add_argument('-l', '--use_latest_obj_dir', help="uses latest obj dir found in rad_gen dir", action='store_true') 
+            parser.add_argument('-o', '--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
+            # parser.add_argument('-e', '--top_lvl_config', help="path to top level config file",  type=str, default=None)
+            parser.add_argument('-s', '--design_sweep_config', help="path to config file containing design sweep parameters",  type=str, default=None)
+            parser.add_argument('-c', '--compile_results', help="flag to compile results related a specific asic flow or sweep depending on additional provided configs", action='store_true') 
+            parser.add_argument('-syn', '--synthesis', help="flag runs synthesis on specified design", action='store_true') 
+            parser.add_argument('-par', '--place_n_route', help="flag runs place & route on specified design", action='store_true') 
+            parser.add_argument('-pt', '--primetime', help="flag runs primetime on specified design", action='store_true') 
+            parser.add_argument('-sram', '--sram_compiler', help="flag enables srams to be run in design", action='store_true') 
+            parser.add_argument('-make', '--make_build', help="flag enables make build system for asic flow", action='store_true') 
+        """
+        
     #   ___ ___  ___ ___ ___     _   ___  ___ ___ 
     #  / __/ _ \| __| __| __|   /_\ | _ \/ __/ __|
     # | (_| (_) | _|| _|| _|   / _ \|   / (_ \__ \
     #  \___\___/|_| |_| |___| /_/ \_\_|_\\___|___/
 
     if "coffe" in parsed_args.subtools:
-        default_arg_vals = {
-            **default_arg_vals,
-            "opt_type": "global",
-            "initial_sizes": "default",
-            "re_erf": 1,
-            "area_opt_weight": 1,
-            "delay_opt_weight": 1,
-            "max_iterations": 6,
-            "size_hb_interfaces": 0.0,
-        }
+        # Adding COFFE CLI args
+        coffe_cli = rg_ds.CoffeCLI()
+        # cli_objs.append(coffe_cli)
+        for cli_arg in coffe_cli.cli_args:
+            rg_ds.add_arg(parser, cli_arg)
+        """
+            default_arg_vals = {
+                **default_arg_vals,
+                "opt_type": "global",
+                "initial_sizes": "default",
+                "re_erf": 1,
+                "area_opt_weight": 1,
+                "delay_opt_weight": 1,
+                "max_iterations": 6,
+                "size_hb_interfaces": 0.0,
+            }
 
-        parser.add_argument('-f', '--fpga_arch_conf_path', help ="path to config file containing coffe FPGA arch information", type=str, default= None)
-        parser.add_argument('-hb', '--hb_flows_conf_path', type=str, default=None, help="top level hardblock flows config file, this specifies all hardblocks and asic flows used")
-        parser.add_argument('-n', '--no_sizing', help="don't perform transistor sizing", action='store_true')
-        parser.add_argument('-o', '--opt_type', type=str, choices=["global", "local"], default = default_arg_vals["opt_type"], help="choose optimization type")
-        parser.add_argument('-s', '--initial_sizes', type=str, default = default_arg_vals["initial_sizes"], help="path to initial transistor sizes")
-        parser.add_argument('-m', '--re_erf', type=int, default = default_arg_vals["re_erf"], help = "choose how many sizing combos to re-erf")
-        parser.add_argument('-a', '--area_opt_weight', type=int, default = default_arg_vals["area_opt_weight"], help="area optimization weight")
-        parser.add_argument('-d', '--delay_opt_weight', type=int, default = default_arg_vals["delay_opt_weight"], help="delay optimization weight")
-        parser.add_argument('-i', '--max_iterations', type=int, default = default_arg_vals["max_iterations"] ,help="max FPGA sizing iterations")
-        parser.add_argument('-hi', '--size_hb_interfaces', type=float, default=default_arg_vals["size_hb_interfaces"], help="perform transistor sizing only for hard block interfaces")
-        # quick mode is disabled by default. Try passing -q 0.03 for 3% minimum improvement
-        parser.add_argument('-q', '--quick_mode', type=float, default=-1.0, help="minimum cost function improvement for resizing")
-        
-                
-        #arguments for ASIC flow TODO integrate some of these into the asic_dse tool, functionality already exists just needs to be connected
-        # parser.add_argument('-ho',"--hardblock_only",help="run only a single hardblock through the asic flow", action='store_true',default=False)
-        # parser.add_argument('-g',"--gen_hb_scripts",help="generates all hardblock scripts which can be run by a user",action='store_true',default=False)
-        # parser.add_argument('-p',"--parallel_hb_flow",help="runs the hardblock flow for current parameter selection in a parallel fashion",action='store_true',default=False)
-        # parser.add_argument('-r',"--parse_pll_hb_flow",help="parses the hardblock flow from previously generated results",action='store_true',default=False)
-
+            parser.add_argument('-f', '--fpga_arch_conf_path', help ="path to config file containing coffe FPGA arch information", type=str, default= None)
+            parser.add_argument('-hb', '--hb_flows_conf_path', type=str, default=None, help="top level hardblock flows config file, this specifies all hardblocks and asic flows used")
+            parser.add_argument('-n', '--no_sizing', help="don't perform transistor sizing", action='store_true')
+            parser.add_argument('-o', '--opt_type', type=str, choices=["global", "local"], default = default_arg_vals["opt_type"], help="choose optimization type")
+            parser.add_argument('-s', '--initial_sizes', type=str, default = default_arg_vals["initial_sizes"], help="path to initial transistor sizes")
+            parser.add_argument('-m', '--re_erf', type=int, default = default_arg_vals["re_erf"], help = "choose how many sizing combos to re-erf")
+            parser.add_argument('-a', '--area_opt_weight', type=int, default = default_arg_vals["area_opt_weight"], help="area optimization weight")
+            parser.add_argument('-d', '--delay_opt_weight', type=int, default = default_arg_vals["delay_opt_weight"], help="delay optimization weight")
+            parser.add_argument('-i', '--max_iterations', type=int, default = default_arg_vals["max_iterations"] ,help="max FPGA sizing iterations")
+            parser.add_argument('-hi', '--size_hb_interfaces', type=float, default=default_arg_vals["size_hb_interfaces"], help="perform transistor sizing only for hard block interfaces")
+            # quick mode is disabled by default. Try passing -q 0.03 for 3% minimum improvement
+            parser.add_argument('-q', '--quick_mode', type=float, default=-1.0, help="minimum cost function improvement for resizing")
+            
+                    
+            #arguments for ASIC flow TODO integrate some of these into the asic_dse tool, functionality already exists just needs to be connected
+            # parser.add_argument('-ho',"--hardblock_only",help="run only a single hardblock through the asic flow", action='store_true',default=False)
+            # parser.add_argument('-g',"--gen_hb_scripts",help="generates all hardblock scripts which can be run by a user",action='store_true',default=False)
+            # parser.add_argument('-p',"--parallel_hb_flow",help="runs the hardblock flow for current parameter selection in a parallel fashion",action='store_true',default=False)
+            # parser.add_argument('-r',"--parse_pll_hb_flow",help="parses the hardblock flow from previously generated results",action='store_true',default=False)
+        """
     #   _______    ___ ___     _   ___  ___ ___ 
     #  |__ /   \  |_ _/ __|   /_\ | _ \/ __/ __|
     #   |_ \ |) |  | | (__   / _ \|   / (_ \__ \
     #  |___/___/  |___\___| /_/ \_\_|_\\___|___/
     if "ic_3d" in parsed_args.subtools:
-        parser.add_argument('-d', '--debug_spice', help="takes in directory(ies) named according to tile of spice sim, runs sim, opens waveforms and param settings for debugging", nargs="*", type=str, default= None)
-        parser.add_argument('-p', '--pdn_modeling', help="performs pdn modeling", action="store_true")
-        parser.add_argument('-b', '--buffer_dse', help="brute forces the user provided range of stage ratio and number of stages for buffer sizing", action="store_true")
-        parser.add_argument('-s', '--buffer_sens_study', help="sweeps parameters for buffer chain wire load, plots results", action="store_true")
-        parser.add_argument('-l', '--use_latest_obj_dir', help="for spice work dirs, old outputs are overriden rather than creating a new obj dir", action='store_true') 
-        parser.add_argument('-c', '--input_config_path', help="top level input config file", type=str, default=None)
-    
-    args = parser.parse_args()
-    return args, gen_arg_keys, default_arg_vals
+        ic_3d_cli = rg_ds.Ic3dCLI()
+        # cli_objs.append(ic_3d_cli)
+        for cli_arg in ic_3d_cli.cli_args:
+            rg_ds.add_arg(parser, cli_arg)
+        """
+            parser.add_argument('-d', '--debug_spice', help="takes in directory(ies) named according to tile of spice sim, runs sim, opens waveforms and param settings for debugging", nargs="*", type=str, default= None)
+            parser.add_argument('-p', '--pdn_modeling', help="performs pdn modeling", action="store_true")
+            parser.add_argument('-b', '--buffer_dse', help="brute forces the user provided range of stage ratio and number of stages for buffer sizing", action="store_true")
+            parser.add_argument('-s', '--buffer_sens_study', help="sweeps parameters for buffer chain wire load, plots results", action="store_true")
+            parser.add_argument('-l', '--use_latest_obj_dir', help="for spice work dirs, old outputs are overriden rather than creating a new obj dir", action='store_true') 
+            parser.add_argument('-c', '--input_config_path', help="top level input config file", type=str, default=None)
+        """
+
+    if in_args == None and arg_list == None:
+        args = parser.parse_args()
+    else:
+        args = parser.parse_args(args = arg_list, namespace = in_args)
+        
+    # Default value dictionary for any arg that has a non None or False for default value
+    default_arg_vals = { k: v for k, v in vars(args).items() if v != None and v != False}
+
+    return args, default_arg_vals
 
 
-def init_structs_top(args: argparse.Namespace, gen_arg_keys: List[str], default_arg_vals: Dict[str, Any]) -> Dict[str, Any]:
+def merge_cli_and_config_args(cli: Dict[str, Any], config: Dict[str, Any], default: Dict[str, Any]) -> Dict[str, Any]:
+    """
+        Merges the cli and config args into a single dictionary
+        - CLI args override config args
+    """
+    result_conf = {}
+    if config == None:
+        for k_conf, v_conf in cli.items():
+            result_conf[k_conf] = v_conf
+    elif cli == None:
+        for k_conf, v_conf in config.items():
+            result_conf[k_conf] = v_conf
+    else:
+        for k_cli, v_cli in cli.items():
+            # We only want the parameters relevant to the subtool we're running (exclude top level args)
+            # If one wanted to exclude other subtool args they could do it here
+            # if user passed in top lvl conf file
+            for k_conf, v_conf in config.items():
+                if k_conf == k_cli:
+                    # If the cli key is not a default value or None/False AND cli key is not in the cli default values dictionary then we will use the cli value
+                    if v_cli != None and v_cli != False and v_cli != default[k_cli]:
+                        result_conf[k_conf] = v_cli
+                    else:
+                        result_conf[k_conf] = v_conf
+            # if the cli key was not loaded into result config 
+            # meaning it didnt exist in config file, we use whatever value was in cli
+            
+            if k_cli not in result_conf.keys():
+                result_conf[k_cli] = v_cli 
+            # else:
+            #     # if only cli args provided
+            #     result_conf[k_cli] = v_cli
+    return result_conf
+
+def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any]) -> Dict[str, Any]:
     # ARGS CAN BE PASSED FROM CONFIG OR CLI
     # NOTE: CLI ARGS OVERRIDE CONFIG ARGS!
 
-    top_conf = {}
+    top_conf = None
     if args.top_config_path is not None:
         top_conf = parse_yml_config(args.top_config_path)
 
@@ -612,31 +710,38 @@ def init_structs_top(args: argparse.Namespace, gen_arg_keys: List[str], default_
     # Comparing two input param dicts one coming from cli and one from config file for each tool
     subtool_confs = {}
     for subtool in cli_dict["subtools"]:
-        result_conf = {}
-        for k_cli, v_cli in cli_dict.items():
-            # We only want the parameters relevant to the subtool we're running (exclude top level args)
-            # If one wanted to exclude other subtool args they could do it here
-            # if user passed in top lvl conf file
-            if args.top_config_path != None:
-                for k_conf, v_conf in top_conf[subtool].items():
-                    if k_conf == k_cli:
-                        # If the cli key is not a default value or None/False AND cli key is not in the cli default values dictionary then we will use the cli value
-                        if v_cli != None and v_cli != False and v_cli != default_arg_vals[k_cli]:
-                            result_conf[k_conf] = v_cli
-                        else:
-                            result_conf[k_conf] = v_conf
-                # if the cli key was not loaded into result config 
-                # meaning it didnt exist in config file, we use whatever value was in cli
-                if k_cli not in result_conf.keys():
-                    result_conf[k_cli] = v_cli 
-            else:
-                # if only cli args provided
-                result_conf[k_cli] = v_cli
+        """
+            result_conf = {}
+            for k_cli, v_cli in cli_dict.items():
+                # We only want the parameters relevant to the subtool we're running (exclude top level args)
+                # If one wanted to exclude other subtool args they could do it here
+                # if user passed in top lvl conf file
+                if args.top_config_path != None:
+                    for k_conf, v_conf in top_conf[subtool].items():
+                        if k_conf == k_cli:
+                            # If the cli key is not a default value or None/False AND cli key is not in the cli default values dictionary then we will use the cli value
+                            if v_cli != None and v_cli != False and v_cli != default_arg_vals[k_cli]:
+                                result_conf[k_conf] = v_cli
+                            else:
+                                result_conf[k_conf] = v_conf
+                    # if the cli key was not loaded into result config 
+                    # meaning it didnt exist in config file, we use whatever value was in cli
+                    if k_cli not in result_conf.keys():
+                        result_conf[k_cli] = v_cli 
+                else:
+                    # if only cli args provided
+                    result_conf[k_cli] = v_cli
 
-        # init common structs for all subtools
+            # init common structs for all subtools
+        """
+        # if top level config file was passed in and subtool is in top level config file
+        if top_conf != None and subtool in top_conf.keys():
+            result_conf = merge_cli_and_config_args(top_conf[subtool], top_conf, default_arg_vals) # TODO WTF is going on here
+        else:
+            result_conf = merge_cli_and_config_args(cli_dict, top_conf, default_arg_vals)
 
         subtool_confs[subtool] = {
-            #"common": init_common_structs(result_conf),
+            "common": init_common_structs(result_conf),
             **result_conf,
         }
         
@@ -678,11 +783,13 @@ def init_asic_config(env: rg_ds.EnvSettings, conf_path: str) -> str:
 
 
 def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
+    common_inputs = { }
     rad_gen_home = os.environ.get("RAD_GEN_HOME")
     if rad_gen_home is None:
         raise RuntimeError("RAD_GEN_HOME environment variable not set, please source <rad_gen_top>/env_setup.sh")
     else:
         rad_gen_home = clean_path(rad_gen_home)
+    common_inputs["rad_gen_home_path"] = rad_gen_home
 
     # This implies that hammer home must be set even when not running hammer, thats fine for now its assumed users have to recursivley clone repo
     # TODO if we want to change this we can just make hammer home optional 
@@ -691,14 +798,17 @@ def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
         raise RuntimeError("HAMMER_HOME environment variable not set, please source <rad_gen_top>/env_setup.sh")
     else:
         hammer_home = clean_path(hammer_home)
+    common_inputs["hammer_home_path"] = hammer_home
 
+
+    common_inputs["log_fpath"] = os.path.join(rad_gen_home, "logs", "rad_gen.log")
     # For the below directory structures we have dicts with keys and values being the same
     # This is really for readability as when these directories are accessed further in the flow 
     # we will use the keys/dir names which are descriptive of thier purpose
 
     # Setup input and output directory structures instantiated under <rad_gen_home>
-    input_tree_struct = rg_ds.Tree(  
-        os.path.join(rad_gen_home, "inputs"),
+    common_inputs["input_tree_top"] = rg_ds.Tree(  
+        os.path.join(rad_gen_home, subtool_conf["input_tree_top_path"]),
         [
             rg_ds.Tree("asic_dse", 
                 [
@@ -709,17 +819,25 @@ def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
         ]
     )
 
-    output_tree_struct = rg_ds.Tree(  
-        os.path.join(rad_gen_home, "outputs"),
+    common_inputs["output_tree_top"] = rg_ds.Tree(  
+        os.path.join(rad_gen_home, subtool_conf["output_tree_top_path"]),
         [
             rg_ds.Tree("asic_dse"),
             rg_ds.Tree("coffe"),
             rg_ds.Tree("ic_3d"),
         ]
     )
+    # For now on our output path fields we need to manually generate the directories and files specified
+    # This ensures that our function to check for valid paths will not fail
+    # TODO have the <_>Args dynamic dataclass have fields for each argument which specifies relevant information
+    for out_path_key in ["log_fpath"]:
+        os.makedirs(common_inputs[out_path_key], exist_ok = True)
 
+
+    design_input_trees = {}
+    design_output_trees = {}
     # Input dir structure for asic-dse asic flow, instantiated under <user_defined_design_name> dir under "asic_dse" in input tree
-    asic_input_tree_struct = rg_ds.Tree(
+    design_input_trees["asic_dse"] = rg_ds.Tree(
         # No root here as this structure exists for each user defined design
         None,
         [
@@ -738,7 +856,7 @@ def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
                 ]),
         ]
     )
-    asic_output_tree_struct = rg_ds.Tree(
+    design_output_trees["asic_dse"] = rg_ds.Tree(
         # No root here as this structure exists for <top_level_module>
         None,
         [
@@ -747,9 +865,7 @@ def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
                     rg_ds.Tree("scripts"), # scripts to run hammer flow in parallel 
                     rg_ds.Tree("obj_dir", tag="obj"), # hammer obj dir, will contain all outputs/scripts/reports from flow
                 ], tag="hammer"),
-            rg_ds.Tree("custom",
-                           
-            )
+            rg_ds.Tree("custom"),
         ]
     )
 
@@ -762,17 +878,22 @@ def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
         "fpga_fabric_sizing" : "fpga_fabric_sizing"
     }
 
+    # Initialize all of the user arguements with dyn dataclass
+    common_cli = rg_ds.RadGenCLI()
+    # common_cli_fields = common_cli.get_dataclass_fields(is_cli = True)
+    CommonArgs = rg_ds.get_dyn_class(
+        "CommonArgs",
+        common_cli.get_dataclass_fields(is_cli = True),
+    )
+
+    common_inputs["args"] = CommonArgs(**subtool_conf)
+    common = init_dataclass(rg_ds.Common, common_inputs, {})
+
+    return common
 
 
 
-
-
-    log_file = os.path.join(rad_gen_home, "logs", "rad_gen.log")
-
-
-
-
-def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSettings:
+def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     """
         Initializes the data structures used by the ASIC DSE flow:
         ASIC-DSE:
@@ -789,7 +910,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
     #     input_tree_top_path = clean_path(asic_dse_conf["input_tree_top_path"])
     # if asic_dse_conf["output_tree_top_path"] != None:
     #     output_tree_top_path = clean_path(asic_dse_conf["output_tree_top_path"])
-        
     
 
     if asic_dse_conf["env_config_path"] != None:
@@ -971,10 +1091,11 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.HighLvlSetting
         "asic_flow_settings": asic_flow_settings,
         "custom_asic_flow_settings": custom_asic_flow_settings,
         "env_settings": env_settings,
+        "common": asic_dse_conf["common"],
     }
-    high_lvl_settings = init_dataclass(rg_ds.HighLvlSettings, high_lvl_inputs, {})
+    asic_dse = init_dataclass(rg_ds.AsicDSE, high_lvl_inputs, {})
 
-    return high_lvl_settings
+    return asic_dse
 
 def init_coffe_structs(coffe_conf: Dict[str, Any]):
     fpga_arch_conf = load_arch_params(clean_path(coffe_conf["fpga_arch_conf_path"]))
