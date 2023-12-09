@@ -60,15 +60,12 @@ The following paper may be used as a general citation for RAD-Gen:
 
 .. code-block:: bibtex
 
-   @inproceedings{rad-flow-dlrm,
-      title = {{A Whole New World: How to Architect Beyond?FPGA Reconfigurable Acceleration Devices?}},
-      author = {Boutros, Andrew and More, Stephen and Betz, Vaughn},
-      eventtitle = {2023 33nd International Conference on Field-Programmable Logic and Applications ({FPL})},
-      booktitle = {2023 33nd International Conference on Field-Programmable Logic and Applications ({FPL})},
-      date = {2023-09},
-      publisher={IEEE}
-   }
-
+@inproceedings{rad-gen,
+    title = {{Into the Third Dimension: Architecture Exploration Tools for 3D Reconfigurable Acceleration Devices}},
+    author = {Boutros, Andrew and Mahmoudi, Fatemehsadat and Mohaghegh, Amin and More, Stephen and Betz, Vaughn},
+    booktitle = {IEEE International Conference on Field-Programmable Technology (FPT)},
+    year = {2023}
+}
 
 .. - **RAD-Sim:** A SystemC simulator for rapid design space exploration and architecture-application co-design
 
