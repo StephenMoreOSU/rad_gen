@@ -48,7 +48,7 @@ This gives users an idea of their accuracy.
    # --------------+--------------+--------------+--------------+--------------+--------------+--------------+--------------+--------------+--------------
 
 COFFE FPGA Fabric w/ALU hardblock Flow Example
---------------------------------
+-------------------------------------------------------------
 
 We will use the COFFE subtool in RAD-Gen to size a 7nm FPGA fabric with an ALU hardblock. 
 COFFE will perform transistor sizing for fpga custom circuit logic and muxing required to interact with the ALU hardblock. 
