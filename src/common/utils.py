@@ -13,12 +13,14 @@ import shapely as sh
 
 from dataclasses import fields, field
 
+from pathlib import Path
+
 #Import hammer modules
 import vlsi.hammer.hammer.config as hammer_config
 from vlsi.hammer.hammer.vlsi.hammer_vlsi_impl import HammerVLSISettings 
 from vlsi.hammer.hammer.vlsi.driver import HammerDriver
 import vlsi.hammer.hammer.tech as hammer_tech
-
+from vlsi.hammer.hammer.config import load_config_from_string
 
 # RAD-Gen modules
 import src.common.data_structs as rg_ds
@@ -30,6 +32,9 @@ import csv
 import re
 import subprocess as sp 
 import pandas as pd
+
+# Common modules
+from collections.abc import MutableMapping
 
 # temporary imports from rad_gen main for testing ease
 
@@ -44,7 +49,21 @@ cur_env = os.environ.copy()
 # ╚██████╔╝███████╗██║ ╚████║███████╗██║  ██║██║  ██║███████╗    ╚██████╔╝   ██║   ██║███████╗███████║
 #  ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
 
-
+def flatten(dictionary, parent_key='', separator='.'):
+    """
+        Turns a nested dictionary into a flattened one with seperator delimited keys
+        Ex.
+            - Input: {"a": {"b": 1, "c": 2}, "d": {"e": {"f": 3}}}
+            - Output: {"a.b": 1, "a.c": 2, "d.e.f": 3}
+    """
+    items = []
+    for key, value in dictionary.items():
+        new_key = parent_key + separator + key if parent_key else key
+        if isinstance(value, MutableMapping):
+            items.extend(flatten(value, new_key, separator=separator).items())
+        else:
+            items.append((new_key, value))
+    return dict(items)
 
 def key_val_2_report(key: str, val: Any) -> Tuple[str, Any]:
     """
@@ -468,6 +487,7 @@ def init_dataclass(dataclass_type: Type, input_yaml_config: dict, add_arg_config
         # additional arg values for fields not defined in input yaml (defined in default_value_config[field])
         elif field in add_arg_config.keys():
             dataclass_inputs[field] = add_arg_config[field]
+        # clean path and make sure it exists (if "path" keyword in field name)
         if "path" in field and field in dataclass_inputs:
             if isinstance(dataclass_inputs[field], list):
                 for idx, path in enumerate(dataclass_inputs[field]):
@@ -505,12 +525,20 @@ def convert_namespace(in_namespace: argparse.Namespace) -> List[str]:
 
     return arg_list
 
-def parse_rad_gen_top_cli_args(in_args: argparse.Namespace = None) -> Tuple[argparse.Namespace, Dict[str, Any]]:
+
+
+asic_dse_cli = rg_ds.AsicDseCLI()
+coffe_cli = rg_ds.CoffeCLI()
+ic_3d_cli = rg_ds.Ic3dCLI()
+common_cli = rg_ds.RadGenCLI()
+
+
+def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) -> Tuple[argparse.Namespace, Dict[str, Any]]:
     """ 
         Parses the top level RAD-Gen args
-    """                 
-    # converting namespace to list of cli arguments
-    arg_list = convert_namespace(in_args)
+    """                     
+    # converting namespace to list of cli arguments if we get namespace
+    arg_list = convert_namespace(in_args) if isinstance(in_args, argparse.Namespace) else in_args
 
     # List containing all the CLI objects
     # cli_objs: List[Any] = []
@@ -558,6 +586,7 @@ def parse_rad_gen_top_cli_args(in_args: argparse.Namespace = None) -> Tuple[argp
         asic_cli = rg_ds.AsicDseCLI()
         # cli_objs.append(asic_cli)
         for cli_arg in asic_cli.cli_args:
+            # cli_arg.key = ".".join(["asic_dse",cli_arg.key])
             rg_ds.add_arg(parser, cli_arg)
 
         """
@@ -689,10 +718,26 @@ def merge_cli_and_config_args(cli: Dict[str, Any], config: Dict[str, Any], defau
             
             if k_cli not in result_conf.keys():
                 result_conf[k_cli] = v_cli 
+            
             # else:
             #     # if only cli args provided
             #     result_conf[k_cli] = v_cli
     return result_conf
+
+
+
+def modify_param_dict_keys_for_hier(in_dict: Dict[str, Any], subtool: str):
+    global asic_dse_cli
+    global coffe_cli
+    global ic_3d_cli
+    global common_cli
+    for k in in_dict.copy().keys():
+        for cli_arg in globals()[f"{subtool}_cli"].cli_args:
+            if k == cli_arg.key:
+                # replace old key name with new key name
+                in_dict[f"{subtool}.{cli_arg.key}"] = in_dict.pop(k)
+
+
 
 def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any]) -> Dict[str, Any]:
     # ARGS CAN BE PASSED FROM CONFIG OR CLI
@@ -700,16 +745,20 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
 
     top_conf = None
     if args.top_config_path is not None:
-        top_conf = parse_yml_config(args.top_config_path)
-
+        #top_conf = parse_yml_config(args.top_config_path)
+        top_conf = load_config_from_string(Path(args.top_config_path).read_text(), is_yaml=True, path=str(Path(args.top_config_path).resolve().parent))
     cli_dict = vars(args)
-
+    # Convert the key names of cli_dict into heiarachical keys which will match the config file
+    for conv_dict in [cli_dict, default_arg_vals]:
+        for subtool_str in "coffe", "asic_dse", "ic_3d", "common":
+            modify_param_dict_keys_for_hier(conv_dict, subtool_str)
+    
     # Below currently parses the cli args and will always take the cli arg value over whats in the config file (if cli arg == None)
     # If cli_arg == default_cli_value && key exists in the config file -> then tool will use the config file instead of cli 
 
     # Comparing two input param dicts one coming from cli and one from config file for each tool
     subtool_confs = {}
-    for subtool in cli_dict["subtools"]:
+    for subtool in cli_dict["common.subtools"]:
         """
             result_conf = {}
             for k_cli, v_cli in cli_dict.items():
@@ -735,13 +784,27 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
             # init common structs for all subtools
         """
         # if top level config file was passed in and subtool is in top level config file
-        if top_conf != None and subtool in top_conf.keys():
-            result_conf = merge_cli_and_config_args(top_conf[subtool], top_conf, default_arg_vals) # TODO WTF is going on here
-        else:
+        if top_conf != None and subtool in [ key.split(".")[0] for key in top_conf.keys()]:
+            # The dict concatenation is because the merrge function only takes a single level of a nested dict
+            # result_conf = merge_cli_and_config_args(cli_dict, {**top_conf, **top_conf[subtool], **top_conf["common"]}, default_arg_vals)
             result_conf = merge_cli_and_config_args(cli_dict, top_conf, default_arg_vals)
+        else:
+            # In this case only using the cli args
+            result_conf = cli_dict
+        
+        # Only passing in keys from common, removing heirarchy from keys to make things more clear in function
+        common = init_common_structs({ k.replace("common.","") : v for k,v in result_conf.items() if "common" in k})
+         
+        # Do some post processing conversions on the common structs to be relevant to each subtool
+        # Search for the subtool tag in the output dir tree & set the subtool output_tree top to that dir
+        subtool_dirs: List = common.output_tree_top.search_subtrees(subtool, 1)
+        if len(subtool_dirs) > 1 or len(subtool_dirs) == 0:
+            raise ValueError(f"ERROR: '{subtool}' is not a unique tag in the output dir tree (or doesnt exist)")
+        elif len(subtool_dirs) == 1:
+            common.output_tree_top = subtool_dirs[0]
 
         subtool_confs[subtool] = {
-            "common": init_common_structs(result_conf),
+            "common": common,
             **result_conf,
         }
         
@@ -759,7 +822,7 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
     return rad_gen_info
     
 
-def init_asic_config(env: rg_ds.EnvSettings, conf_path: str) -> str:
+def init_asic_config(design_input_tree: rg_ds.Tree, design_output_tree: rg_ds.Tree, conf_path: str) -> str:
     """
         This function is specifically to clean up the configs passed to hammer prior to initialization of the
         ASICFlowSettings data structure.
@@ -769,12 +832,15 @@ def init_asic_config(env: rg_ds.EnvSettings, conf_path: str) -> str:
     # Use the path of the config file to determine where they are created
     conf_dir = os.path.dirname(conf_path)
     conf_name = os.path.basename(os.path.splitext(conf_path)[0])
-    for dir in env.input_dir_struct["configs"].keys():
-        os.makedirs(os.path.join(conf_dir, dir), exist_ok=True)
+    # Will use the structure contained in tag "config" and create its subdirs wherever user input config file(s) are located
+    conf_tree = design_input_tree.search_subtrees("config")[0]
+    for dir in conf_tree.subtrees:
+        os.makedirs(os.path.join(conf_dir, dir.root), exist_ok=True)
 
+    mod_dir = conf_tree.search_subtrees("mod")[0].basename
     # Our yaml parsing function performs santization, there may be invalid paths so we don't want to look for them
     conf_dict = parse_yml_config(conf_path, validate_paths = False)
-    conf_out_path = os.path.join(conf_dir, env.input_dir_struct["configs"]["mod"], conf_name + "_pre_proc.yml" )
+    conf_out_path = os.path.join(conf_dir, mod_dir, conf_name + "_pre_proc.yml" )
     with open(conf_out_path, "w" ) as f:
         yaml.safe_dump(conf_dict, f, sort_keys = False)
 
@@ -782,7 +848,7 @@ def init_asic_config(env: rg_ds.EnvSettings, conf_path: str) -> str:
 
 
 
-def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
+def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
     common_inputs = { }
     rad_gen_home = os.environ.get("RAD_GEN_HOME")
     if rad_gen_home is None:
@@ -801,37 +867,43 @@ def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
     common_inputs["hammer_home_path"] = hammer_home
 
 
-    common_inputs["log_fpath"] = os.path.join(rad_gen_home, "logs", "rad_gen.log")
     # For the below directory structures we have dicts with keys and values being the same
     # This is really for readability as when these directories are accessed further in the flow 
     # we will use the keys/dir names which are descriptive of thier purpose
 
     # Setup input and output directory structures instantiated under <rad_gen_home>
     common_inputs["input_tree_top"] = rg_ds.Tree(  
-        os.path.join(rad_gen_home, subtool_conf["input_tree_top_path"]),
+        os.path.join(rad_gen_home, common_conf["input_tree_top_path"]),
         [
-            rg_ds.Tree("asic_dse", 
-                [
+            rg_ds.Tree(root="asic_dse", 
+                subtrees=[
                     rg_ds.Tree("sys_configs")
-                ]),
-            rg_ds.Tree("coffe"),
-            rg_ds.Tree("ic_3d"),
+                ],
+                tag="asic_dse"),
+            rg_ds.Tree(root="coffe", tag="coffe"),
+            rg_ds.Tree(root="ic_3d", tag="ic_3d"),
         ]
     )
+    # The above may look confusing as we are naming root & tag the same but the idea is that we decouple the directory name with its function
+    # So we follow this convension to set tags for thier usage
 
     common_inputs["output_tree_top"] = rg_ds.Tree(  
-        os.path.join(rad_gen_home, subtool_conf["output_tree_top_path"]),
+        os.path.join(rad_gen_home, common_conf["output_tree_top_path"]),
         [
-            rg_ds.Tree("asic_dse"),
-            rg_ds.Tree("coffe"),
-            rg_ds.Tree("ic_3d"),
+            rg_ds.Tree(root="asic_dse", tag="asic_dse"),
+            rg_ds.Tree(root="coffe", tag="coffe"),
+            rg_ds.Tree(root="ic_3d", tag="ic_3d"),
         ]
     )
+    common_inputs["log_fpath"] = os.path.join(rad_gen_home, "logs", "rad_gen.log")
     # For now on our output path fields we need to manually generate the directories and files specified
     # This ensures that our function to check for valid paths will not fail
     # TODO have the <_>Args dynamic dataclass have fields for each argument which specifies relevant information
     for out_path_key in ["log_fpath"]:
-        os.makedirs(common_inputs[out_path_key], exist_ok = True)
+        os.makedirs(os.path.dirname(common_inputs[out_path_key]), exist_ok = True)
+        # write to log to create empty file and not piss off the path checker
+        fd = open(common_inputs[out_path_key], "w")
+        fd.close()
 
 
     design_input_trees = {}
@@ -843,16 +915,17 @@ def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
         [
             rg_ds.Tree("configs", 
                 [
-                    rg_ds.Tree("gen"),
-                    rg_ds.Tree("mod"),
-                ]),
+                    rg_ds.Tree("gen", tag="gen"),
+                    rg_ds.Tree("mod", tag="mod"),
+                ],
+                tag = "config"),
             rg_ds.Tree("rtl", 
                 [
-                    rg_ds.Tree("gen"),
-                    rg_ds.Tree("src"),
-                    rg_ds.Tree("include"),
-                    rg_ds.Tree("verif"),
-                    rg_ds.Tree("build"),
+                    rg_ds.Tree("gen", tag="gen"),
+                    rg_ds.Tree("src", tag="src"),
+                    rg_ds.Tree("include", tag="inc"),
+                    rg_ds.Tree("verif", tag="verif"),
+                    rg_ds.Tree("build", tag="build"),
                 ]),
         ]
     )
@@ -879,15 +952,15 @@ def init_common_structs(subtool_conf: Dict[str, Any]) -> rg_ds.Common:
     }
 
     # Initialize all of the user arguements with dyn dataclass
-    common_cli = rg_ds.RadGenCLI()
-    # common_cli_fields = common_cli.get_dataclass_fields(is_cli = True)
-    CommonArgs = rg_ds.get_dyn_class(
-        "CommonArgs",
-        common_cli.get_dataclass_fields(is_cli = True),
-    )
+    # common_cli = rg_ds.RadGenCLI()
+    # # common_cli_fields = common_cli.get_dataclass_fields(is_cli = True)
+    # CommonArgs = rg_ds.get_dyn_class(
+    #     "CommonArgs",
+    #     common_cli.get_dataclass_fields(is_cli = True),
+    # )
 
-    common_inputs["args"] = CommonArgs(**subtool_conf)
-    common = init_dataclass(rg_ds.Common, common_inputs, {})
+    common_inputs["args"] = rg_ds.RadGenArgs(**common_conf)
+    common = init_dataclass(rg_ds.Common, common_inputs)
 
     return common
 
@@ -911,26 +984,70 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     # if asic_dse_conf["output_tree_top_path"] != None:
     #     output_tree_top_path = clean_path(asic_dse_conf["output_tree_top_path"])
     
+    # Input dir structure for asic-dse asic flow, instantiated under <user_defined_design_name> dir under "asic_dse" in input tree
+    design_input_tree = rg_ds.Tree(
+        asic_dse_conf["common"].input_tree_top.root,
+        [
+            rg_ds.Tree("projects",
+                [
+                    rg_ds.Tree(asic_dse_conf["project_name"],
+                    [
+                        rg_ds.Tree("configs", 
+                            [
+                                rg_ds.Tree("gen", tag="gen"),
+                                rg_ds.Tree("mod", tag="mod"),
+                            ],
+                            tag = "config"),
+                        rg_ds.Tree("rtl", 
+                            [
+                                rg_ds.Tree("gen", tag="gen"),
+                                rg_ds.Tree("src", tag="src"),
+                                rg_ds.Tree("include", tag="inc"),
+                                rg_ds.Tree("verif", tag="verif"),
+                                rg_ds.Tree("build", tag="build"),
+                            ]),
+                    ])
+                ]
+            )
+        ]
+    )
+    design_output_tree = rg_ds.Tree(
+        asic_dse_conf["common"].output_tree_top.root,
+        [
+            rg_ds.Tree("hammer", 
+                [
+                    rg_ds.Tree("scripts", tag="script"), # scripts to run hammer flow in parallel 
+                    rg_ds.Tree("obj_dir", tag="obj"), # hammer obj dir, will contain all outputs/scripts/reports from flow
+                ], tag="hammer"),
+            rg_ds.Tree("custom"),
+        ]
+    )
 
-    if asic_dse_conf["env_config_path"] != None:
-        env_conf = parse_yml_config(asic_dse_conf["env_config_path"])
-    else:
-        raise ValueError(f"ASIC-DSE env config file not provided from {asic_dse_conf['env_config_path']}")
+
+    """
+        if asic_dse_conf["env_config_path"] != None:
+            env_conf = parse_yml_config(asic_dse_conf["env_config_path"])
+        else:
+            raise ValueError(f"ASIC-DSE env config file not provided from {asic_dse_conf['env_config_path']}")
+        
+            
+        script_info_inputs = env_conf["scripts"] if "scripts" in env_conf.keys() else {}
+        scripts_info = init_dataclass(rg_ds.ScriptInfo, script_info_inputs)
+
+        # create additional dicts for argument passed information
+        env_inputs = {
+            # TODO change in EnvSettings to be env_config_path
+            "env_config_path": asic_dse_conf["env_config_path"],
+            "scripts_info": scripts_info,
+        }
+        env_settings = init_dataclass(rg_ds.EnvSettings, env_conf["env"], env_inputs)
+
+        # TODO we should get tech info from another place, but for determining ASAP7 rundir is kinda hard
+        if "tech" in env_conf.keys():
+            tech_info = init_dataclass(rg_ds.StdCellTechInfo, env_conf["tech"], {})
+    """
     
-    script_info_inputs = env_conf["scripts"] if "scripts" in env_conf.keys() else {}
-    scripts_info = init_dataclass(rg_ds.ScriptInfo, script_info_inputs)
-
-    # create additional dicts for argument passed information
-    env_inputs = {
-        # TODO change in EnvSettings to be env_config_path
-        "env_config_path": asic_dse_conf["env_config_path"],
-        "scripts_info": scripts_info,
-    }
-    env_settings = init_dataclass(rg_ds.EnvSettings, env_conf["env"], env_inputs)
-
-    # TODO we should get tech info from another place, but for determining ASAP7 rundir is kinda hard
-    if "tech" in env_conf.keys():
-        tech_info = init_dataclass(rg_ds.StdCellTechInfo, env_conf["tech"], {})
+    # tech_info = ini 
 
     # Initialize optional parameters
     custom_asic_flow_settings = None
@@ -959,8 +1076,8 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
 
         high_lvl_inputs["sweep_config_path"] = asic_dse_conf["design_sweep_config"]
         # By default set the result search path to the design output path, possibly could be changed in later functions if needed
-        high_lvl_inputs["result_search_path"] = env_settings.design_output_path
-
+        high_lvl_inputs["result_search_path"] = asic_dse_conf["common"].output_tree_top.root
+        
         for design in sweep_config["designs"]:
             sweep_type_inputs = {} # parameters for a specific type of sweep
             if design["type"] == "sram":
@@ -987,8 +1104,8 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
 
         if asic_dse_conf["flow_config_paths"] != None:
             # Before parsing asic flow config we should run them through pre processing thats general to all input files
-            for idx, path in enumerate(asic_dse_conf["flow_config_paths"]):
-                asic_dse_conf["flow_config_paths"][idx] = init_asic_config(env_settings, asic_dse_conf["flow_config_paths"][idx])
+            for idx, conf_path in enumerate(asic_dse_conf["flow_config_paths"]):
+                asic_dse_conf["flow_config_paths"][idx] = init_asic_config(design_input_tree, design_output_tree, conf_path) #init_asic_config(env_settings, asic_dse_conf["flow_config_paths"][idx])
             
             # enable asic flow to be run
             vlsi_mode_inputs["enable"] = True
@@ -1009,7 +1126,17 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 custom_asic_flow_settings = load_hb_params(clean_path(asic_dse_conf["flow_config_paths"][0]))
 
             elif asic_dse_conf["flow_mode"] == "hammer":
-
+                # Initialize the hammer tree
+                asic_flow_settings_input["hammer_tree"] = rg_ds.Tree(  
+                    asic_dse_conf["common"].hammer_home_path,
+                    [
+                        rg_ds.Tree("asic_dse"),
+                        rg_ds.Tree("coffe"),
+                        rg_ds.Tree("ic_3d"),
+                    ]
+                )
+                
+                
                 # Initialize a Hammer Driver, this will deal with the defaults & will allow us to load & manipulate configs before running hammer flow
                 driver_opts = HammerDriver.get_default_driver_options()
                 # update values

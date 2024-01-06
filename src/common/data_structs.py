@@ -264,6 +264,20 @@ class Tree:
         for path in paths:
             print(path.displayable())
 
+    def search_subtrees(self, target_tag: str, target_depth: int = None):
+        result = []
+        self._search_subtrees(target_tag, target_depth, 0, result)
+        return result
+
+    def _search_subtrees(self, target_tag, target_depth, current_depth, result):
+        # If we want to search all depths we set target depth to None
+        if (current_depth == target_depth or target_depth == None) and self.tag == target_tag:
+            result.append(self)
+
+        if self.subtrees and (current_depth < target_depth or target_depth == None):
+            for subtree in self.subtrees:
+                subtree._search_subtrees(target_tag, target_depth, current_depth + 1, result)
+
 
 # Accessing the directory structure like a dictionary
 def get_dir(directory: Tree, *keys):
@@ -407,6 +421,10 @@ class ParentCLI:
         """
             Returns the dynamic (defined in _fields) and static (defined in dataclass) to instantiate the dynamic dataclass
         """
+        # To deal with problem of "." character being invalid for field names we replace it with double underscore here, has to be converted back to "." when cli args are written to console
+        for key in self._fields.copy().keys():
+            if "." in key:
+                self._fields[key.replace(".", "__")] = self._fields.pop(key)
         # Adds the dynamic fields propegated from cli_args to the dataclass
         keys = list(self._fields.keys())
         dtypes = list(self._fields.values())
@@ -489,6 +507,13 @@ class CommonCLI(ParentCLI):
         output_tree_top_path: str = None
     """
 
+common_cli = CommonCLI()
+# Make a custom dataclass for common input arguments
+AsicDseArgs = get_dyn_class(
+    cls_name = "AsicDseArgs",
+    fields = common_cli.get_dataclass_fields(),
+    bases= (CommonCLI, )
+)
 
 
 @dataclass
@@ -545,14 +570,17 @@ class RadGenCLI(ParentCLI):
         cmd_str = f"python3 {rad_gen_home}/rad_gen.py"
         for _field in self.__class__.__dataclass_fields__:
             # List of arguments derived from cli_args are the only ones we should use to call RAD-Gen
-            if _field in [ _field.key for _field in self.cli_args ]: #!= "no_use_arg_list":
+            # Also don't pass argument values if they are the defaults that already exist in the CLI defs
+            cli_default = next((cli_field.default_val for cli_field in self.cli_args if cli_field.key == _field), None) # This gets default value for the feild in question
+            if _field in [ cli_field.key for cli_field in self.cli_args ] and getattr(self, _field) != cli_default: #!= "no_use_arg_list":
                 # no use arg list is used specifically to skip an otherwise valid argument in the cli call  
                 if not ( self.no_use_arg_list != None and ( _field in self.no_use_arg_list ) ):
                     cmd_str = self.decode_dataclass_to_cli(cmd_str = cmd_str, _field = _field, args_dict = sys_args_dict)
         if self.subtool_args != None:
             for _field in self.subtool_args.__dataclass_fields__:
+                cli_default = next((cli_field.default_val for cli_field in self.subtool_args.cli_args if cli_field.key == _field), None) # This gets default value for the feild in question
                 # List of arguments derived from subtool cli_args are the only ones we should use to call the subtool
-                if _field in [ _field.key for _field in self.subtool_args.cli_args ]: # != "no_use_arg_list":
+                if _field in [ _field.key for _field in self.subtool_args.cli_args ] and getattr(self.subtool_args, _field) != cli_default: # != "no_use_arg_list":
                     if not (self.no_use_arg_list != None and ( _field in self.no_use_arg_list ) ):
                         cmd_str = self.decode_dataclass_to_cli(obj = self.subtool_args, cmd_str = cmd_str, _field = _field, args_dict = sys_args_dict)
         sys_args = cmd_str.split(" ")[2:] # skip over the <python3 rad_gen.py>
@@ -586,7 +614,7 @@ class AsicDseCLI(ParentCLI):
         Command line interface settings for asic-dse subtool
     """
     cli_args: List[GeneralCLI] = field(default_factory = lambda: [
-        GeneralCLI(key = "env_config_path", shortcut = "-e", datatype = str, help_msg = "Path to hammer environment configuration file"),
+        GeneralCLI(key = "tool_env_conf_path", shortcut = "-e", datatype = str, help_msg = "Path to hammer environment configuration file"),
         GeneralCLI(key = "design_sweep_config", shortcut = "-s", datatype = str, help_msg = "Path to design sweep config file"),
         # RUN MODE
         GeneralCLI(key = "run_mode", shortcut = "-r", datatype = str, choices = ["serial", "parallel", "gen_scripts"], default_val = "serial", help_msg = "Specify if flow is run in serial or parallel for sweeps"),
@@ -594,7 +622,8 @@ class AsicDseCLI(ParentCLI):
         GeneralCLI(key = "flow_mode", shortcut = "-m", datatype = str, choices = ["hammer", "custom"], default_val = "hammer", help_msg = "Mode in which asic flow is run hammer or custom modes"),
         GeneralCLI(key = "top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
         GeneralCLI(key = "hdl_path", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
-        GeneralCLI(key = "flow_config_paths", shortcut = "-p", datatype = str, nargs = "*", help_msg = "Paths to flow config files, these can be either custom or hammer format"),
+        GeneralCLI(key = "flow_conf_paths", shortcut = "-p", datatype = str, nargs = "*", help_msg = "Paths to flow config files, these can be either custom or hammer format"),
+        GeneralCLI(key = "project_name", shortcut = "-n", datatype = str, help_msg = "Name of Project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them"),
         # GeneralCLI(key = "use_latest_obj_dir", shortcut = "-l", action = "store_true", help_msg = "Uses latest obj / work dir found in the respective output_design_files/<top_module> dir"),
         # GeneralCLI(key = "use_manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj / work dir"),
         GeneralCLI(key = "compile_results", shortcut = "-c", datatype = bool, action = "store_true", help_msg = "Flag to compile results related a specific asic flow or sweep depending on additional provided configs"),
@@ -603,6 +632,12 @@ class AsicDseCLI(ParentCLI):
         GeneralCLI(key = "primetime", shortcut = "-pt", datatype = bool, help_msg = "Flag to run primetime (timing & power)"),
         GeneralCLI(key = "sram_compiler", shortcut = "-sram", datatype = bool, help_msg = "Flag that must be provided if sram macros exist in design (ASIC-DSE)"),
         GeneralCLI(key = "make_build", shortcut = "-make", datatype = bool, help_msg = "<TAG> <UNDER DEV> Generates a makefile to manage flow dependencies and execution"),
+        # Below are definitions for params nested in the hierarchy of AsicDSE dataclass
+        GeneralCLI(key = "tech.name", datatype= str, help_msg = "Name of tech lib for use with Cadence Virtuoso", default_val = "asap7"),
+        GeneralCLI(key = "tech.cds_lib", datatype= str, help_msg = "Name of cds lib for use with Cadence Virtuoso", default_val = "asap7_TechLib"),
+        GeneralCLI(key = "tech.pdk_rundir_path", datatype= str, help_msg = "Path to rundir of pdk being used for Cadence Virtuoso"),
+
+
     ] )
     arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [
         { "shortcut": "-e", "key": "env_config_path", "help_msg": "Path to hammer environment configuration file", "datatype": str },
@@ -773,6 +808,16 @@ class DesignSweepInfo:
     type_info: Any = None # contains either RTLSweepInfo or SRAMSweepInfo depending on sweep type
 
 
+@dataclass
+class ScriptInfo:
+    """
+        Filenames of various scripts used in RAD Gen
+    """
+    gds_to_area_fname: str = "get_area" # name for gds to area script & output csv file
+    virtuoso_setup_path: str = None
+
+
+
 @dataclass 
 class ASICFlowSettings:
     """ 
@@ -780,9 +825,12 @@ class ASICFlowSettings:
         - paths
         - flow stage information
     """
+    
 
+    # Directory structure for hammer repo 
+    hammer_tech_path: str = None 
     # Moved to here
-    hammer_env_paths: List[str] # paths to hammer environment file containing absolute paths to asic tools and licenses
+    hammer_env_paths: List[str] = None # paths to hammer environment file containing absolute paths to asic tools and licenses
     # Hammer Driver Path
     hammer_cli_driver_path: str = None # path to hammer driver
     hammer_driver: HammerDriver = None # hammer settings
@@ -794,6 +842,7 @@ class ASICFlowSettings:
     config_path: str = None # path to hammer IR parsable configuration file
     top_lvl_module: str = None # top level module of design
     obj_dir_path: str = None # hammer object directory containing subdir for each flow stage
+    
     # use_latest_obj_dir: bool # looks for the most recently created obj directory associated with design (TODO & design parameters) and use this for the asic run
     # manual_obj_dir: str # specify a specific obj directory to use for the asic run (existing or non-existing)
     # Stages being run
@@ -833,16 +882,10 @@ class ASICFlowSettings:
         #     self.hammer_cli_driver_path = f"python3 {self.hammer_cli_driver_path}"
 
 
-@dataclass
-class ScriptInfo:
-    """
-        Filenames of various scripts used in RAD Gen
-    """
-    gds_to_area_fname: str = "get_area" # name for gds to area script & output csv file
-    virtuoso_setup_path: str = None
 
 
 
+# TODO remove this data structure, moving all its contents to AsicFlowSettings and Common
 @dataclass
 class EnvSettings:
     """ 
@@ -924,9 +967,12 @@ class AsicDSE:
         - Preparing designs to be swept via RTL/VLSI parameters
         - Using the SRAM mapper
     """
-    env_settings: EnvSettings # env settings relative to paths and filenames for RAD Gen
+    common: Common # common settings for RAD Gen
+    # env_settings: EnvSettings # env settings relative to paths and filenames for RAD Gen
     mode: RADGenMode # mode in which RAD Gen is running
-    tech_info: StdCellTechInfo # technology information for the design
+    tech: StdCellTechInfo # technology information for the design
+    scripts: ScriptInfo = None # script information for RAD Gen
+    project_name: str = None # name of project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them
     sweep_config_path: str = None # path to sweep configuration file containing design parameters to sweep
     result_search_path: str = None # path which will look for various output obj directories to parse results from
     asic_flow_settings: ASICFlowSettings = None # asic flow settings for single design
@@ -940,10 +986,12 @@ class AsicDSE:
             self.sram_compiler_settings = SRAMCompilerSettings()
             self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
             self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
-        elif self.sram_compiler_settings.config_out_path == None:
-            self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
-        elif self.sram_compiler_settings.rtl_out_path == None:
-            self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
+        if self.asic_flow_settings.hammer_tech_path is None:
+            self.asic_flow_settings.hammer_tech_path = os.path.join(self.common.hammer_home_path, "hammer", "technology")
+        # elif self.sram_compiler_settings.config_out_path == None and self.sram_compiler_settings.rtl_out_path != None:
+        #     self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
+        # elif self.sram_compiler_settings.rtl_out_path == None and self.sram_compiler_settings.config_out_path != None:
+        #     self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
 
 
 
@@ -2234,3 +2282,7 @@ class Ic3d:
     design_pdn: DesignPDN
 
 
+
+# To basically add forward declarations
+if __name__ == "__main__":
+    pass

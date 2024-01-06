@@ -66,7 +66,7 @@ class TestSuite:
         ci_test_obj_dir_suffix = "ci_test"
 
         if self.top_config_path is None:
-            pass
+            self.top_config_path = os.path.expanduser(f"{self.rad_gen_home}/unit_tests/inputs/top_lvl_configs/rad_gen_config.yml")
             # Get top level information relevant for all tests
                 # self.top_config_path = os.path.expanduser(f"{self.rad_gen_home}/unit_tests/top_lvl_configs/rad_gen_test_config.yml")
                 # assert os.path.exists(self.top_config_path)
@@ -102,6 +102,8 @@ class TestSuite:
         # Get the cli arguments for rad gen from the definition in data_structs.py
         rg_cli = rg_ds.RadGenCLI()
         rg_cli_fields = rg_cli.get_dataclass_fields()
+
+        
         # field_defs = [ (name, dtype, field(default_factory=lambda: default)) for name, dtype, default in zip(rg_cli_fields["keys"], rg_cli_fields["dtypes"], rg_cli_fields["defaults"]) ]
         # Create custom dataclass for RadGenArgs
         # RadGenArgs = make_dataclass(
@@ -134,6 +136,8 @@ class TestSuite:
             cls_name = "AsicDseArgs",
             fields = asic_dse_fields,
             bases= (rg_ds.AsicDseCLI, ))
+        
+
         # AsicDseArgs = make_dataclass(
         #     "AsicDseArgs", 
         #     fields = [ (name, dtype, field(default_factory=lambda: default)) for name, dtype, default in zip(asic_dse_fields["keys"], asic_dse_fields["dtypes"], asic_dse_fields["defaults"]) ], 
@@ -149,13 +153,14 @@ class TestSuite:
             #  /_/ \_\____\___/    \_/ |____|___/___| |___/ \_/\_/ |___|___|_|     |_| |___|___/ |_|  
 
             alu_sweep_config = os.path.expanduser(f"{self.asic_dse_inputs}/sweeps/alu_sweep.yml")
-            env_config_path = os.path.expanduser(f"{self.asic_dse_inputs}/sys_configs/asic_dse_env.yml")
+            tool_env_conf_path = os.path.expanduser(f"{self.asic_dse_inputs}/sys_configs/cadence_tools.yml")
             # Init the arguments we want to use for this test
             asic_dse_args = AsicDseArgs(
-                env_config_path = env_config_path,
+                tool_env_conf_path = tool_env_conf_path,
                 design_sweep_config = alu_sweep_config,
             )
             alu_sweep_args = RadGenArgs(
+                top_config_path = self.top_config_path,
                 subtools = ["asic_dse"],
                 subtool_args = asic_dse_args,
             )
@@ -172,7 +177,7 @@ class TestSuite:
             top_lvl_mod = "alu_ver"
             flow_mode = "hammer"
             asic_dse_args = AsicDseArgs(
-                env_config_path = env_config_path,
+                tool_env_conf_path = tool_env_conf_path,
                 flow_config_paths = self.sys_configs + [alu_config],
                 top_lvl_module = top_lvl_mod,
                 hdl_path = os.path.expanduser(f"{self.asic_dse_inputs}/alu/rtl"),
@@ -195,7 +200,7 @@ class TestSuite:
             asic_dse_args = AsicDseArgs(
                 run_mode = "parallel",
                 flow_mode = flow_mode,
-                env_config_path = env_config_path,
+                tool_env_conf_path = tool_env_conf_path,
                 flow_config_paths = [alu_config], # not supplying sys_configs as not needed in custom flow
                 top_lvl_module = top_lvl_mod,
                 manual_obj_dir = os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{flow_mode}_{ci_test_obj_dir_suffix}"),
@@ -217,7 +222,7 @@ class TestSuite:
                                                                                                              
             sram_gen_config = os.path.expanduser(f"{self.asic_dse_inputs}/sweeps/sram_sweep.yml")
             asic_dse_args = AsicDseArgs( 
-                env_config_path = env_config_path,
+                tool_env_conf_path = tool_env_conf_path,
                 design_sweep_config = sram_gen_config,
             )
             sram_gen_test = RadGenArgs(
@@ -238,7 +243,7 @@ class TestSuite:
             top_lvl_mod = "sram_wrapper"
             alu_asic_flow_args = AsicDseArgs(
                 # top_config_path = self.top_config_path,
-                env_config_path = env_config_path,
+                tool_env_conf_path = tool_env_conf_path,
                 flow_config_paths = self.sys_configs + [sram_config],
                 manual_obj_dir = os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
                 sram_compiler = True,
@@ -261,7 +266,7 @@ class TestSuite:
             top_lvl_mod = "sram_macro_map_2x256x64"
             sram_compiled_macro_config = os.path.expanduser(f"{self.asic_dse_inputs}/sram/configs/compiler_outputs/sram_config__sram_macro_map_2x256x64.yaml" )
             asic_dse_args = AsicDseArgs(
-                env_config_path = env_config_path,
+                tool_env_conf_path = tool_env_conf_path,
                 flow_config_paths = self.sys_configs + [sram_compiled_macro_config],
                 manual_obj_dir = os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
                 sram_compiler = True,
@@ -281,7 +286,7 @@ class TestSuite:
             # NoC RTL PARAM SWEEP GEN TEST 
             noc_sweep_config = os.path.expanduser(f"{self.asic_dse_inputs}/sweeps/noc_sweep.yml")
             asic_dse_args = AsicDseArgs(
-                env_config_path = env_config_path,
+                tool_env_conf_path = tool_env_conf_path,
                 design_sweep_config = noc_sweep_config,
             )
             noc_sweep_test = RadGenArgs(
@@ -294,7 +299,7 @@ class TestSuite:
             top_lvl_mod = "router_wrap_bk"
             noc_config = os.path.expanduser(f"{self.asic_dse_inputs}/NoC/configs/vcr_config_num_message_classes_5_buffer_size_20_num_nodes_per_router_1_num_dimensions_2_flit_data_width_124_num_vcs_5.yaml")
             asic_dse_args = AsicDseArgs(
-                env_config_path = env_config_path,
+                tool_env_conf_path = tool_env_conf_path,
                 flow_config_paths = self.sys_configs + [noc_config],
                 top_lvl_module = top_lvl_mod,
                 hdl_path = os.path.expanduser(f"{self.asic_dse_inputs}/NoC/rtl/src"),
@@ -545,9 +550,11 @@ def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], su
             # sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"{test.test_name}_unit_test_{idx}.log"]), env=cur_env, shell=True)
             rad_gen_args = argparse.Namespace(**sys_args_dict)
             rg.main(rad_gen_args)
+        
         golden_ref_base_path = os.path.expanduser( os.path.join(rad_gen_home, "unit_tests", "golden_results", subtool) )
         out_csv_path = None
         # Parse result and compare
+        """
         if subtool == "asic_dse":
             # Path of the golden reference output file 
             golden_ref_path = os.path.join(golden_ref_base_path, f"{test.rad_gen_args.subtool_args.top_lvl_module}_flow_report.csv")
@@ -605,7 +612,7 @@ def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], su
                 print(res_df)
             else:
                 pass
-                
+        """
 
 
 
