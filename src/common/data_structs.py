@@ -165,15 +165,15 @@ class DisplayablePath(object):
         return self.path.name
 
     @classmethod
-    def make_tree(cls: Type['DisplayablePath'], root: Path, parent: Optional['DisplayablePath'] = None, is_last: bool = False, criteria: Optional[Callable[[Any], bool]]=None) -> Generator['DisplayablePath', None, None]:
-        root = Path(str(root))
+    def make_tree(cls: Type['DisplayablePath'], path: Path, parent: Optional['DisplayablePath'] = None, is_last: bool = False, criteria: Optional[Callable[[Any], bool]]=None) -> Generator['DisplayablePath', None, None]:
+        path = Path(str(path))
         criteria = criteria or cls._default_criteria
 
-        displayable_root = cls(root, parent, is_last)
-        yield displayable_root
+        displayable_path = cls(path, parent, is_last)
+        yield displayable_path
 
         children = sorted(list(path
-                               for path in root.iterdir()
+                               for path in path.iterdir()
                                if criteria(path)),
                           key=lambda s: str(s).lower())
         count = 1
@@ -181,11 +181,11 @@ class DisplayablePath(object):
             is_last = count == len(children)
             if path.is_dir():
                 yield from cls.make_tree(path,
-                                         parent=displayable_root,
+                                         parent=displayable_path,
                                          is_last=is_last,
                                          criteria=criteria)
             else:
-                yield cls(path, displayable_root, is_last)
+                yield cls(path, displayable_path, is_last)
             count += 1
 
     @classmethod
@@ -233,50 +233,156 @@ class Tree:
     """
 
 
-    def __init__(self, root: str, subtrees: List['Tree'] = None, tag: str = None):
-        self.root : Union[str, None] = root
-        self.basename : Union[str, None] = os.path.basename(root) if root else None
+    def __init__(self, path: str, subtrees: List['Tree'] = None, tag: str = None, scan_dir: bool = False):
+        self.path : Union[str, None] = path
+        self.basename : Union[str, None] = os.path.basename(path) if path else None
         self.subtrees : Union[List['Tree'], None] = subtrees
         self.tag : Union[str, None] = tag
+        self.heir_tag: Union[str, None] = tag
         self.is_leaf : bool = False
+        self.scan_dir: bool = scan_dir # If true will scan the directory path and add any subdirectories to the tree
         
+        # to make sure update_subdir_paths isnt called multiple times for the same tree
+
         if self.subtrees == None:
             self.is_leaf = True
         else:
-            self.is_leaf = False
-    
-        if self.subtrees and root:
+            self.is_leaf = False    
+
+        # if tag not provided just use dir name
+        if self.tag == None:
+            self.tag = self.basename
+
+
+    def rec_add_existing_subtrees(self):
+        """
+            - Assuming the tree (self) has been constructed (dir exists)
+            This finds all the subdirectories which also currently exist (even if they are not present in the tree)
+            and will add them to the tree data structure
+
+            This fn is useful when you want to use a directory structure which may come from a third party.
+            This way when you search for a tag you can use the structure currently defined but if for some reason it changes, 
+            you would only need to update the tag being searched for rather than the entire Tree instantiation
+        """
+        # Create subtrees and append them
+        for subdir in os.listdir(self.path):
+            if os.path.isdir(os.path.join(self.path, subdir)):
+                self.subtrees.append(Tree(subdir))
+        # Now recursively call this function on all subtrees
+        if self.subtrees:
+            for subtree in self.subtrees:
+                subtree.rec_add_existing_subtrees()
+
+
+    def update_tree(self, parent: 'Tree' = None):
+        # Only would pass in a parent if doing something like adding a subtree to existing tree
+        if parent:
+            if parent.path:
+                self.path = os.path.join(parent.path, self.path)
+
+            if parent.tag:
+                self.heir_tag = f"{parent.tag}.{self.tag}" if self.tag else parent.tag
+
+        # before looking for subtrees do the scan dir functions
+        if self.scan_dir:
+            self.rec_add_existing_subtrees()
+
+        if self.subtrees and self.path:
             for subdir in self.subtrees:
                 # Recursively goes down all depths
-                self.update_subdir_paths(subdir, self.root)
+                self._update_subdir_paths(subdir, self.path, self.tag)
 
-    def update_subdir_paths(self, dir, parent_path):
+        # Now get a list of all leaves in tree and store\
+        # self.leaves = self.get_leafs()
+
+    def _update_subdir_paths(self, dir, parent_path, parent_tag):
         if parent_path:
-            dir.root = os.path.join(parent_path, dir.root)
+            dir.path = os.path.join(parent_path, dir.path)
 
+        if parent_tag:
+            dir.heir_tag = f"{parent_tag}.{dir.tag}" if dir.tag else parent_tag
+        
         if dir.subtrees:
             for subdir in dir.subtrees:
-                subdir.root = os.path.join(parent_path, subdir.root)
-                self.update_subdir_paths(subdir, subdir.root)
+                self._update_subdir_paths(subdir, dir.path, dir.heir_tag) #subdir.path
 
     def display_tree(self):
-        paths = DisplayablePath.make_tree(Path(self.root))
+        paths = DisplayablePath.make_tree(Path(self.path))
         for path in paths:
             print(path.displayable())
 
-    def search_subtrees(self, target_tag: str, target_depth: int = None):
+    def search_subtrees(self, target_tag: str, target_depth: int = None, is_hier_tag = False):
         result = []
-        self._search_subtrees(target_tag, target_depth, 0, result)
+        self._search_subtrees(target_tag, target_depth, 0, is_hier_tag, result)
+        if not result:
+            raise Exception(f"Tag {target_tag} not found in tree")
         return result
 
-    def _search_subtrees(self, target_tag, target_depth, current_depth, result):
+    def _search_subtrees(self, target_tag, target_depth, current_depth, is_hier_tag, result):
+        # set search tag
+        found_tag = self.tag if not is_hier_tag else self.heir_tag
+        
         # If we want to search all depths we set target depth to None
-        if (current_depth == target_depth or target_depth == None) and self.tag == target_tag:
-            result.append(self)
+        if (target_depth == None or current_depth == target_depth):
+            # For hier tags we do a substr search which is more useful
+            if not is_hier_tag:
+                if found_tag == target_tag:
+                    result.append(self)
+            else:
+                if target_tag in found_tag:
+                    result.append(self)
 
-        if self.subtrees and (current_depth < target_depth or target_depth == None):
+        if self.subtrees and (target_depth == None or current_depth < target_depth):
             for subtree in self.subtrees:
-                subtree._search_subtrees(target_tag, target_depth, current_depth + 1, result)
+                subtree._search_subtrees(target_tag, target_depth, current_depth + 1, is_hier_tag, result)
+    
+
+    def append_tagged_subtree(self, tag: str, subtree: 'Tree', is_hier_tag: bool = False):        
+        # find subtree in question
+        found_subtree = self.search_subtrees(tag, is_hier_tag = is_hier_tag)[0]
+        # update the subtree paths to reflect its new placement
+        subtree.update_tree(parent = found_subtree )
+        if len(self.search_subtrees(tag, is_hier_tag = is_hier_tag)) > 0:
+            if found_subtree.subtrees:
+                found_subtree.subtrees.append(subtree)
+            else:
+                # As it had no children we need to make it a non leaf
+                found_subtree.is_leaf = False
+                found_subtree.subtrees = [subtree]
+        else:
+            raise Exception(f"Tag {tag} not found in tree")
+
+    # def replace_tagged_subtree(self, tag: str, subtree: 'Tree'):
+    #     if len(self.search_subtrees(tag)) > 0:
+    #         self.search_subtrees(tag)[0] = subtree
+    #     else:
+    #         raise Exception(f"Tag {tag} not found in tree")        
+
+
+    # def get_leafs(self):
+    #     if self.is_leaf:
+    #         return [self]
+    #     else:
+    #         leaves = []
+    #         for subtree in self.subtrees:
+    #             leaves += subtree.get_leafs()
+    #         return leaves
+        
+    def create_tree(self):
+        if self.is_leaf:
+            # os.makedirs(self.path, exist_ok = True)
+            print(self.path)
+            return
+
+        for subtree in self.subtrees:
+            subtree.create_tree()
+        
+        # update list of leaves if anything was changed since construction
+        # self.leaves = self.get_leafs()
+        # Create the tree by iterating over all leaf paths (makedirs will make all directories to the target)
+        # for leaf in self.leaves:
+        #     # os.makedirs(leaf.path, exist_ok = True)
+        #     print(leaf.path)        
 
 
 # Accessing the directory structure like a dictionary
@@ -332,9 +438,11 @@ class Common:
 
     # All user input fields which exist in a dynamic dataclass, and originate from CommonCLI
     args: Any = None 
+
     # Paths
     rad_gen_home_path: str = None
     hammer_home_path: str = None
+    hammer_tech_path: str = None
     # openram_home_path: str = None
     # Logging
     log_fpath: str = f"rad-gen-{create_timestamp()}.log" # path to log file for current RAD Gen run
@@ -345,11 +453,13 @@ class Common:
     # 2 - Hammer and asic tool outputs will be printed to console 
     log_verbosity: int = 1 # verbosity level for log file 
 
-    # obj_dir : str = None # path to obj directory for current RAD Gen run
+    obj_dir : str = None # path to obj directory for current RAD Gen run
     
     # Input / Output directory structures
-    input_tree_top: Tree = None
-    output_tree_top: Tree = None
+    project_tree: Tree = None
+
+    project_name: str = None # Name of the RAD-Gen project
+
 
     # ASIC-DSE
     # Directory structure for asic-dse hammer asic flow
@@ -483,8 +593,10 @@ class CommonCLI(ParentCLI):
         GeneralCLI(key = "top_config_path", shortcut = "-tc", datatype = str, help_msg = "path to (optional) RAD-GEN top level config file"),
         GeneralCLI(key = "use_latest_obj_dir", shortcut = "-l", datatype = bool, action = "store_true", help_msg = "Uses latest obj / work dir found in the respective output dir"),
         GeneralCLI(key = "manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj dir"),
-        GeneralCLI(key = "input_tree_top_path", shortcut = "-itree", datatype = str, help_msg = "path to top level dir containing input designs"),
-        GeneralCLI(key = "output_tree_top_path", shortcut = "-otree", datatype = str, help_msg = "path to top level dir which outputs will be produced into, will have a subdir for each subtool"),
+        GeneralCLI(key = "project_name", shortcut = "-n", datatype = str, help_msg = "Name of Project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them"),
+        # GeneralCLI(key = "input_tree_top_path", shortcut = "-itree", datatype = str, help_msg = "path to top level dir containing input designs"),
+        # GeneralCLI(key = "output_tree_top_path", shortcut = "-otree", datatype = str, help_msg = "path to top level dir which outputs will be produced into, will have a subdir for each subtool"),
+
     ])
     arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [ 
         {"key": "use_latest_obj_dir", 
@@ -524,8 +636,9 @@ class RadGenCLI(ParentCLI):
         GeneralCLI(key = "top_config_path", shortcut = "-tc", datatype = str, help_msg = "path to (optional) RAD-GEN top level config file"),
         GeneralCLI(key = "use_latest_obj_dir", shortcut = "-l", datatype = bool, action = "store_true", help_msg = "Uses latest obj / work dir found in the respective output dir"),
         GeneralCLI(key = "manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj dir"),
-        GeneralCLI(key = "input_tree_top_path", shortcut = "-itree", datatype = str, help_msg = "path to top level dir containing input designs", default_val = os.path.expanduser(f"{os.environ['RAD_GEN_HOME']}/unit_tests/inputs")),
-        GeneralCLI(key = "output_tree_top_path", shortcut = "-otree", datatype = str, help_msg = "path to top level dir which outputs will be produced into, will have a subdir for each subtool", default_val = os.path.expanduser(f"{os.environ['RAD_GEN_HOME']}/unit_tests/outputs")),
+        GeneralCLI(key = "project_name", shortcut = "-n", datatype = str, help_msg = "Name of Project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them"),
+        # GeneralCLI(key = "input_tree_top_path", shortcut = "-itree", datatype = str, help_msg = "path to top level dir containing input designs", default_val = os.path.expanduser(f"{os.environ['RAD_GEN_HOME']}/unit_tests/inputs")),
+        # GeneralCLI(key = "output_tree_top_path", shortcut = "-otree", datatype = str, help_msg = "path to top level dir which outputs will be produced into, will have a subdir for each subtool", default_val = os.path.expanduser(f"{os.environ['RAD_GEN_HOME']}/unit_tests/outputs")),
     ])
     arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [ 
         {"key": "top_config_path", 
@@ -614,7 +727,7 @@ class AsicDseCLI(ParentCLI):
         Command line interface settings for asic-dse subtool
     """
     cli_args: List[GeneralCLI] = field(default_factory = lambda: [
-        GeneralCLI(key = "tool_env_conf_path", shortcut = "-e", datatype = str, help_msg = "Path to hammer environment configuration file"),
+        GeneralCLI(key = "tool_env_conf_paths", shortcut = "-e", datatype = str, nargs = "*", help_msg = "Path to hammer environment configuration file (used to specify industry tool paths + licenses)"),
         GeneralCLI(key = "design_sweep_config", shortcut = "-s", datatype = str, help_msg = "Path to design sweep config file"),
         # RUN MODE
         GeneralCLI(key = "run_mode", shortcut = "-r", datatype = str, choices = ["serial", "parallel", "gen_scripts"], default_val = "serial", help_msg = "Specify if flow is run in serial or parallel for sweeps"),
@@ -623,7 +736,6 @@ class AsicDseCLI(ParentCLI):
         GeneralCLI(key = "top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
         GeneralCLI(key = "hdl_path", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
         GeneralCLI(key = "flow_conf_paths", shortcut = "-p", datatype = str, nargs = "*", help_msg = "Paths to flow config files, these can be either custom or hammer format"),
-        GeneralCLI(key = "project_name", shortcut = "-n", datatype = str, help_msg = "Name of Project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them"),
         # GeneralCLI(key = "use_latest_obj_dir", shortcut = "-l", action = "store_true", help_msg = "Uses latest obj / work dir found in the respective output_design_files/<top_module> dir"),
         # GeneralCLI(key = "use_manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj / work dir"),
         GeneralCLI(key = "compile_results", shortcut = "-c", datatype = bool, action = "store_true", help_msg = "Flag to compile results related a specific asic flow or sweep depending on additional provided configs"),
@@ -636,8 +748,7 @@ class AsicDseCLI(ParentCLI):
         GeneralCLI(key = "tech.name", datatype= str, help_msg = "Name of tech lib for use with Cadence Virtuoso", default_val = "asap7"),
         GeneralCLI(key = "tech.cds_lib", datatype= str, help_msg = "Name of cds lib for use with Cadence Virtuoso", default_val = "asap7_TechLib"),
         GeneralCLI(key = "tech.pdk_rundir_path", datatype= str, help_msg = "Path to rundir of pdk being used for Cadence Virtuoso"),
-
-
+        GeneralCLI(key = "scripts.virtuoso_setup_path", datatype= str, help_msg = "Path to env setup script for virtuoso environment"),
     ] )
     arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [
         { "shortcut": "-e", "key": "env_config_path", "help_msg": "Path to hammer environment configuration file", "datatype": str },
@@ -817,7 +928,6 @@ class ScriptInfo:
     virtuoso_setup_path: str = None
 
 
-
 @dataclass 
 class ASICFlowSettings:
     """ 
@@ -826,14 +936,11 @@ class ASICFlowSettings:
         - flow stage information
     """
     
-
-    # Directory structure for hammer repo 
-    hammer_tech_path: str = None 
-    # Moved to here
+    # Hammer Info
     hammer_env_paths: List[str] = None # paths to hammer environment file containing absolute paths to asic tools and licenses
-    # Hammer Driver Path
     hammer_cli_driver_path: str = None # path to hammer driver
     hammer_driver: HammerDriver = None # hammer settings
+    
     # Replace design_config with hammer_driver 
     #design_config : Dict[str, Any] = None # Hammer IR parsable configuration info
     
@@ -978,16 +1085,20 @@ class AsicDSE:
     asic_flow_settings: ASICFlowSettings = None # asic flow settings for single design
     custom_asic_flow_settings: Dict[str, Any] = None # custom asic flow settings
     design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
-    sram_compiler_settings: SRAMCompilerSettings = None
+    sram_compiler_settings: SRAMCompilerSettings = None # paths related to SRAM compiler outputs
     def __post_init__(self):
-        # Post inits required for structs that use other struct values as inputs and cannot be clearly defined
-        self.tech_info.sram_lib_path = os.path.join(self.env_settings.hammer_tech_path, self.tech_info.name, "sram_compiler", "memories")
+        # Post inits required for structs that use other strut values as inputs and cannot be clearly defined
+        self.tech.sram_lib_path = self.common.project_tree.search_subtrees(f"hammer.{self.tech.name}.sram_compiler.memories", is_hier_tag=True)[0].path #os.path.join(self.env_settings.hammer_tech_path, self.tech_info.name, "sram_compiler", "memories")
+        # TODO add user defined paths for sram compiler outputs in CLI (in case users want to send them somewhere else)
         if self.sram_compiler_settings is None:
             self.sram_compiler_settings = SRAMCompilerSettings()
-            self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
-            self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
-        if self.asic_flow_settings.hammer_tech_path is None:
-            self.asic_flow_settings.hammer_tech_path = os.path.join(self.common.hammer_home_path, "hammer", "technology")
+            self.sram_compiler_settings.config_out_path = self.common.project_tree.search_subtrees(f"sram.compiler.configs.gen", is_hier_tag=True)[0].path #os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
+            self.sram_compiler_settings.rtl_out_path = self.common.project_tree.search_subtrees(f"sram.compiler.rtl.gen", is_hier_tag=True)[0].path #os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
+        
+        
+        # if self.asic_flow_settings.hammer_tech_path is None:
+        #     self.asic_flow_settings.hammer_tech_path = os.path.join(self.common.hammer_home_path, "hammer", "technology")
+
         # elif self.sram_compiler_settings.config_out_path == None and self.sram_compiler_settings.rtl_out_path != None:
         #     self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
         # elif self.sram_compiler_settings.rtl_out_path == None and self.sram_compiler_settings.config_out_path != None:

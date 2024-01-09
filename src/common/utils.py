@@ -14,6 +14,8 @@ import shapely as sh
 from dataclasses import fields, field
 
 from pathlib import Path
+import copy
+
 
 #Import hammer modules
 import vlsi.hammer.hammer.config as hammer_config
@@ -21,6 +23,8 @@ from vlsi.hammer.hammer.vlsi.hammer_vlsi_impl import HammerVLSISettings
 from vlsi.hammer.hammer.vlsi.driver import HammerDriver
 import vlsi.hammer.hammer.tech as hammer_tech
 from vlsi.hammer.hammer.config import load_config_from_string
+from vlsi.hammer.hammer.vlsi.cli_driver import dump_config_to_json_file
+
 
 # RAD-Gen modules
 import src.common.data_structs as rg_ds
@@ -419,6 +423,26 @@ def sanitize_config(config_dict: Dict[str, Any], validate_paths: bool = True) ->
 
     return traverse_nested_dict(config_dict, sanitize_element, validate_paths)
 
+def parse_config(conf_path: str, validate_paths: bool = True, sanitize: bool = True):
+    is_yaml = None
+    if conf_path.endswith(".yaml") or conf_path.endswith(".yml"):
+        is_yaml = True
+    elif conf_path.endswith(".json"):
+        is_yaml = False
+    else:
+        raise ValueError(f"ERROR: config file {conf_path} is not a yaml or json file")
+
+    if sanitize:
+        conf_dict = sanitize_config( 
+            load_config_from_string(Path(conf_path).read_text(), is_yaml=is_yaml, path=str(Path(conf_path).resolve().parent)),
+            validate_paths)
+    else:
+        conf_dict = sanitize_config( 
+            load_config_from_string(Path(conf_path).read_text(), is_yaml=is_yaml, path=str(Path(conf_path).resolve().parent)),
+            validate_paths
+        )
+    return conf_dict
+
 def parse_yml_config(yaml_file: str, validate_paths: bool = True) -> dict:
     """
         Takes in possibly unsafe path and returns a sanitized config
@@ -726,6 +750,25 @@ def merge_cli_and_config_args(cli: Dict[str, Any], config: Dict[str, Any], defau
 
 
 
+
+def strip_hier(in_dict: Dict[str, Any], strip_tag: str = None) -> Dict[str, Any]:
+    """
+        Removes heirarchy from keys in a dictionary
+        - If strip_tag is provided then only keys which contain the strip_tag will be stripped
+    """
+    strip_tag_re = re.compile(f".*{strip_tag}\.")
+    out_dict = {}
+    for k, v in in_dict.items():
+        if strip_tag != None:
+            if strip_tag in k:
+                out_dict[strip_tag_re.sub("", k)] = v
+            else:
+                out_dict[k] = v
+        else:
+            out_dict[strip_tag_re.sub("", k)] = v            
+    return out_dict
+
+
 def modify_param_dict_keys_for_hier(in_dict: Dict[str, Any], subtool: str):
     global asic_dse_cli
     global coffe_cli
@@ -793,15 +836,8 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
             result_conf = cli_dict
         
         # Only passing in keys from common, removing heirarchy from keys to make things more clear in function
-        common = init_common_structs({ k.replace("common.","") : v for k,v in result_conf.items() if "common" in k})
-         
-        # Do some post processing conversions on the common structs to be relevant to each subtool
-        # Search for the subtool tag in the output dir tree & set the subtool output_tree top to that dir
-        subtool_dirs: List = common.output_tree_top.search_subtrees(subtool, 1)
-        if len(subtool_dirs) > 1 or len(subtool_dirs) == 0:
-            raise ValueError(f"ERROR: '{subtool}' is not a unique tag in the output dir tree (or doesnt exist)")
-        elif len(subtool_dirs) == 1:
-            common.output_tree_top = subtool_dirs[0]
+        common = init_common_structs(strip_hier(result_conf, strip_tag="common"))
+            # { k.replace("common.","") : v for k,v in result_conf.items() if "common" in k})
 
         subtool_confs[subtool] = {
             "common": common,
@@ -816,13 +852,15 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
     for subtool in subtool_confs.keys():
         fn_to_call = getattr(sys.modules[__name__], f"init_{subtool}_structs", None)
         if callable(fn_to_call):
-            rad_gen_info[subtool] = fn_to_call(subtool_confs[subtool]) 
+            # do the renaming of keys to take out the "<subtool>." portion of heirarchy, this is because by definition all keys that are passed in are only for the respective subtool
+            # (subtools are independant of one another), and the common dataclass is passed through the "common" key
+            rad_gen_info[subtool] = fn_to_call( {k.replace(f"{subtool}.","") : v for k,v in subtool_confs[subtool].items()} ) 
         else:
             raise ValueError(f"ERROR: {subtool} is not a valid subtool ('init_{subtool}_structs' is not a defined function)")
     return rad_gen_info
     
 
-def init_asic_config(design_input_tree: rg_ds.Tree, design_output_tree: rg_ds.Tree, conf_path: str) -> str:
+def init_asic_config(conf_tree: rg_ds.Tree, conf_path: str) -> str:
     """
         This function is specifically to clean up the configs passed to hammer prior to initialization of the
         ASICFlowSettings data structure.
@@ -830,26 +868,31 @@ def init_asic_config(design_input_tree: rg_ds.Tree, design_output_tree: rg_ds.Tr
     """
     # Generate the directories using the structure specifed in env
     # Use the path of the config file to determine where they are created
-    conf_dir = os.path.dirname(conf_path)
-    conf_name = os.path.basename(os.path.splitext(conf_path)[0])
-    # Will use the structure contained in tag "config" and create its subdirs wherever user input config file(s) are located
-    conf_tree = design_input_tree.search_subtrees("config")[0]
-    for dir in conf_tree.subtrees:
-        os.makedirs(os.path.join(conf_dir, dir.root), exist_ok=True)
+    # conf_dir = os.path.dirname(conf_path)
+    # # Will use the structure contained in tag "config" and create its subdirs wherever user input config file(s) are located
+    # conf_tree = design_input_tree.search_subtrees("config")[0]
+    # for dir in conf_tree.subtrees:
+    #     os.makedirs(os.path.join(conf_dir, dir.root), exist_ok=True)
 
-    mod_dir = conf_tree.search_subtrees("mod")[0].basename
     # Our yaml parsing function performs santization, there may be invalid paths so we don't want to look for them
-    conf_dict = parse_yml_config(conf_path, validate_paths = False)
-    conf_out_path = os.path.join(conf_dir, mod_dir, conf_name + "_pre_proc.yml" )
-    with open(conf_out_path, "w" ) as f:
-        yaml.safe_dump(conf_dict, f, sort_keys = False)
+    # conf_dict = parse_yml_config(conf_path, validate_paths = False)
+    # conf_out_path = os.path.join(conf_dir, mod_dir, conf_name + "_pre_procd.yml" )
+    # with open(conf_out_path, "w" ) as f:
+    #     yaml.safe_dump(conf_dict, f, sort_keys = False)
 
-    return conf_out_path
+
+    conf_fname = os.path.basename(os.path.splitext(conf_path)[0])
+    conf_dict = parse_config(conf_path, validate_paths = False, sanitize = True)
+    mod_confs_dpath = conf_tree.search_subtrees("mod")[0].path
+    conf_out_fpath = os.path.join(mod_confs_dpath, conf_fname + "_pre_procd.json")
+    dump_config_to_json_file(conf_out_fpath, conf_dict)
+    
+    return conf_out_fpath
 
 
 
 def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
-    common_inputs = { }
+    common_inputs = copy.deepcopy(common_conf)
     rad_gen_home = os.environ.get("RAD_GEN_HOME")
     if rad_gen_home is None:
         raise RuntimeError("RAD_GEN_HOME environment variable not set, please source <rad_gen_top>/env_setup.sh")
@@ -872,33 +915,35 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
     # we will use the keys/dir names which are descriptive of thier purpose
 
     # Setup input and output directory structures instantiated under <rad_gen_home>
-    common_inputs["input_tree_top"] = rg_ds.Tree(  
-        os.path.join(rad_gen_home, common_conf["input_tree_top_path"]),
-        [
-            rg_ds.Tree(root="asic_dse", 
-                subtrees=[
-                    rg_ds.Tree("sys_configs")
-                ],
-                tag="asic_dse"),
-            rg_ds.Tree(root="coffe", tag="coffe"),
-            rg_ds.Tree(root="ic_3d", tag="ic_3d"),
-        ]
-    )
+    # common_inputs["input_tree_top"] = rg_ds.Tree(  
+    #     os.path.join(rad_gen_home, common_conf["input_tree_top_path"]),
+    #     [
+    #         rg_ds.Tree(root="asic_dse", 
+    #             subtrees=[
+    #                 rg_ds.Tree("sys_configs")
+    #             ],
+    #             tag="asic_dse"),
+    #         rg_ds.Tree(root="coffe", tag="coffe"),
+    #         rg_ds.Tree(root="ic_3d", tag="ic_3d"),
+    #     ]
+    # )
     # The above may look confusing as we are naming root & tag the same but the idea is that we decouple the directory name with its function
     # So we follow this convension to set tags for thier usage
 
-    common_inputs["output_tree_top"] = rg_ds.Tree(  
-        os.path.join(rad_gen_home, common_conf["output_tree_top_path"]),
-        [
-            rg_ds.Tree(root="asic_dse", tag="asic_dse"),
-            rg_ds.Tree(root="coffe", tag="coffe"),
-            rg_ds.Tree(root="ic_3d", tag="ic_3d"),
-        ]
-    )
+    # common_inputs["output_tree_top"] = rg_ds.Tree(  
+    #     os.path.join(rad_gen_home, common_conf["output_tree_top_path"]),
+    #     [
+    #         rg_ds.Tree(root="asic_dse", tag="asic_dse"),
+    #         rg_ds.Tree(root="coffe", tag="coffe"),
+    #         rg_ds.Tree(root="ic_3d", tag="ic_3d"),
+    #     ]
+    # )
+
     common_inputs["log_fpath"] = os.path.join(rad_gen_home, "logs", "rad_gen.log")
     # For now on our output path fields we need to manually generate the directories and files specified
     # This ensures that our function to check for valid paths will not fail
     # TODO have the <_>Args dynamic dataclass have fields for each argument which specifies relevant information
+    
     for out_path_key in ["log_fpath"]:
         os.makedirs(os.path.dirname(common_inputs[out_path_key]), exist_ok = True)
         # write to log to create empty file and not piss off the path checker
@@ -908,6 +953,7 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
 
     design_input_trees = {}
     design_output_trees = {}
+    """
     # Input dir structure for asic-dse asic flow, instantiated under <user_defined_design_name> dir under "asic_dse" in input tree
     design_input_trees["asic_dse"] = rg_ds.Tree(
         # No root here as this structure exists for each user defined design
@@ -941,7 +987,7 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
             rg_ds.Tree("custom"),
         ]
     )
-
+    """
     # asic_input_tree_struct.__init__(os.path.join(top_input_path, asic_dse, user_defined_design), asic_input_tree_struct.subtrees)
     # Coffe does not necessarily have an input tree, as it only requires configuration files
 
@@ -958,6 +1004,58 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
     #     "CommonArgs",
     #     common_cli.get_dataclass_fields(is_cli = True),
     # )
+
+    """
+        The idea of the below project tree dir structure is that we copy all the relevant files (yuck) into the project dir so we can access them easily
+        - This allows for the user to specify files which may be located across many different places and they will all be condensed to a single place
+            - It should check to make sure the files are not already in the project directory before copying them
+            - Ideally the project tree should be a workspace that can be used for development of RTL or other stuff and that way there isnt a ton of copying
+            
+    """
+    common_inputs["project_tree"] = rg_ds.Tree(
+        rad_gen_home,
+        [
+            # Resources that could be shared across multiple tools are put here, this could be technology models, pdk collateral, sram_macros, etc      
+            rg_ds.Tree("shared_resources",
+                [
+                    # The idea for this section is that Pdks come in many forms with different structures but most of the time we need a few specific files
+                    # So for each new PDK a user will have to parse the directory structure and copy the files into this directory.
+
+                    # I think this is going to be the easiest way to make sure that the stuff we need to use for various tools is findable
+                    rg_ds.Tree("pdks", 
+                            # Maybe include sym links to pdks being used here?
+                            # rg_ds.Tree("tx_models", tag="tx_model"),
+                            # rg_ds.Tree("sram", tag="sram"),
+                        tag="pdks"),
+                    # Configs which different runs of subtools may need to share
+                    rg_ds.Tree("configs", tag="configs"),
+                    # Ex. for asic_dse regardless of design you may share the hammer config for cadence_tools or a specific pdk
+                ],
+                tag="shared_resource"),
+            rg_ds.Tree("projects",
+                # Whatever subtool is run will add to this tree (maybe creating directories in the configs/output/project dirs relevant to whatever its doing)
+                [
+                    rg_ds.Tree(common_conf["project_name"],
+                        [
+                            rg_ds.Tree("configs", tag = "configs"),
+                            rg_ds.Tree("outputs", tag = "outputs"),
+                        ], tag = f"{common_conf['project_name']}"
+                    )
+                ], tag = "projects"
+            ),
+            rg_ds.Tree("third_party", 
+                [  
+                    rg_ds.Tree("hammer", scan_dir = True, tag = "hammer_repo"),
+                    rg_ds.Tree("pdks", scan_dir = True, tag = "pdks"),
+                ],tag = "third_party"
+            ),
+        ],
+        tag = "top"
+    )
+
+    common_inputs["project_tree"].update_tree()
+    # Create the directory tree
+    # common_inputs["project_tree"].create_tree()
 
     common_inputs["args"] = rg_ds.RadGenArgs(**common_conf)
     common = init_dataclass(rg_ds.Common, common_inputs)
@@ -985,43 +1083,182 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     #     output_tree_top_path = clean_path(asic_dse_conf["output_tree_top_path"])
     
     # Input dir structure for asic-dse asic flow, instantiated under <user_defined_design_name> dir under "asic_dse" in input tree
+
+    # hammer_obj_dir_tree = rg_ds.Tree()
+
+
+
+    # spice_dir_tree = rg_ds.Tree(
+
+    # )
+
+
+    configs_tree = rg_ds.Tree("asic_dse", 
+        [
+            rg_ds.Tree("sweeps", tag="sweep"),
+            rg_ds.Tree("gen", tag="gen"),
+            rg_ds.Tree("mod", tag="mod"),
+        ], tag = "asic_dse"
+    )
+
+    rtl_tree = rg_ds.Tree("rtl", 
+        [
+            rg_ds.Tree("gen", tag="gen"),
+            rg_ds.Tree("src", tag="src"),
+            rg_ds.Tree("include", tag="inc"),
+            rg_ds.Tree("verif", tag="verif"),
+            rg_ds.Tree("build", tag="build"),
+        ], tag = "rtl"
+    )
+
+
+    design_out_tree = rg_ds.Tree(asic_dse_conf["top_lvl_module"],
+            [
+                rg_ds.Tree("hammer", 
+                    [
+                        # Obj directories exist here
+                        rg_ds.Tree("obj_dirs", tag="obj_dirs"),
+                        # Guessing there should be a place to put high level reports / logs / scripts (by high level I mean not specific to a single obj dir)
+                        rg_ds.Tree("reports", tag="report"),
+                        rg_ds.Tree("scripts", tag="script"),
+                        rg_ds.Tree("logs", tag="logs"),
+                    ],
+                    tag="hammer"
+                ),
+                # Obj directories exist here
+                rg_ds.Tree("custom", tag="custom") # TODO
+                # Obj directories exist here
+            ], tag="top_lvl_mod"
+        )
+
+
+
+    # Create a copy of the conf tree with name configs to use for sram_compiler
+    conf_tree_copy = copy.deepcopy(configs_tree)
+    conf_tree_copy.path = "configs"
+    conf_tree_copy.tag = "configs"
+    # TODO move tech class to PDK class in common (regardless of subtool we need to create PDK dir for collaterol)
+
+    pdk_tree = rg_ds.Tree(f"{asic_dse_conf['tech.name']}",
+        [
+            rg_ds.Tree("tx_models", tag="tx_model"), # Stores tx model files (.sp)
+            rg_ds.Tree("sram", 
+                [   
+                    rg_ds.Tree("compiler", 
+                        [
+                            conf_tree_copy,
+                            copy.deepcopy(rtl_tree),
+                        ],
+                        tag = "compiler"
+                    )
+                ], tag="sram"
+            ),
+        ]
+    )
+
+    # updating project tree from common
+    asic_dse_conf["common"].project_tree.append_tagged_subtree("configs", copy.deepcopy(configs_tree)) # append asic_dse specific conf tree to the project conf tree
+    # asic_dse_conf["common"].project_tree.append_tagged_subtree("outputs", design_out_tree) # append our asic_dse outputs
+    asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}", rtl_tree) # add rtl to the project tree
+    asic_dse_conf["common"].project_tree.append_tagged_subtree("shared_resource.configs", copy.deepcopy(configs_tree), is_hier_tag = True) # append our shared configs tree to the project tree
+    # shared_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees("resources.configs", is_hier_tag= True)[0] # search for the shared configs
+    # shared_conf_tree.append_tagged_subtree("shared_configs", copy.deepcopy(configs_tree)) # inside of shared configs and append our shared configs to it
+    asic_dse_conf["common"].project_tree.append_tagged_subtree("shared_resource.pdks", pdk_tree, is_hier_tag = True) # append our pdk tree to the project tree
+
+    asic_dse_conf["common"].project_tree.create_tree()
+
+
+
+    """
     design_input_tree = rg_ds.Tree(
         asic_dse_conf["common"].input_tree_top.root,
         [
+            # Resources that could be shared across multiple tools are put here, this could be technology models, pdk collateral, sram_macros, etc      
+            rg_ds.Tree("resources",
+                [
+                    # The idea for this section is that Pdks come in many forms with different structures but most of the time we need a few specific files
+                    # So for each new PDK a user will have to parse the directory structure and copy the files into this directory.
+
+                    # I think this is going to be the easiest way to make sure that the stuff we need to use for various tools is findable
+                    rg_ds.Tree("pdks", 
+                        [
+                            rg_ds.Tree("tx_models", tag="tx_model"),
+                        ],
+                        tag="pdk"),
+                ],
+                tag="resource"),
             rg_ds.Tree("projects",
                 [
                     rg_ds.Tree(asic_dse_conf["project_name"],
-                    [
-                        rg_ds.Tree("configs", 
-                            [
-                                rg_ds.Tree("gen", tag="gen"),
-                                rg_ds.Tree("mod", tag="mod"),
-                            ],
-                            tag = "config"),
-                        rg_ds.Tree("rtl", 
-                            [
-                                rg_ds.Tree("gen", tag="gen"),
-                                rg_ds.Tree("src", tag="src"),
-                                rg_ds.Tree("include", tag="inc"),
-                                rg_ds.Tree("verif", tag="verif"),
-                                rg_ds.Tree("build", tag="build"),
-                            ]),
-                    ])
-                ]
+                        [
+                            rg_ds.Tree("configs", 
+                                [
+                                    rg_ds.Tree("gen", tag="gen"),
+                                    rg_ds.Tree("mod", tag="mod"),
+                                ], tag = "config"
+                            ),
+                            rg_ds.Tree("rtl", 
+                                [
+                                    rg_ds.Tree("gen", tag="gen"),
+                                    rg_ds.Tree("src", tag="src"),
+                                    rg_ds.Tree("include", tag="inc"),
+                                    rg_ds.Tree("verif", tag="verif"),
+                                    rg_ds.Tree("build", tag="build"),
+                                ], tag = "rtl"
+                            ),
+                            rg_ds.Tree("outputs",
+                                [
+                                    rg_ds.Tree("stdcell",
+                                        [
+                                            rg_ds.Tree(asic_dse_conf["top_lvl_module"],
+                                                [
+                                                    rg_ds.Tree("hammer", None, tag="hammer"),
+                                                    # Obj directories exist here
+                                                    rg_ds.Tree("custom", None, tag="custom")
+                                                    # Obj directories exist here
+                                                ], tag="top_lvl_mod"
+                                            )
+                                        ]
+                                    ),
+                                    rg_ds.Tree("custom_circuits",
+                                        [
+                                            rg_ds.Tree("3D", tag="3D"),
+                                            rg_ds.Tree("fpga_arch", tag="fpga_arch")
+                                        ]
+                                    )
+                                ], tag = "output"
+                            )
+                        ], tag = f"{asic_dse_conf['project_name']}"
+                    )
+                ], tag = "projects"
             )
-        ]
+                # ], tag = "asic_dse"
+            # )
+        ],
+        tag = "top"
     )
-    design_output_tree = rg_ds.Tree(
-        asic_dse_conf["common"].output_tree_top.root,
-        [
-            rg_ds.Tree("hammer", 
-                [
-                    rg_ds.Tree("scripts", tag="script"), # scripts to run hammer flow in parallel 
-                    rg_ds.Tree("obj_dir", tag="obj"), # hammer obj dir, will contain all outputs/scripts/reports from flow
-                ], tag="hammer"),
-            rg_ds.Tree("custom"),
-        ]
-    )
+    """
+
+    # design_output_tree = rg_ds.Tree(
+    #     asic_dse_conf["common"].output_tree_top.root,
+    #     [
+    #         rg_ds.Tree("asic_dse",
+    #             [
+    #                 rg_ds.Tree("projects")
+    #                 rg_ds.Tree("hammer", 
+    #                     [
+    #                         rg_ds.Tree("scripts", tag="script"), # scripts to run hammer flow in parallel 
+    #                         rg_ds.Tree("obj_dir", tag="obj"), # hammer obj dir, will contain all outputs/scripts/reports from flow
+    #                     ], tag="hammer"),
+    #                 rg_ds.Tree("custom"),
+    #             ]
+    #         )
+    #     ]
+    # )
+
+    # Create the above trees
+    #design_input_tree.create_tree()
+    #design_output_tree.create_tree()
 
 
     """
@@ -1046,8 +1283,9 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
         if "tech" in env_conf.keys():
             tech_info = init_dataclass(rg_ds.StdCellTechInfo, env_conf["tech"], {})
     """
-    
-    # tech_info = ini 
+    # tech_inputs = {k.replace("tech.",""):v for k,v in asic_dse_conf.items() if "tech." in k}
+    tech = init_dataclass(rg_ds.StdCellTechInfo, strip_hier(asic_dse_conf, strip_tag="tech"))
+    scripts = init_dataclass(rg_ds.ScriptInfo, strip_hier(asic_dse_conf, strip_tag="scripts"))
 
     # Initialize optional parameters
     custom_asic_flow_settings = None
@@ -1074,9 +1312,10 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
         
         sweep_config = parse_yml_config(asic_dse_conf["design_sweep_config"])
 
+
         high_lvl_inputs["sweep_config_path"] = asic_dse_conf["design_sweep_config"]
         # By default set the result search path to the design output path, possibly could be changed in later functions if needed
-        high_lvl_inputs["result_search_path"] = asic_dse_conf["common"].output_tree_top.root
+        high_lvl_inputs["result_search_path"] = asic_dse_conf["common"].project_tree.search_subtrees(f'{asic_dse_conf["common"].project_name}.outputs', is_hier_tag = True)[0].path
         
         for design in sweep_config["designs"]:
             sweep_type_inputs = {} # parameters for a specific type of sweep
@@ -1102,11 +1341,14 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
         design_sweep_infos = None
 
 
-        if asic_dse_conf["flow_config_paths"] != None:
+        if asic_dse_conf["flow_conf_paths"] != None:
+            # search for conf tree below in our project_name dir
+            proj_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees(f"{asic_dse_conf['common'].project_name}.configs.asic_dse", is_hier_tag = True)[0] 
+
             # Before parsing asic flow config we should run them through pre processing thats general to all input files
-            for idx, conf_path in enumerate(asic_dse_conf["flow_config_paths"]):
-                asic_dse_conf["flow_config_paths"][idx] = init_asic_config(design_input_tree, design_output_tree, conf_path) #init_asic_config(env_settings, asic_dse_conf["flow_config_paths"][idx])
-            
+            for idx, conf_path in enumerate(asic_dse_conf["flow_conf_paths"]):
+                asic_dse_conf["flow_conf_paths"][idx] = init_asic_config(proj_conf_tree, conf_path)
+
             # enable asic flow to be run
             vlsi_mode_inputs["enable"] = True
             vlsi_mode_inputs["flow_mode"] = asic_dse_conf["flow_mode"]
@@ -1122,26 +1364,33 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 print("\tPlace & Route: Cadence Encounter OR Innovus")
                 print("\tTiming & Power: Synopsys PrimeTime")
                 # If custom flow is enabled there should only be a single config file
-                assert len(asic_dse_conf["flow_config_paths"]) == 1, "ERROR: Custom flow mode requires a single config file"
-                custom_asic_flow_settings = load_hb_params(clean_path(asic_dse_conf["flow_config_paths"][0]))
+                assert len(asic_dse_conf["flow_conf_paths"]) == 1, "ERROR: Custom flow mode requires a single config file"
+                custom_asic_flow_settings = load_hb_params(clean_path(asic_dse_conf["flow_conf_paths"][0]))
 
             elif asic_dse_conf["flow_mode"] == "hammer":
+                # Search for the shared conf tree in the project tree
+                shared_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees("shared_resource.configs.asic_dse", is_hier_tag = True)[0]
+                # Pre process & validate env config path
+                for idx, conf_path in enumerate(asic_dse_conf["tool_env_conf_paths"]):
+                    asic_dse_conf["tool_env_conf_paths"][idx] = init_asic_config(shared_conf_tree, conf_path)
+
+
                 # Initialize the hammer tree
-                asic_flow_settings_input["hammer_tree"] = rg_ds.Tree(  
-                    asic_dse_conf["common"].hammer_home_path,
-                    [
-                        rg_ds.Tree("asic_dse"),
-                        rg_ds.Tree("coffe"),
-                        rg_ds.Tree("ic_3d"),
-                    ]
-                )
+                # asic_flow_settings_input["hammer_tree"] = rg_ds.Tree(  
+                #     asic_dse_conf["common"].hammer_home_path,
+                #     [
+                #         rg_ds.Tree("asic_dse"),
+                #         rg_ds.Tree("coffe"),
+                #         rg_ds.Tree("ic_3d"),
+                #     ]
+                # )
                 
                 
                 # Initialize a Hammer Driver, this will deal with the defaults & will allow us to load & manipulate configs before running hammer flow
                 driver_opts = HammerDriver.get_default_driver_options()
                 # update values
-                driver_opts = driver_opts._replace(environment_configs = list(env_settings.env_paths))
-                driver_opts = driver_opts._replace(project_configs = list(asic_dse_conf["flow_config_paths"]))
+                driver_opts = driver_opts._replace(environment_configs = list(asic_dse_conf["tool_env_conf_paths"]))
+                driver_opts = driver_opts._replace(project_configs = list(asic_dse_conf["flow_conf_paths"]))
                 hammer_driver = HammerDriver(driver_opts)
 
                 # Instantiating a hammer driver class creates an obj_dir named "obj_dir" in the current directory, as a quick fix we will delete this directory after its created
@@ -1161,25 +1410,34 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                     vlsi_mode_inputs["config_pre_proc"] = False
                     asic_flow_settings_input["top_lvl_module"] = hammer_driver.database.get_setting("synthesis.inputs.top_module")
                 
+                # create the tree for the vlsi outputs
+                asic_dse_conf["common"].project_tree.append_tagged_subtree("outputs", design_out_tree) # append our asic_dse outputs
+
+
                 # Create output directory for obj dirs to be created inside of
-                out_dir = os.path.join(env_settings.design_output_path, asic_flow_settings_input["top_lvl_module"])
-                obj_dir_fmt = f"{asic_flow_settings_input['top_lvl_module']}-{rg_ds.create_timestamp()}"
+                out_dir = asic_dse_conf["common"].project_tree.search_subtrees(f"outputs.{asic_dse_conf['top_lvl_module']}.hammer.obj_dirs", is_hier_tag = True)[0].path
+                #os.path.join(env_settings.design_output_path, asic_flow_settings_input["top_lvl_module"])
+                obj_dir_fmt = f"{asic_flow_settings_input['top_lvl_module']}-{rg_ds.create_timestamp()}" # Still putting top level mod naming convension on obj_dirs because who knows where they will end up
                 
                 # Throw error if both obj_dir options are specified
-                assert not (asic_dse_conf["use_latest_obj_dir"] and asic_dse_conf["manual_obj_dir"] != None), "ERROR: cannot use both latest obj dir and manual obj dir arguments for ASIC-DSE subtool"
+                assert not (asic_dse_conf["common"].use_latest_obj_dir and asic_dse_conf["common"].manual_obj_dir != None), "ERROR: cannot use both latest obj dir and manual obj dir arguments for ASIC-DSE subtool"
                 
                 obj_dir_path = None
                 # Users can specify a specific obj directory
-                if asic_dse_conf["manual_obj_dir"] != None:
-                    obj_dir_path = os.path.realpath(os.path.expanduser(asic_dse_conf["manual_obj_dir"]))
+                if asic_dse_conf["common"].manual_obj_dir != None:
+                    obj_dir_path = os.path.realpath(os.path.expanduser(asic_dse_conf["common"].manual_obj_dir))
                 # Or they can use the latest created obj dir
-                elif asic_dse_conf["use_latest_obj_dir"]:
+                elif asic_dse_conf["common"].use_latest_obj_dir:
                     if os.path.isdir(out_dir):
                         obj_dir_path = find_newest_obj_dir(search_dir = out_dir, obj_dir_fmt = f"{asic_flow_settings_input['top_lvl_module']}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
+                    else:
+                        print( f"WARNING: No latest obj dirs found in {out_dir} of format {asic_flow_settings_input['top_lvl_module']}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
                 # If no value given or no obj dir found, we will create a new one
                 if obj_dir_path == None:
                     obj_dir_path = os.path.join(out_dir,obj_dir_fmt)
+                    print( f"WARNING: No obj dir specified or found, creating new one @: {obj_dir_path}")
 
+                # TODO move directory creation / destruction to Tree class
                 if not os.path.isdir(obj_dir_path):
                     os.makedirs(obj_dir_path)
 
@@ -1193,17 +1451,17 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 # if not specified the flow will run all the stages by defualt
                 run_all_flow = not (asic_dse_conf["synthesis"] or asic_dse_conf["place_n_route"] or asic_dse_conf["primetime"]) and not asic_dse_conf["compile_results"]
                 
+                # TODO implement "flow_stages" element of ASICFlowSettings struct
                 asic_flow_settings_input["make_build"] = asic_dse_conf["make_build"]
                 asic_flow_settings_input["run_sram"] = asic_dse_conf["sram_compiler"]
                 asic_flow_settings_input["run_syn"] = asic_dse_conf["synthesis"] or run_all_flow
                 asic_flow_settings_input["run_par"] = asic_dse_conf["place_n_route"] or run_all_flow
                 asic_flow_settings_input["run_pt"] = asic_dse_conf["primetime"] or run_all_flow
-                # TODO implement "flow_stages" element of ASICFlowSettings struct
-                if "asic_flow" in env_conf.keys():
-                    config_file_input = env_conf["asic_flow"]
-                else:
-                    config_file_input = {}
-                asic_flow_settings = init_dataclass(rg_ds.ASICFlowSettings, config_file_input, asic_flow_settings_input, validate_paths = not vlsi_mode_inputs["config_pre_proc"] )
+                # if "asic_flow" in env_conf.keys():
+                #     config_file_input = env_conf["asic_flow"]
+                # else:
+                #     config_file_input = {}
+                asic_flow_settings = init_dataclass(rg_ds.ASICFlowSettings, {}, asic_flow_settings_input, validate_paths = not vlsi_mode_inputs["config_pre_proc"] )
 
         else:
             print("ERROR: no flow config files provided, cannot run ASIC flow")
@@ -1213,11 +1471,12 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     high_lvl_inputs = {
         **high_lvl_inputs,
         "mode": rad_gen_mode,
-        "tech_info": tech_info,
+        "tech": tech,
+        "scripts": scripts,
         "design_sweep_infos": design_sweep_infos,
         "asic_flow_settings": asic_flow_settings,
         "custom_asic_flow_settings": custom_asic_flow_settings,
-        "env_settings": env_settings,
+        # "env_settings": env_settings,
         "common": asic_dse_conf["common"],
     }
     asic_dse = init_dataclass(rg_ds.AsicDSE, high_lvl_inputs, {})
@@ -1225,7 +1484,13 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     return asic_dse
 
 def init_coffe_structs(coffe_conf: Dict[str, Any]):
+    # Add coffe specific trees to common
+    coffe_conf["common"].project_tree.append_tagged_subtree("config", rg_ds.Tree("coffe", tag="coffe.config"))
+    
     fpga_arch_conf = load_arch_params(clean_path(coffe_conf["fpga_arch_conf_path"]))
+    coffe_conf["common"].project_tree.append_tagged_subtree("output", rg_ds.Tree(os.path.basename(os.path.splitext(fpga_arch_conf["arch_out_folder"])[0]), tag="coffe.output"))
+
+
     if "hb_flows_conf_path" in coffe_conf.keys() and coffe_conf["hb_flows_conf_path"] != None:
         hb_flows_conf =  parse_yml_config(coffe_conf["hb_flows_conf_path"])
         ###################### SETTING UP ASIC TOOL ARGS FOR HARDBLOCKS ######################
@@ -1245,7 +1510,7 @@ def init_coffe_structs(coffe_conf: Dict[str, Any]):
             for hb_conf in hb_confs:
                 # pray this is pass by copy not reference
                 asic_dse_cli_args = { **asic_dse_cli_args_base }
-                asic_dse_cli_args["flow_config_paths"] = hb_conf["flow_config_paths"]
+                asic_dse_cli_args["flow_conf_paths"] = hb_conf["flow_conf_paths"]
                 asic_dse_cli = init_dataclass(rg_ds.AsicDseCLI, asic_dse_cli_args)
                 hb_inputs = {
                     "asic_dse_cli": asic_dse_cli
@@ -1269,6 +1534,18 @@ def init_coffe_structs(coffe_conf: Dict[str, Any]):
 
 
 def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
+
+    # Add ic_3d specific trees to common
+    ic_3d_conf["common"].project_tree.append_tagged_subtree("config", rg_ds.Tree("ic_3d", tag="ic_3d.config"))
+    output_subtrees = [
+        rg_ds.Tree("includes", tag="inc"),
+        rg_ds.Tree("obj_dirs", tag="obj_dirs"),
+        rg_ds.Tree("subckts", tag="subckt"),
+        rg_ds.Tree("reports", tag="report"),
+        rg_ds.Tree("scripts", tag="script"),
+    ]
+    for output_subtree in output_subtrees:
+        ic_3d_conf["common"].project_tree.append_tagged_subtree("output", output_subtree)
 
     cli_arg_inputs = {}
     for k, v in ic_3d_conf.items():
