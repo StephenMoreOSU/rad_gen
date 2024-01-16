@@ -50,6 +50,8 @@ class TestSuite:
     alu_tests: List[Test] = None
     sram_tests: List[Test] = None
     noc_tests: List[Test] = None
+
+    asic_dse_sweep_tests: List[Test] = None 
     # Design Config files containing tool / tech info which is used across all tests
     sys_configs: List[str] = None
     
@@ -144,6 +146,8 @@ class TestSuite:
         #     bases = (rg_ds.AsicDseCLI,)
         # )
 
+
+
         if self.alu_tests is None:
             self.alu_tests = []
 
@@ -160,6 +164,7 @@ class TestSuite:
                 design_sweep_config = alu_sweep_config,
             )
             alu_sweep_args = RadGenArgs(
+                override_outputs = True,
                 top_config_path = self.top_config_path,
                 subtools = ["asic_dse"],
                 subtool_args = asic_dse_args,
@@ -221,11 +226,13 @@ class TestSuite:
             #  |___/_|_\/_/ \_\_|  |_| |___/ |_| |___| |_| \___|_||_|___|___/  |_|  |_/_/ \_\___|_|_\\___/   \___|___|_|\_|
                                                                                                              
             sram_gen_config = os.path.expanduser(f"{self.asic_dse_inputs}/sweeps/sram_sweep.yml")
-            asic_dse_args = AsicDseArgs( 
+            asic_dse_args = AsicDseArgs(
                 tool_env_conf_path = tool_env_conf_path,
                 design_sweep_config = sram_gen_config,
             )
             sram_gen_test = RadGenArgs(
+                override_outputs = True,
+                top_config_path = self.top_config_path,
                 subtools = ["asic_dse"],
                 subtool_args = asic_dse_args,
             )
@@ -313,6 +320,9 @@ class TestSuite:
             )
             noc_asic_test = Test(rad_gen_args=noc_asic_test, test_name="noc_hammer_flow")
             self.noc_tests.append(noc_asic_test)
+
+        if self.asic_dse_sweep_tests is None:
+            self.asic_dse_sweep_tests = [alu_sweep_test, sram_gen_test, noc_sweep_test]
 
         
         #  ██████╗ ██████╗ ███████╗███████╗███████╗
@@ -532,11 +542,14 @@ def dict_diff(d1, d2, path=""):
 def parse_args() -> argparse.Namespace:
     top_lvl_parser = argparse.ArgumentParser(description="RADGen CI Test Suite")
     top_lvl_parser.add_argument("-p", "--just_print",  help="Don't execute test just print commands to console, this parses & compares results if they already exist", action='store_true')
-    top_lvl_parser.add_argument("-pdn", "--pdn_modeling",  help="Run PDN modeling test", action='store_true')
-    top_lvl_parser.add_argument("-buff_dse", "--buff_dse_modeling",  help="Run Buff DSE test", action='store_true')
+    #subtools_group = top_lvl_parser.add_argument_group("Subtool Selection", "Select which subtools to run tests for")
+    top_lvl_parser.add_argument("-ic_3d", "--ic_3d",  help="Run IC 3D tests", action='store_true')
     top_lvl_parser.add_argument("-coffe", "--coffe",  help="Run COFFE test", action='store_true')
     top_lvl_parser.add_argument("-asic", "--asic_dse",  help="Run ASIC DSE tests", action='store_true')
-
+    top_lvl_parser.add_argument_group("Subtool Tests", "Select which subtool tests to run")
+    top_lvl_parser.add_argument("-pdn", "--pdn_modeling",  help="Run PDN modeling test", action='store_true')
+    top_lvl_parser.add_argument("-buff_dse", "--buff_dse_modeling",  help="Run Buff DSE test", action='store_true')
+    top_lvl_parser.add_argument("-asic_dse_sweeps", "--asic_dse_sweeps",  help="Run ASIC DSE sweeps test", action='store_true')
     return top_lvl_parser.parse_args()
 
 
@@ -545,7 +558,7 @@ def parse_args() -> argparse.Namespace:
 def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], subtool: str, result_path: str = None, golden_ref_path: str = None):
     for idx, test in enumerate(tests):
         cmd_str, sys_args, sys_args_dict = test.rad_gen_args.get_rad_gen_cli_cmd(rad_gen_home)        
-        print(f"Running Test {test.test_name}: {cmd_str}\n")    
+        print(f"Running Test {test.test_name}: {cmd_str}\n")
         if not args.just_print:   
             # sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"{test.test_name}_unit_test_{idx}.log"]), env=cur_env, shell=True)
             rad_gen_args = argparse.Namespace(**sys_args_dict)
@@ -641,8 +654,12 @@ def main():
     run_all = True if not args.asic_dse and not args.coffe and not args.pdn_modeling and not args.buff_dse_modeling else False
 
     if run_all or args.asic_dse:
-        print("Running ALU tests\n")
-        run_tests(args, test_suite.rad_gen_home, test_suite.alu_tests, "asic_dse")
+        if args.asic_dse_sweeps:
+            print("Running ASIC DSE sweeps tests\n")
+            run_tests(args, test_suite.rad_gen_home, test_suite.asic_dse_sweep_tests, "asic_dse")
+        else:
+            print("Running ALU tests\n")
+            run_tests(args, test_suite.rad_gen_home, test_suite.alu_tests, "asic_dse")
 
     #     print("Running SRAM tests\n")
     #     run_tests(args, test_suite.rad_gen_home, test_suite.sram_tests, "asic_dse")

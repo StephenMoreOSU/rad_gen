@@ -14,6 +14,10 @@ import math
 import pandas as pd
 
 
+# Hammer imports
+from third_party.hammer.hammer.vlsi.cli_driver import dump_config_to_json_file
+
+
 # asic_dse imports
 import src.asic_dse.hammer_flow as asic_hammer
 import src.asic_dse.custom_flow as asic_custom
@@ -67,20 +71,51 @@ def compile_results(rad_gen_settings: rg_ds.AsicDSE):
     csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(rad_gen_settings.sweep_config_path))[0] )
     rg_utils.write_dict_to_csv(csv_lines,csv_fname)
 
-def design_sweep(rad_gen_settings: rg_ds.AsicDSE):
+def design_sweep(asic_dse: rg_ds.AsicDSE):
     # Starting with just SRAM configurations for a single rtl file (changing parameters in header file)
-    rg_utils.rad_gen_log(f"Running design sweep from config file {rad_gen_settings.sweep_config_path}",rad_gen_log_fd)
+    rg_utils.rad_gen_log(f"Running design sweep from config file {asic_dse.sweep_config_path}",rad_gen_log_fd)
     
-    scripts_outdir = os.path.join(rad_gen_settings.env_settings.design_output_path,"scripts")
-    if not os.path.isdir(scripts_outdir):
-        os.makedirs(scripts_outdir)
-    # design_sweep_config = yaml.safe_load(open(rad_gen_settings.sweep_config_path))
-    for id, design_sweep in enumerate(rad_gen_settings.design_sweep_infos):
+    
+
+    # Create output directory for <top_lvl_module> used in this sweep
+    # asic_dse.common.project_tree.append_tagged_subtree()
+
+
+
+    # scripts_outdir = os.path.join(asic_dse.env_settings.design_output_path,"scripts")
+    # if not os.path.isdir(scripts_outdir):
+    #     os.makedirs(scripts_outdir)
+
+
+    # design_sweep_config = yaml.safe_load(open(asic_dse.sweep_config_path))
+    for id, design_sweep in enumerate(asic_dse.design_sweep_infos):
         """ General flow for all designs in sweep config """
+
         # Load in the base configuration file for the design
         # sanitized_design = sanitize_config(design)
-        base_config = yaml.safe_load(open(design_sweep.base_config_path))
+        base_config = rg_utils.parse_config(design_sweep.base_config_path)
+        # yaml.safe_load(open(design_sweep.base_config_path))
+
+        # Output to current project directory output "scripts" directory
+        # prioritize top lvl module contained in sweep config
+        if design_sweep.top_lvl_module != None:
+            top_lvl_module = design_sweep.top_lvl_module
+        elif base_config.get("synthesis.inputs.top_module") != None:
+            top_lvl_module = base_config["synthesis.inputs.top_module"]
+        else:
+            raise ValueError("No top level module specified in config file or sweep config file")
         
+        if design_sweep.type == "rtl_params" or design_sweep.type == "vlsi_params":
+            # Tasks done prior to generating sweep stuff for VLSI / RTL
+            design_out_tree = copy.deepcopy(asic_dse.design_out_tree)
+            design_out_tree.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
+            # Add dir to project tree and create it output directory for <top_lvl_module> used in this sweep
+            asic_dse.common.project_tree.append_tagged_subtree(f"{asic_dse.common.project_name}.outputs", design_out_tree, is_hier_tag = True)
+            scripts_out_dpath = asic_dse.common.project_tree.search_subtrees(f"{asic_dse.common.project_name}.outputs.{top_lvl_module}.script", is_hier_tag = True)[0].path
+        elif design_sweep.type == "sram":
+            pass
+            
+
         """ Currently only can sweep either vlsi params or rtl params not both """
         sweep_script_lines = [
             "#!/bin/bash",
@@ -91,34 +126,56 @@ def design_sweep(rad_gen_settings: rg_ds.AsicDSE):
             """ MODIFYING HAMMER CONFIG YAML FILES """
             sweep_idx = 1
             for param_sweep_key, param_sweep_vals in design_sweep.type_info.params.items():
+                # TODO Check to make sure the sweeep param is in the hammer.vlsi params
                 # <TAG> <HAMMER-IR-PARSE TODO> , This is looking for the period in parameters and will set the associated hammer IR to that value 
                 if "period" in param_sweep_key:
                     for period in design_sweep.type_info.params[param_sweep_key]:
-                        mod_base_config["vlsi.inputs"]["clocks"][0]["period"] = f'{str(period)} ns'
-                        modified_config_path = os.path.splitext(design_sweep.base_config_path)[0] + f'_period_{str(period)}.yaml'
-                        with open(modified_config_path, 'w') as fd:
-                            yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
+                        mod_base_config["vlsi.inputs.clocks"][0]["period"] = f'{str(period)} ns' # TODO allow for multiple clocks
+                        modified_config_fname = os.path.basename(os.path.splitext(design_sweep.base_config_path)[0]) + f'_period_{str(period)}.json' # TODO make paramater based naming optional 
+                        sweep_point_config_fpath = os.path.join( asic_dse.common.project_tree.search_subtrees(f"{asic_dse.common.project_name}.configs.gen", is_hier_tag = True)[0].path,
+                                                                    modified_config_fname)
+                        dump_config_to_json_file(sweep_point_config_fpath, mod_base_config)
+                        # with open(modified_config_path, 'w') as fd:
+                        #     yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
 
+                        asic_dse_args = rg_ds.AsicDseArgs(
+                                flow_conf_paths = design_sweep.flow_conf_paths + [sweep_point_config_fpath],
+                                tool_env_conf_paths = design_sweep.tool_env_conf_paths,
+                        )
+                        # Create the Rad Gen CLI command struct to call the tool for this sweep point
+                        rad_gen_args = rg_ds.RadGenArgs(
+                            subtools = ["asic_dse"],
+                            subtool_args = asic_dse_args,
+                        )
+                        cmd_str, _, _ = rad_gen_args.get_rad_gen_cli_cmd(asic_dse.common.rad_gen_home_path)
                         rad_gen_cmd_lines = [
-                            asic_hammer.get_rad_gen_flow_cmd(rad_gen_settings, modified_config_path, sram_flag=False, top_level_mod=design_sweep.top_lvl_module, hdl_path=design_sweep.rtl_dir_path) + " &",
-                            "sleep 2",
+                            cmd_str + " &",
+                            "sleep 1",
                         ]
                         sweep_script_lines += rad_gen_cmd_lines
                         if sweep_idx % design_sweep.flow_threads == 0 and sweep_idx != 0:
                             sweep_script_lines.append("wait")
                         sweep_idx += 1
             rg_utils.rad_gen_log("\n".join(rg_utils.create_bordered_str("Autogenerated Sweep Script")),rad_gen_log_fd)
-            rg_utils.rad_gen_log("\n".join(sweep_script_lines),rad_gen_log_fd)
+            rg_utils.rad_gen_log("\n".join(sweep_script_lines), rad_gen_log_fd)
             sweep_script_lines = rg_utils.create_bordered_str("Autogenerated Sweep Script") + sweep_script_lines
-            script_path = os.path.join(scripts_outdir, f"{design_sweep.top_lvl_module}_vlsi_sweep.sh")
+            # Get the path to write out script to, if the -l (override) flag is provided we will overwrite the script
+            # TODO update use_latest_obj_dir to be "override_existing_files" or something
+            script_path = None
+            if asic_dse.common.override_outputs:
+                script_path = rg_utils.find_newest_file(scripts_out_dpath, f"{top_lvl_module}_vlsi_sweep_{rg_ds.create_timestamp(fmt_only_flag=True)}.sh", is_dir = False)
+            
+            if script_path == None:
+                script_path = os.path.join(scripts_out_dpath, f"{top_lvl_module}_vlsi_sweep_{rg_ds.create_timestamp()}.sh")
+            
             for line in sweep_script_lines:
-                with open(script_path , "w") as fd:
+                with open(script_path , "a+") as fd:
                     rg_utils.file_write_ln(fd, line)
             permission_cmd = f"chmod +x {script_path}"
             rg_utils.run_shell_cmd_no_logs(permission_cmd)
         # TODO This wont work for multiple SRAMs in a single design, simply to evaluate individual SRAMs
-        elif design_sweep.type == "sram":      
-            asic_hammer.sram_sweep_gen(rad_gen_settings, id)                
+        elif design_sweep.type == "sram":
+            asic_hammer.sram_sweep_gen(asic_dse, id)
         # TODO make this more general but for now this is ok
         # the below case should deal with any asic_param sweep we want to perform
         elif design_sweep.type == 'rtl_params':
@@ -128,7 +185,7 @@ def design_sweep(rad_gen_settings: rg_ds.AsicDSE):
             # for hdr_path in mod_param_hdr_paths:
                 rg_utils.rad_gen_log(f"PARAMS FOR PATH {hdr_path}",rad_gen_log_fd)
                 rad_gen_cmd_lines = [
-                    asic_hammer.get_rad_gen_flow_cmd(rad_gen_settings, config_path, sram_flag=False, top_level_mod=design_sweep.top_lvl_module, hdl_path=design_sweep.rtl_dir_path) + " &",
+                    asic_hammer.get_rad_gen_flow_cmd(asic_dse, config_path, sram_flag=False, top_level_mod=design_sweep.top_lvl_module, hdl_path=design_sweep.rtl_dir_path) + " &",
                     "sleep 2",
                 ]
                 sweep_script_lines += rad_gen_cmd_lines
@@ -136,14 +193,14 @@ def design_sweep(rad_gen_settings: rg_ds.AsicDSE):
                     sweep_script_lines.append("wait")
                 sweep_idx += 1
                 # rad_gen_log(get_rad_gen_flow_cmd(config_path,sram_flag=False,top_level_mod=sanitized_design["top_level_module"],hdl_path=sanitized_design["rtl_dir_path"]),rad_gen_log_fd)
-                asic_hammer.read_in_rtl_proj_params(rad_gen_settings, design_sweep.type_info.params, design_sweep.top_lvl_module, design_sweep.rtl_dir_path, hdr_path)
+                asic_hammer.read_in_rtl_proj_params(asic_dse, design_sweep.type_info.params, design_sweep.top_lvl_module, design_sweep.rtl_dir_path, hdr_path)
                 """ We shouldn't need to edit the values of params/defines which are operations or values set to other params/defines """
                 """ EDIT PARAMS/DEFINES IN THE SWEEP FILE """
                 # TODO this assumes parameter sweep vars arent kept over multiple files
             rg_utils.rad_gen_log("\n".join(rg_utils.create_bordered_str("Autogenerated Sweep Script")),rad_gen_log_fd)
             rg_utils.rad_gen_log("\n".join(sweep_script_lines),rad_gen_log_fd)
             sweep_script_lines = rg_utils.create_bordered_str("Autogenerated Sweep Script") + sweep_script_lines
-            script_path = os.path.join(scripts_outdir, f"{design_sweep.top_lvl_module}_rtl_sweep.sh")
+            script_path = os.path.join(scripts_out_dpath, f"{design_sweep.top_lvl_module}_rtl_sweep.sh")
             for line in sweep_script_lines:
                 with open( script_path, "w") as fd:
                     rg_utils.file_write_ln(fd, line)
