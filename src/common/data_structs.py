@@ -344,6 +344,7 @@ class Tree:
         result = []
         self._search_subtrees(target_tag, target_depth, 0, is_hier_tag, result)
         if not result:
+            # self.print_tree()
             raise Exception(f"Tag {target_tag} not found in tree")
         return result
 
@@ -365,16 +366,23 @@ class Tree:
             for subtree in self.subtrees:
                 subtree._search_subtrees(target_tag, target_depth, current_depth + 1, is_hier_tag, result)
     
+    def print_tree(self):
+        if self.is_leaf:
+            print(self.path)
+            return
+        
+        for subtree in self.subtrees:
+            subtree.print_tree()
 
     def create_tree(self):
         if self.is_leaf:
             os.makedirs(self.path, exist_ok = True)
-            print(self.path)
+            # print(self.path)
             return
 
         for subtree in self.subtrees:
-            # Don't create tree on scan_dir
-            # if not subtree.scan_dir:
+            if not self.scan_dir:
+                # Don't create tree on scan_dir
                 subtree.create_tree()
 
     def append_tagged_subtree(self, tag: str, subtree: 'Tree', is_hier_tag: bool = False):        
@@ -880,8 +888,9 @@ class SRAMCompilerSettings:
         Paths related to SRAM compiler outputs
         If not specified in the top level config file, will use default output structure (sent to rad gen input designs directory)
     """
-    rtl_out_path: str = None # os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
-    config_out_path: str = None #os.path.expanduser("~/rad_gen/input_designs/sram/configs/compiler_outputs")
+    rtl_out_dpath: str = None # os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
+    config_out_dpath: str = None #os.path.expanduser("~/rad_gen/input_designs/sram/configs/compiler_outputs")
+    scripts_out_dpath: str = None
     
 
 
@@ -904,7 +913,7 @@ class VLSISweepInfo:
 
 @dataclass 
 class SRAMSweepInfo:
-    base_rtl_path: str # path to RTL file which will be modified by SRAM scripts to generate SRAMs, its an SRAM instantiation (supporting dual and single ports with ifdefs) wrapped in registers
+    sram_rtl_template_fpath: str # path to RTL file which will be modified by SRAM scripts to generate SRAMs, its an SRAM instantiation (supporting dual and single ports with ifdefs) wrapped in registers
     """
         List of dicts each of which contain the following elements:
         - rw_ports -> number of read/write ports
@@ -939,9 +948,9 @@ class DesignSweepInfo:
         Information specific to a single sweep of design parameters, this corresponds to a single design in sweep config file
         Ex. If sweeping clock freq in terms of [0, 1, 2] this struct contains information about that sweep
     """
-    top_lvl_module: str # top level module of design
     base_config_path: str # path to hammer config of design
-    rtl_dir_path: str # path to directory containing rtl files for design, files can be in subdirectories
+    top_lvl_module: str = None # top level module of design
+    # rtl_dir_path: str = None # path to directory containing rtl files for design, files can be in subdirectories
     type: str = None # options are "sram", "rtl_params" or "vlsi_params" TODO this could be instead determined by searching through parameters acceptable to hammer IR
     flow_threads: int = 1 # number of vlsi runs which will be executed in parallel (in terms of sweep parameters)
     type_info: Any = None # contains either RTLSweepInfo or SRAMSweepInfo depending on sweep type
@@ -1128,58 +1137,14 @@ class AsicDSE:
     # design_tree: Tree = None
     
     def __post_init__(self):
-        # Use initialized fields to create asic dse dir structure collateral
-        # self.design_out_tree = Tree(self.common_asic_flow.top_lvl_module,
-        #     [
-        #         # Obj directories exist here
-        #         Tree("obj_dirs", tag="obj_dirs"),
-        #         # Guessing there should be a place to put high level reports / logs / scripts (by high level I mean not specific to a single obj dir)
-        #         Tree("reports", tag="report"),
-        #         Tree("scripts", tag="script"),
-        #         Tree("logs", tag="logs"),
-        #         # Tree("hammer", 
-        #         #     [
-        #         #         # Obj directories exist here
-        #         #         Tree("obj_dirs", tag="obj_dirs"),
-        #         #         # Guessing there should be a place to put high level reports / logs / scripts (by high level I mean not specific to a single obj dir)
-        #         #         Tree("reports", tag="report"),
-        #         #         Tree("scripts", tag="script"),
-        #         #         Tree("logs", tag="logs"),
-        #         #     ],
-        #         #     tag="hammer"
-        #         # ),
-        #         # # Obj directories exist here
-        #         # Tree("custom", tag="custom") # TODO
-        #         # Obj directories exist here
-        #     ], tag=self.common_asic_flow.top_lvl_module
-        # )
-        # self.common.project_tree.append_tagged_subtree(f"{self.common.project_name}.outputs", self.design_out_tree, is_hier_tag = True) # append our asic_dse outputs
-        # # create the tree for the vlsi outputs (its ok to call multiple times, or if dirs already exist)
-        # self.common.project_tree.create_tree()
-        
-        # Perform any other intializations which require the design out tree
-
-        # By default set the result search path to the design output path, possibly could be changed in later functions if needed
-        # self.result_search_path = self.common.project_tree.search_subtrees(f'{self.common.project_name}.outputs', is_hier_tag = True)[0].path
-
-
-        # Post inits required for structs that use other strut values as inputs and cannot be clearly defined
+        # Post inits required for structs that use other struct values as inputs and cannot be clearly defined, tradeoff is that these definitions cannot be changed via user input easily (as those intialized with init_dataclass() can)
         self.stdcell_lib.sram_lib_path = self.common.project_tree.search_subtrees(f"hammer.technology.{self.stdcell_lib.name}.sram_compiler.memories", is_hier_tag=True)[0].path #os.path.join(self.env_settings.hammer_tech_path, self.tech_info.name, "sram_compiler", "memories")
         # TODO add user defined paths for sram compiler outputs in CLI (in case users want to send them somewhere else)
         if self.sram_compiler_settings is None:
             self.sram_compiler_settings = SRAMCompilerSettings()
-            self.sram_compiler_settings.config_out_path = self.common.project_tree.search_subtrees(f"sram_lib.configs.gen", is_hier_tag=True)[0].path #os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
-            self.sram_compiler_settings.rtl_out_path = self.common.project_tree.search_subtrees(f"sram_lib.rtl.gen", is_hier_tag=True)[0].path #os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
-        
-        
-        # if self.asic_flow_settings.hammer_tech_path is None:
-        #     self.asic_flow_settings.hammer_tech_path = os.path.join(self.common.hammer_home_path, "hammer", "technology")
-
-        # elif self.sram_compiler_settings.config_out_path == None and self.sram_compiler_settings.rtl_out_path != None:
-        #     self.sram_compiler_settings.config_out_path = os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
-        # elif self.sram_compiler_settings.rtl_out_path == None and self.sram_compiler_settings.config_out_path != None:
-        #     self.sram_compiler_settings.rtl_out_path = os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
-
+            self.sram_compiler_settings.config_out_dpath = self.common.project_tree.search_subtrees(f"sram_lib.configs.gen", is_hier_tag=True)[0].path #os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
+            self.sram_compiler_settings.rtl_out_dpath = self.common.project_tree.search_subtrees(f"sram_lib.rtl.gen", is_hier_tag=True)[0].path #os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
+            self.sram_compiler_settings.scripts_out_dpath = self.common.project_tree.search_subtrees(f"sram_lib.scripts", is_hier_tag=True)[0].path #os.path.join(self.env_settings.design_input_path, "sram", "scripts", "compiler_outputs")
 
 
 #  ██████╗ ██████╗ ███████╗███████╗███████╗
