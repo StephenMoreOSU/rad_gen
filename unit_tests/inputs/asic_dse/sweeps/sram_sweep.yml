@@ -1,13 +1,19 @@
-designs:
+# shared env configs for all sweeps
+shared:
+  tool_env_conf_paths: [~/Documents/rad_gen/unit_tests/inputs/asic_dse/sys_configs/env.yml]
+  flow_conf_paths: [ ~/Documents/rad_gen/system_configs/asap7.yml, ~/Documents/rad_gen/system_configs/cadence_tools.yml]
+
+
+design_sweeps:
   - base_config_path: ~/rad_gen/unit_tests/inputs/asic_dse/sram/configs/sram.yml
     # These two args are required for each run of hammer flow
-    top_lvl_module: sram_wrapper
-    rtl_dir_path: ~/rad_gen/unit_tests/inputs/asic_dse/sram/rtl
+    ## top_lvl_module: sram_wrapper
+    ##rtl_dir_path: ~/rad_gen/unit_tests/inputs/asic_dse/sram/rtl
     type: "sram"
     # Unused for now but may be required as we figure out a way to specify PDK related files
-    sram_memory_path: ~/hammer/src/hammer-vlsi/technology/asap7/sram_compiler/memories
+    ##sram_memory_path: ~/hammer/src/hammer-vlsi/technology/asap7/sram_compiler/memories
     # params below this line are specific to the "sram" design type
-    base_rtl_path: ~/rad_gen/unit_tests/inputs/asic_dse/sram/rtl/sram.sv
+    ##base_rtl_path: ~/rad_gen/unit_tests/inputs/asic_dse/sram/rtl/sram.sv
     # Sram compiler will replace rtl_module with 
     # Small depth = 128, med = 512, large = 2048
     mems :

@@ -243,8 +243,7 @@ class Tree:
         self.is_leaf : bool = False
         self.scan_dir: bool = scan_dir # If true will scan the directory path and add any subdirectories to the tree
         
-        # to make sure update_subdir_paths isnt called multiple times for the same tree
-
+        # Set is_leaf flag
         if self.subtrees == None:
             self.is_leaf = True
         else:
@@ -616,43 +615,45 @@ def get_dyn_class(cls_name: str, fields: Dict[str, List[Any]],  bases: Tuple[Any
                         "__init__": dyn_dataclass_init})
     
 
-@dataclass
-class CommonCLI(ParentCLI):
-    """
-        Path related settings which could be relevant to multiple subtools
-    """
-    cli_args : List[GeneralCLI] = field(default_factory = lambda: [ 
-        GeneralCLI(key = "subtools", shortcut="-st", datatype = str, nargs = "*", help_msg = "subtool to run"),
-        GeneralCLI(key = "top_config_path", shortcut = "-tc", datatype = str, help_msg = "path to (optional) RAD-GEN top level config file"),
-        GeneralCLI(key = "use_latest_obj_dir", shortcut = "-l", datatype = bool, action = "store_true", help_msg = "Uses latest obj / work dir found in the respective output dir"),
-        GeneralCLI(key = "manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj dir"),
-        GeneralCLI(key = "project_name", shortcut = "-n", datatype = str, help_msg = "Name of Project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them"),
-        # GeneralCLI(key = "input_tree_top_path", shortcut = "-itree", datatype = str, help_msg = "path to top level dir containing input designs"),
-        # GeneralCLI(key = "output_tree_top_path", shortcut = "-otree", datatype = str, help_msg = "path to top level dir which outputs will be produced into, will have a subdir for each subtool"),
+# @dataclass
+# class CommonCLI(ParentCLI):
+#     """
+#         Path related settings which could be relevant to multiple subtools
+#     """
+#     cli_args : List[GeneralCLI] = field(default_factory = lambda: [ 
+#         GeneralCLI(key = "subtools", shortcut="-st", datatype = str, nargs = "*", help_msg = "subtool to run"),
+#         GeneralCLI(key = "top_config_path", shortcut = "-tc", datatype = str, help_msg = "path to (optional) RAD-GEN top level config file"),
+#         GeneralCLI(key = "use_latest_obj_dir", shortcut = "-l", datatype = bool, action = "store_true", help_msg = "Uses latest obj / work dir found in the respective output dir"),
+#         GeneralCLI(key = "manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj dir"),
+#         GeneralCLI(key = "project_name", shortcut = "-n", datatype = str, help_msg = "Name of Project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them"),
+#         # GeneralCLI(key = "input_tree_top_path", shortcut = "-itree", datatype = str, help_msg = "path to top level dir containing input designs"),
+#         # GeneralCLI(key = "output_tree_top_path", shortcut = "-otree", datatype = str, help_msg = "path to top level dir which outputs will be produced into, will have a subdir for each subtool"),
 
-    ])
-    arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [ 
-        {"key": "use_latest_obj_dir", 
-            "shortcut": "-l", "action": "store_true", "help_msg": "Uses latest obj / work dir found in the respective output dir"},
+#     ])
+#     arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [ 
+#         {"key": "use_latest_obj_dir", 
+#             "shortcut": "-l", "action": "store_true", "help_msg": "Uses latest obj / work dir found in the respective output dir"},
         
-        {"key": "manual_obj_dir",
-            "shortcut": "-o", "datatype": str, "help_msg": "Uses user specified obj dir"},
+#         {"key": "manual_obj_dir",
+#             "shortcut": "-o", "datatype": str, "help_msg": "Uses user specified obj dir"},
         
-        {"key": "input_tree_top_path",
-            "shortcut": "-itree", "datatype": str, "help_msg": "path to top level dir containing input designs"},
+#         {"key": "input_tree_top_path",
+#             "shortcut": "-itree", "datatype": str, "help_msg": "path to top level dir containing input designs"},
 
-        {"key": "output_tree_top_path",
-            "shortcut": "-otree", "datatype": str, "help_msg": "path to top level dir which outputs will be produced into, will have a subdir for each subtool"},
+#         {"key": "output_tree_top_path",
+#             "shortcut": "-otree", "datatype": str, "help_msg": "path to top level dir which outputs will be produced into, will have a subdir for each subtool"},
         
-    ])
+#     ])
 
-    """
-        gen_log: bool = False # generate log file
-        input_tree_top_path: str = None
-        output_tree_top_path: str = None
-    """
+#     """
+#         gen_log: bool = False # generate log file
+#         input_tree_top_path: str = None
+#         output_tree_top_path: str = None
+#     """
 
-common_cli = CommonCLI()
+# common_cli = CommonCLI()
+
+
 # Make a custom dataclass for common input arguments
 # AsicDseArgs = get_dyn_class(
 #     cls_name = "AsicDseArgs",
@@ -1255,20 +1256,18 @@ CoffeArgs = get_dyn_class(
 
 @dataclass
 class Coffe:
-    args: CoffeArgs
-    """
-        # TODO put coffe CLI in here
-        no_sizing: bool # don't perform sizing
-        opt_type: str # optimization type, options are "global" or "local"
-        initial_sizes: str # where to get initial transistor sizes options are "default" ... TODO find all valid options
-        re_erf: int # how many sizing combos to re-erf
-        area_opt_weight: int # area optimization weight
-        delay_opt_weight: int # delay optimization weight
-        max_iterations: int # max FPGA sizing iterations
-        size_hb_interfaces: float # perform transistor sizing only for hard block interfaces
-        quick_mode : float # minimum cost function improvement for resizing, could try 0.03 for 3% improvement
-        fpga_arch_conf: Dict[str, Any] # FPGA architecture configuration dictionary TODO define as dataclass
-    """
+    # args: CoffeArgs = None
+    # TODO put coffe CLI in here
+    no_sizing: bool # don't perform sizing
+    opt_type: str # optimization type, options are "global" or "local"
+    initial_sizes: str # where to get initial transistor sizes options are "default" ... TODO find all valid options
+    re_erf: int # how many sizing combos to re-erf
+    area_opt_weight: int # area optimization weight
+    delay_opt_weight: int # delay optimization weight
+    max_iterations: int # max FPGA sizing iterations
+    size_hb_interfaces: float # perform transistor sizing only for hard block interfaces
+    quick_mode : float # minimum cost function improvement for resizing, could try 0.03 for 3% improvement
+    fpga_arch_conf: Dict[str, Any] # FPGA architecture configuration dictionary TODO define as dataclass
 
     # NON cli args are below:
     arch_name: str # name of FPGA architecture

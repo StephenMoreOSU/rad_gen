@@ -60,7 +60,7 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
 
     # Extract initial transistor sizes from file and overwrite the 
     # default initial sizes if this option was used.
-    if coffe_info.initial_sizes != "default" :
+    if coffe_info.initial_sizes != None: #"default" :
         utils.use_initial_tran_size(args.initial_sizes, fpga_inst, tran_sizing, coffe_info.fpga_arch_conf["fpga_arch_params"]['use_tgate'])
 
     # Print FPGA implementation details

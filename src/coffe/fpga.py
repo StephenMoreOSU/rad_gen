@@ -5674,6 +5674,7 @@ class FPGA:
         self.area_dict["cb_total"] = connection_block_area
         self.width_dict["cb_total"] = math.sqrt(connection_block_area)
         
+        # This is checking if we are intializing the areas or iterating on them, self.lb_height should only == 0 if the FPGA object was just intialized
         if self.lb_height == 0.0:        
             # Calculate total area of local muxes
             local_mux_area = self.logic_cluster.local_mux.num_per_tile*self.area_dict[self.logic_cluster.local_mux.name + "_sram"]
@@ -7265,7 +7266,8 @@ class FPGA:
         if "inv_" in tran_name or "tgate_" in tran_name:
             if not self.specs.use_finfet :
                 area = 0.518 + 0.127*tran_size + 0.428*math.sqrt(tran_size)
-            elif (self.specs.min_tran_width == 7):
+            # This is the finfet Tx model we used in ASAP7, not sure why it should be different than other finfet Tx models
+            elif (self.specs.min_tran_width == 7): 
                 area = 0.3694 + 0.0978*tran_size + 0.5368*math.sqrt(tran_size)
             else :
                 area = 0.034 + 0.414*tran_size + 0.735*math.sqrt(tran_size)

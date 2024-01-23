@@ -1255,6 +1255,8 @@ def search_ranges(sizing_ranges, fpga_inst, sizable_circuit, opt_type, re_erf, a
 	wire_rc_list = []
 	eval_delay_list = []
 
+    # It appears to me that this loop calculates the area and wire_rc data for each transistor sizing combo and saves them to "area_list" and "wire_rc_list"
+	# But it looks like the fpga_inst will be updated with the last transistor sizing combo in the list, which im not sure about
 	for combo in sizing_combos:
 		# Update FPGA transistor sizes
 		fpga_inst._update_transistor_sizes(element_names, combo, fpga_inst.specs.use_finfet, erf_ratios)
@@ -1287,6 +1289,9 @@ def search_ranges(sizing_ranges, fpga_inst, sizable_circuit, opt_type, re_erf, a
 		parameter_dict[wire_name + "_res"] = []
 		parameter_dict[wire_name + "_cap"] = []
 
+    # This loop populates the parameter_dict with transistor sizes which are being swept over for this iteration of search_ranges()
+    # Swept and non-swept params will be lists of N elements corresponding to the "tran_name" key in the dict
+	# Non-swept parameters will have the same value for each element
 	for i in range(len(sizing_combos)):
 		for tran_name, tran_size in current_tran_sizes.items():
 			# We need this temp value to compare agains 'element_names'
@@ -2234,6 +2239,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 		
 		
 		fpga_inst.update_area()
+        # Initialization of the floorplan (if lb_height == 0 means uninitialized)
 		if fpga_inst.lb_height == 0.0:
 			fpga_inst.lb_height = math.sqrt(fpga_inst.area_dict["tile"])
 			fpga_inst.update_area()
@@ -2305,7 +2311,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 			time_before_sizing = time.time()
 
 
-
+        # Seems a bit strange to me to perform all these sizings only if we want to size the hb_interfaces
 		if size_hb_interfaces == 0.0:
 			############################################
 			## Size switch block mux transistors

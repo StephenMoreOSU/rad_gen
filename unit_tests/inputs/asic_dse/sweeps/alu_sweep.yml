@@ -2,7 +2,7 @@
 # shared env configs for all sweeps
 shared:
   tool_env_conf_paths: [~/Documents/rad_gen/unit_tests/inputs/asic_dse/sys_configs/env.yml]
-  flow_conf_paths: [ ~/rad_gen/system_configs/asap7.yml, ~/rad_gen/system_configs/cadence_tools.yml]
+  flow_conf_paths: [ ~/Documents/rad_gen/system_configs/asap7.yml, ~/Documents/rad_gen/system_configs/cadence_tools.yml]
 
 
 design_sweeps:

@@ -1,30 +1,33 @@
 #!/bin/bash
 
-# Adds a path to 
+# Adds a path to the specified environment variable
 pathadd() {
-    if [ -d "$1" ] && [[ ":$PYTHONPATH:" != *":$1:"* ]]; then
-        PYTHONPATH="${PYTHONPATH:+"$PYTHONPATH:"}$1"
+    local env_var="$1"
+    local new_path="$2"
+
+    if [ -d "$new_path" ] && [[ ":${!env_var}:" != *":$new_path:"* ]]; then
+        export "$env_var=${!env_var:+"${!env_var}:"}$new_path"
     fi
 }
 
 # set env vars for RAD-Gen
-RAD_GEN_HOME=$PWD
-VLSI_HOME=$PWD/vlsi
-HAMMER_HOME=$VLSI_HOME/hammer
+export RAD_GEN_HOME=$PWD
+export THIRD_PARTY_HOME=$RAD_GEN_HOME/third_party
+export HAMMER_HOME=$THIRD_PARTY_HOME/hammer
 
-pathadd $RAD_GEN_HOME
+pathadd "PYTHONPATH" "$RAD_GEN_HOME"
 # pathadd $RAD_GEN_HOME/src
 
 # We need to add all of the hammer submodules to the PYTHONPATH
-pathadd $HAMMER_HOME/hammer/technology
-pathadd $HAMMER_HOME/hammer/vlsi
+pathadd "PYTHONPATH" $HAMMER_HOME/hammer/technology
+pathadd "PYTHONPATH" $HAMMER_HOME/hammer/vlsi
 
 # For now for all the pdks we want to use we have to add their paths
 # There are things like sram_compilers used in different pdks which have the same module name
 # so maybe we can only have one on the path?
 tech_plugins=("asap7")
 for tech_plugin in "${tech_plugins[@]}"; do
-    pathadd $HAMMER_HOME/hammer/technology/${tech_plugin}
+    pathadd "PYTHONPATH" $HAMMER_HOME/hammer/technology/${tech_plugin}
 done
 
 
@@ -39,7 +42,7 @@ done
 flow_stages=("sim" "synthesis" "par" "power" "timing" "lvs" "drc" "formal" "sram_generator")
 
 for flow_stage in "${flow_stages[@]}"; do
-    pathadd $HAMMER_HOME/hammer/${flow_stage}
+    pathadd "PYTHONPATH" $HAMMER_HOME/hammer/${flow_stage}
 done
 
 

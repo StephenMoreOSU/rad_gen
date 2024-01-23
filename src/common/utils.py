@@ -595,9 +595,6 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
     # converting namespace to list of cli arguments if we get namespace
     arg_list = convert_namespace(in_args) if isinstance(in_args, argparse.Namespace) else in_args
 
-    # List containing all the CLI objects
-    # cli_objs: List[Any] = []
-
     parser = argparse.ArgumentParser(description="RAD-Gen top level CLI args")
 
     # TODO see if theres a better way to do this but for now we have to manually define which args go to which tool with a list of tags
@@ -613,9 +610,15 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
     # Subtool options are "coffe" "asic-dse" "3d-ic"
     #parser.add_argument("-st", "--subtools", help="subtool to run", nargs="*", type=str, default=None)
     
+    # dict storing key value pairs for default values of each arg
+    default_arg_vals = {}
+
     # Adding Common CLI args
     common_cli = rg_ds.RadGenCLI()
-    # cli_objs.append(common_cli)
+    default_arg_vals = {
+        **default_arg_vals,
+        **common_cli._defaults,
+    }
     for cli_arg in common_cli.cli_args:
         rg_ds.add_arg(parser, cli_arg)
     
@@ -638,10 +641,12 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
     #  /_/ \_\___/___\___| |___/|___/___| /_/ \_\_|_\\___|___/
     if "asic_dse" in parsed_args.subtools:
         # Adding ASIC DSE CLI args
-        asic_cli = rg_ds.AsicDseCLI()
-        # cli_objs.append(asic_cli)
-        for cli_arg in asic_cli.cli_args:
-            # cli_arg.key = ".".join(["asic_dse",cli_arg.key])
+        asic_dse_cli = rg_ds.AsicDseCLI()
+        default_arg_vals = {
+            **default_arg_vals,
+            **asic_dse_cli._defaults,
+        }
+        for cli_arg in asic_dse_cli.cli_args:
             rg_ds.add_arg(parser, cli_arg)
 
         """
@@ -680,7 +685,10 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
     if "coffe" in parsed_args.subtools:
         # Adding COFFE CLI args
         coffe_cli = rg_ds.CoffeCLI()
-        # cli_objs.append(coffe_cli)
+        default_arg_vals = {
+            **default_arg_vals,
+            **coffe_cli._defaults,
+        }
         for cli_arg in coffe_cli.cli_args:
             rg_ds.add_arg(parser, cli_arg)
         """
@@ -721,7 +729,10 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
     #  |___/___/  |___\___| /_/ \_\_|_\\___|___/
     if "ic_3d" in parsed_args.subtools:
         ic_3d_cli = rg_ds.Ic3dCLI()
-        # cli_objs.append(ic_3d_cli)
+        default_arg_vals = {
+            **default_arg_vals,
+            **ic_3d_cli._defaults,
+        }
         for cli_arg in ic_3d_cli.cli_args:
             rg_ds.add_arg(parser, cli_arg)
         """
@@ -739,7 +750,8 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
         args = parser.parse_args(args = arg_list, namespace = in_args)
         
     # Default value dictionary for any arg that has a non None or False for default value
-    default_arg_vals = { k: v for k, v in vars(args).items() if v != None and v != False}
+    # default_arg_vals = {**asic_dse_cli._defaults, **coffe_cli._defaults, **ic_3d_cli._defaults, **common_cli._defaults}
+    # { k: v for k, v in vars(args).items() if v != None and v != False}
 
     return args, default_arg_vals
 
@@ -764,7 +776,8 @@ def merge_cli_and_config_args(cli: Dict[str, Any], config: Dict[str, Any], defau
             for k_conf, v_conf in config.items():
                 if k_conf == k_cli:
                     # If the cli key is not a default value or None/False AND cli key is not in the cli default values dictionary then we will use the cli value
-                    if v_cli != None and v_cli != False and v_cli != default[k_cli]:
+                    #if v_cli != None and v_cli != False and v_cli != default[k_cli]:
+                    if v_cli != default[k_cli]:
                         result_conf[k_conf] = v_cli
                     else:
                         result_conf[k_conf] = v_conf
@@ -943,36 +956,6 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
         hammer_home = clean_path(hammer_home)
     common_inputs["hammer_home_path"] = hammer_home
 
-
-    # For the below directory structures we have dicts with keys and values being the same
-    # This is really for readability as when these directories are accessed further in the flow 
-    # we will use the keys/dir names which are descriptive of thier purpose
-
-    # Setup input and output directory structures instantiated under <rad_gen_home>
-    # common_inputs["input_tree_top"] = rg_ds.Tree(  
-    #     os.path.join(rad_gen_home, common_conf["input_tree_top_path"]),
-    #     [
-    #         rg_ds.Tree(root="asic_dse", 
-    #             subtrees=[
-    #                 rg_ds.Tree("sys_configs")
-    #             ],
-    #             tag="asic_dse"),
-    #         rg_ds.Tree(root="coffe", tag="coffe"),
-    #         rg_ds.Tree(root="ic_3d", tag="ic_3d"),
-    #     ]
-    # )
-    # The above may look confusing as we are naming root & tag the same but the idea is that we decouple the directory name with its function
-    # So we follow this convension to set tags for thier usage
-
-    # common_inputs["output_tree_top"] = rg_ds.Tree(  
-    #     os.path.join(rad_gen_home, common_conf["output_tree_top_path"]),
-    #     [
-    #         rg_ds.Tree(root="asic_dse", tag="asic_dse"),
-    #         rg_ds.Tree(root="coffe", tag="coffe"),
-    #         rg_ds.Tree(root="ic_3d", tag="ic_3d"),
-    #     ]
-    # )
-
     common_inputs["log_fpath"] = os.path.join(rad_gen_home, "logs", "rad_gen.log")
     # For now on our output path fields we need to manually generate the directories and files specified
     # This ensures that our function to check for valid paths will not fail
@@ -987,57 +970,12 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
 
     design_input_trees = {}
     design_output_trees = {}
-    """
-    # Input dir structure for asic-dse asic flow, instantiated under <user_defined_design_name> dir under "asic_dse" in input tree
-    design_input_trees["asic_dse"] = rg_ds.Tree(
-        # No root here as this structure exists for each user defined design
-        None,
-        [
-            rg_ds.Tree("configs", 
-                [
-                    rg_ds.Tree("gen", tag="gen"),
-                    rg_ds.Tree("mod", tag="mod"),
-                ],
-                tag = "config"),
-            rg_ds.Tree("rtl", 
-                [
-                    rg_ds.Tree("gen", tag="gen"),
-                    rg_ds.Tree("src", tag="src"),
-                    rg_ds.Tree("include", tag="inc"),
-                    rg_ds.Tree("verif", tag="verif"),
-                    rg_ds.Tree("build", tag="build"),
-                ]),
-        ]
-    )
-    design_output_trees["asic_dse"] = rg_ds.Tree(
-        # No root here as this structure exists for <top_level_module>
-        None,
-        [
-            rg_ds.Tree("hammer", 
-                [
-                    rg_ds.Tree("scripts"), # scripts to run hammer flow in parallel 
-                    rg_ds.Tree("obj_dir", tag="obj"), # hammer obj dir, will contain all outputs/scripts/reports from flow
-                ], tag="hammer"),
-            rg_ds.Tree("custom"),
-        ]
-    )
-    """
-    # asic_input_tree_struct.__init__(os.path.join(top_input_path, asic_dse, user_defined_design), asic_input_tree_struct.subtrees)
-    # Coffe does not necessarily have an input tree, as it only requires configuration files
 
     # Output dir structure for coffe flow, instantiated under <user_defined_design_name> dir under "coffe" in input tree
     coffe_output_tree_struct = {
         # Stores 
         "fpga_fabric_sizing" : "fpga_fabric_sizing"
     }
-
-    # Initialize all of the user arguements with dyn dataclass
-    # common_cli = rg_ds.RadGenCLI()
-    # # common_cli_fields = common_cli.get_dataclass_fields(is_cli = True)
-    # CommonArgs = rg_ds.get_dyn_class(
-    #     "CommonArgs",
-    #     common_cli.get_dataclass_fields(is_cli = True),
-    # )
 
     """
         The idea of the below project tree dir structure is that we copy all the relevant files (yuck) into the project dir so we can access them easily
@@ -1047,50 +985,78 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
             
     """
 
-    # TODO update the name of pdk_name to what we pass into hammer if using that mode of stdcell flow
-    pdk_tree = rg_ds.Tree(f"{common_conf['pdk_name']}",
-        [
-            rg_ds.Tree("tx_models", tag="tx_model"), # Stores tx model files (.sp)
-        ]
-    )
-    common_inputs["project_tree"] = rg_ds.Tree(
-        rad_gen_home,
-        [
-            # Resources that could be shared across multiple tools are put here, this could be technology models, pdk collateral, sram_macros, etc      
-            rg_ds.Tree("shared_resources",
-                [
-                    # The idea for this section is that Pdks come in many forms with different structures but most of the time we need a few specific files
-                    # So for each new PDK a user will have to parse the directory structure and copy the files into this directory.
+    # For the below directory structures we have dicts with keys and values being the same
+    # This is really for readability as when these directories are accessed further in the flow 
+    # we will use the keys/dir names which are descriptive of thier purpose
 
-                    # I think this is going to be the easiest way to make sure that the stuff we need to use for various tools is findable
-                    rg_ds.Tree("pdks", 
-                        [
-                            copy.deepcopy(pdk_tree),
-                        ],
-                        tag="pdks"),
-                    # Configs which different runs of subtools may need to share
-                    rg_ds.Tree("configs", tag="configs"),
-                    # Ex. for asic_dse regardless of design you may share the hammer config for cadence_tools or a specific pdk
+    # TODO update the name of pdk_name to what we pass into hammer if using that mode of stdcell flow
+    ## TODO PDK Tree implementation
+    ## pdk_tree = rg_ds.Tree(f"{common_conf['pdk_name']}",
+    ##     [
+    ##         rg_ds.Tree("tx_models", tag="tx_model"), # Stores tx model files (.sp)
+    ##     ]
+    ## )
+
+    if common_conf.get("project_name"):
+        common_inputs["project_tree"] = rg_ds.Tree(
+            rad_gen_home,
+            [
+                # Resources that could be shared across multiple tools are put here, this could be technology models, pdk collateral, sram_macros, etc      
+                rg_ds.Tree("shared_resources",
+                    [
+                    
+                        # The idea for this section is that Pdks come in many forms with different structures but most of the time we need a few specific files
+                        # So for each new PDK a user will have to parse the directory structure and copy the files into this directory.
+
+                        # I think this is going to be the easiest way to make sure that the stuff we need to use for various tools is findable
+                        ## TODO PDK Tree implementation
+                        ## rg_ds.Tree("pdks", 
+                        ##     [
+                        ##         copy.deepcopy(pdk_tree),
+                        ##     ],
+                        ##     tag="pdks"),
+                        #Configs which different runs of subtools may need to share
+                        rg_ds.Tree("configs"),
+                        # Ex. for asic_dse regardless of design you may share the hammer config for cadence_tools or a specific pdk
+                    ]
+                ),
+                rg_ds.Tree("projects",
+                    # Whatever subtool is run will add to this tree (maybe creating directories in the configs/output/project dirs relevant to whatever its doing)
+                    [
+                        rg_ds.Tree(common_conf["project_name"],
+                            [
+                                rg_ds.Tree("outputs", tag = "outputs"),
+                            ], tag = f"{common_conf['project_name']}"
+                        )
+                    ], tag = "projects"
+                ),
+                rg_ds.Tree("third_party", 
+                    [  
+                        rg_ds.Tree("hammer", scan_dir = True, tag = "hammer"),
+                        rg_ds.Tree("pdks", scan_dir = True, tag = "pdks"),
+                    ],tag = "third_party"
+                ),
+            ],
+            tag = "top"
+        )
+    else:
+        common_inputs["project_tree"] = rg_ds.Tree(
+            rad_gen_home,
+            [
+                # Resources that could be shared across multiple tools are put here, this could be technology models, pdk collateral, sram_macros, etc      
+                rg_ds.Tree("shared_resources", [
+                    rg_ds.Tree("configs"),
                 ]),
-            rg_ds.Tree("projects",
-                # Whatever subtool is run will add to this tree (maybe creating directories in the configs/output/project dirs relevant to whatever its doing)
-                [
-                    rg_ds.Tree(common_conf["project_name"],
-                        [
-                            rg_ds.Tree("outputs", tag = "outputs"),
-                        ], tag = f"{common_conf['project_name']}"
-                    )
-                ], tag = "projects"
-            ),
-            rg_ds.Tree("third_party", 
-                [  
-                    rg_ds.Tree("hammer", scan_dir = True, tag = "hammer"),
-                    rg_ds.Tree("pdks", scan_dir = True, tag = "pdks"),
-                ],tag = "third_party"
-            ),
-        ],
-        tag = "top"
-    )
+                rg_ds.Tree("projects"),
+                rg_ds.Tree("third_party", 
+                    [  
+                        rg_ds.Tree("hammer", scan_dir = True, tag = "hammer"),
+                        rg_ds.Tree("pdks", scan_dir = True, tag = "pdks"),
+                    ],tag = "third_party"
+                ),
+            ],
+            tag = "top"
+        )
 
     common_inputs["project_tree"].update_tree()
 
@@ -1226,8 +1192,9 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
 
 
     # updating project tree from common
-    asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}", copy.deepcopy(configs_tree), is_hier_tag = True) # append asic_dse specific conf tree to the project conf tree
-    asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}", rtl_tree, is_hier_tag = True) # add rtl to the project tree
+    if asic_dse_conf["common"].project_name != None:
+        asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}", copy.deepcopy(configs_tree), is_hier_tag = True) # append asic_dse specific conf tree to the project conf tree
+        asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}", rtl_tree, is_hier_tag = True) # add rtl to the project tree
     conf_tree_copy = copy.deepcopy(configs_tree)
     conf_tree_copy.update_tree_top_path(new_path = "asic_dse", new_tag = "asic_dse")
     asic_dse_conf["common"].project_tree.append_tagged_subtree("shared_resources.configs", conf_tree_copy, is_hier_tag = True) # append our shared configs tree to the project tree
@@ -1558,10 +1525,10 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     # Initializations common to all modes of asic flow
     design_out_tree_copy = copy.deepcopy(design_out_tree) 
     high_lvl_inputs["design_out_tree"] = design_out_tree_copy
-    # high_lvl_inputs["design_out_tree"] = design_out_tree_copy    
     
     # By default set the result search path to the design output path, possibly could be changed in later functions if needed
-    high_lvl_inputs["result_search_path"] = asic_dse_conf["common"].project_tree.search_subtrees(f'{asic_dse_conf["common"].project_name}.outputs', is_hier_tag = True)[0].path
+    #high_lvl_inputs["result_search_path"] = asic_dse_conf["common"].project_tree.search_subtrees(f'{asic_dse_conf["common"].project_name}.outputs', is_hier_tag = True)[0].path
+    high_lvl_inputs["result_search_path"] = asic_dse_conf["common"].project_tree.search_subtrees(f'projects', is_hier_tag = True)[0].path
 
     # display project tree
     # asic_dse_conf["common"].project_tree.display_tree()
@@ -1586,10 +1553,10 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
 
 def init_coffe_structs(coffe_conf: Dict[str, Any]):
     # Add coffe specific trees to common
-    coffe_conf["common"].project_tree.append_tagged_subtree("config", rg_ds.Tree("coffe", tag="coffe.config"))
+    # coffe_conf["common"].project_tree.append_tagged_subtree("config", rg_ds.Tree("coffe", tag="coffe.config"))
     
     fpga_arch_conf = load_arch_params(clean_path(coffe_conf["fpga_arch_conf_path"]))
-    coffe_conf["common"].project_tree.append_tagged_subtree("output", rg_ds.Tree(os.path.basename(os.path.splitext(fpga_arch_conf["arch_out_folder"])[0]), tag="coffe.output"))
+    # coffe_conf["common"].project_tree.append_tagged_subtree("output", rg_ds.Tree(os.path.basename(os.path.splitext(fpga_arch_conf["arch_out_folder"])[0]), tag="coffe.output"))
 
 
     if "hb_flows_conf_path" in coffe_conf.keys() and coffe_conf["hb_flows_conf_path"] != None:
