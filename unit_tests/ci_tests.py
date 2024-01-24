@@ -165,7 +165,8 @@ class TestSuite:
             )
             alu_sweep_args = RadGenArgs(
                 override_outputs = True,
-                top_config_path = self.top_config_path,
+                project_name = "alu",
+                # top_config_path = self.top_config_path,
                 subtools = ["asic_dse"],
                 subtool_args = asic_dse_args,
             )
@@ -232,7 +233,7 @@ class TestSuite:
             )
             sram_gen_test = RadGenArgs(
                 override_outputs = True,
-                top_config_path = self.top_config_path,
+                # top_config_path = self.top_config_path,
                 subtools = ["asic_dse"],
                 subtool_args = asic_dse_args,
             )
@@ -334,12 +335,6 @@ class TestSuite:
 
         coffe_cli = rg_ds.CoffeCLI()
         coffe_fields = coffe_cli.get_dataclass_fields()
-        # Make a custom dataclass for COFFE input arguments
-        # CoffeArgs = make_dataclass(
-        #     "CoffeArgs", 
-        #     fields = [ (name, dtype, field(default_factory=lambda: default)) for name, dtype, default in zip(coffe_fields["keys"], coffe_fields["dtypes"], coffe_fields["defaults"]) ], 
-        #     bases = (rg_ds.CoffeCLI,)
-        # )
         CoffeArgs = rg_ds.get_dyn_class(
             cls_name = "CoffeArgs",
             fields = coffe_fields,
@@ -347,14 +342,27 @@ class TestSuite:
 
         if self.coffe_tests is None:
             self.coffe_tests = []
+
+            #   ___ ___ _____ _ ___ ____  ___ _   _ _  _ ___ 
+            #  | __| _ \_   _( )_  )__ / | _ \ | | | \| / __|
+            #  | _||  _/ | | |/ / / |_ \ |   / |_| | .` \__ \
+            #  |_| |_|   |_|   /___|___/ |_|_\\___/|_|\_|___/
+            fpga_arch_config = os.path.expanduser(f"{self.coffe_inputs}/fpt23/finfet_7nm_pt_asap7_L4_m6_rl_10.yaml")                    
+            coffe_cli_args = CoffeArgs(
+                fpga_arch_conf_path = fpga_arch_config, 
+                # hb_flows_conf_path = f"{self.coffe_inputs}/finfet_7nm_fabric_w_hbs/hb_flows.yml",
+                max_iterations = 4,
+            )
+        
             # 7nm with ALU + INV hardblocks this may take a while (5+ hrs) hehe
             fpga_arch_config = os.path.expanduser(f"{self.coffe_inputs}/finfet_7nm_fabric_w_hbs/finfet_7nm_fabric_w_hbs.yml")
             coffe_cli_args = CoffeArgs(
                 fpga_arch_conf_path = fpga_arch_config, 
-                hb_flows_conf_path = f"{self.coffe_inputs}/finfet_7nm_fabric_w_hbs/hb_flows.yml",
-                max_iterations = 1, # Low QoR but this is a unit test
+                # hb_flows_conf_path = f"{self.coffe_inputs}/finfet_7nm_fabric_w_hbs/hb_flows.yml",
+                max_iterations = 2, # Low QoR but this is a unit test
             )
             coffe_7nm_hb_test = RadGenArgs(
+                top_config_path = self.top_config_path,
                 subtools = ["coffe"],
                 subtool_args = coffe_cli_args,
             )
@@ -567,7 +575,6 @@ def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], su
         golden_ref_base_path = os.path.expanduser( os.path.join(rad_gen_home, "unit_tests", "golden_results", subtool) )
         out_csv_path = None
         # Parse result and compare
-        """
         if subtool == "asic_dse":
             # Path of the golden reference output file 
             golden_ref_path = os.path.join(golden_ref_base_path, f"{test.rad_gen_args.subtool_args.top_lvl_module}_flow_report.csv")
@@ -625,7 +632,6 @@ def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], su
                 print(res_df)
             else:
                 pass
-        """
 
 
 
@@ -667,9 +673,9 @@ def main():
     #     print("Running NoC tests\n")
     #     run_tests(args, test_suite.rad_gen_home, test_suite.noc_tests, "asic_dse")
 
-    # if run_all or args.coffe:
-    #     print("Running COFFE tests\n")
-    #     run_tests(args, test_suite.rad_gen_home, test_suite.coffe_tests, "coffe")
+    if run_all or args.coffe:
+        print("Running COFFE tests\n")
+        run_tests(args, test_suite.rad_gen_home, test_suite.coffe_tests, "coffe")
     
     # if run_all or args.pdn_modeling:
     #     print("Running PDN modeling tests\n")
