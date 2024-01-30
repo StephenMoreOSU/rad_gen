@@ -6,7 +6,7 @@ from typing import Pattern, Dict, List, Any, Tuple, Union, Generator, Optional, 
 from datetime import datetime
 import logging
 from pathlib import Path
-
+import shutil
 import argparse
 
 
@@ -242,7 +242,9 @@ class Tree:
         self.heir_tag: Union[str, None] = tag
         self.is_leaf : bool = False
         self.scan_dir: bool = scan_dir # If true will scan the directory path and add any subdirectories to the tree
-        
+        # self.exts: Union[List[str], None] = None # List of file extensions which are searched for in this tree
+
+
         # Set is_leaf flag
         if self.subtrees == None:
             self.is_leaf = True
@@ -275,6 +277,7 @@ class Tree:
         """
         # Create subtrees and append them
         for subdir in os.listdir(self.path):
+            # "." and "__" are ignore prefixes for existing dir scanning
             if os.path.isdir(os.path.join(self.path, subdir)) and \
                 not subdir.startswith(".") and \
                 not subdir.startswith("__"):
@@ -306,7 +309,7 @@ class Tree:
         # Only would pass in a parent if doing something like adding a subtree to existing tree
         if parent:
             if parent.path:
-                self.path = os.path.join(parent.path, self.path)
+                self.path = os.path.join(parent.path, self.basename)
 
             if parent.heir_tag:
                 self.heir_tag = f"{parent.heir_tag}.{self.tag}" if self.tag else parent.tag

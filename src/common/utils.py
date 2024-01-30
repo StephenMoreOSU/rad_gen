@@ -46,12 +46,50 @@ rad_gen_log_fd = "asic_dse.log"
 log_verbosity = 2
 cur_env = os.environ.copy()
 
+
+# ██╗      ██████╗  ██████╗  ██████╗ ██╗███╗   ██╗ ██████╗ 
+# ██║     ██╔═══██╗██╔════╝ ██╔════╝ ██║████╗  ██║██╔════╝ 
+# ██║     ██║   ██║██║  ███╗██║  ███╗██║██╔██╗ ██║██║  ███╗
+# ██║     ██║   ██║██║   ██║██║   ██║██║██║╚██╗██║██║   ██║
+# ███████╗╚██████╔╝╚██████╔╝╚██████╔╝██║██║ ╚████║╚██████╔╝
+# ╚══════╝ ╚═════╝  ╚═════╝  ╚═════╝ ╚═╝╚═╝  ╚═══╝ ╚═════╝ 
+
+def log_format_list(*args : Tuple[str]) -> str:
+    # Format the extra arguments as [{arg1}][{arg2}]...[{argN}]
+    if args:
+        formatted_args = "".join([f"[{arg}]" for arg in args]) + ":"
+    else:
+        formatted_args = ":"
+    return formatted_args
+
+# def custom_log(logger: logging.Logger, msg: str, *args):
+#     # Format the extra arguments as [{arg1}][{arg2}]...[{argN}]
+#     if args:
+#         formatted_args = "".join([f"[{arg}]" for arg in args])
+#     else:
+#         formatted_args = ""
+#     extra = {"formatted_args": formatted_args}
+#     logger.debug(msg, extra=extra)
+
 #  ██████╗ ███████╗███╗   ██╗███████╗██████╗  █████╗ ██╗         ██╗   ██╗████████╗██╗██╗     ███████╗
 # ██╔════╝ ██╔════╝████╗  ██║██╔════╝██╔══██╗██╔══██╗██║         ██║   ██║╚══██╔══╝██║██║     ██╔════╝
 # ██║  ███╗█████╗  ██╔██╗ ██║█████╗  ██████╔╝███████║██║         ██║   ██║   ██║   ██║██║     ███████╗
 # ██║   ██║██╔══╝  ██║╚██╗██║██╔══╝  ██╔══██╗██╔══██║██║         ██║   ██║   ██║   ██║██║     ╚════██║
 # ╚██████╔╝███████╗██║ ╚████║███████╗██║  ██║██║  ██║███████╗    ╚██████╔╝   ██║   ██║███████╗███████║
 #  ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
+
+def format_csv_data(data: List[List[Any]]) -> List[List[str]]:
+    # Specify the width for each column
+    column_widths = [max(len(str(value)) for value in column) + 2 for column in zip(*data)]
+
+    # Format the rows
+    formatted_rows = []
+    for row in data:
+        formatted_row = [str(value).ljust(width) for value, width in zip(row, column_widths)]
+        formatted_rows.append(formatted_row)
+
+    return formatted_rows
+
 
 def flatten(dictionary, parent_key='', separator='.'):
     """
@@ -107,6 +145,32 @@ def rad_gen_log(log_str: str, file: str):
             print(f"{log_str}")
         fd.close()
 
+
+def write_csv_file(filename, formatted_data):
+    """
+    Write formatted data to a CSV file.
+
+    Parameters:
+    - filename (str): The name of the CSV file to be created or overwritten.
+    - formatted_data (list): A list of lists containing formatted data.
+      Each inner list represents a row, and its elements are left-aligned
+      strings with specified widths.
+
+    Example Usage:
+    data = [
+        ['Name', 'Age', 'City'],
+        ['John Doe', 25, 'New York'],
+        ['Jane Smith', 30, 'San Francisco'],
+        ['Bob Johnson', 22, 'Chicago'],
+    ]
+
+    formatted_data = format_csv_data(data)
+    write_csv_file('output.csv', formatted_data)
+    """
+    with open(filename, 'w', newline='') as csvfile:
+        csv_writer = csv.writer(csvfile)
+        csv_writer.writerows(formatted_data)
+
 def write_dict_to_csv(csv_lines,csv_fname):
     csv_fd = open(f"{csv_fname}.csv","w")
     writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
@@ -114,6 +178,7 @@ def write_dict_to_csv(csv_lines,csv_fname):
     for line in csv_lines:
         writer.writerow(line)
     csv_fd.close()
+
 
 def check_for_valid_path(path):
     ret_val = False
@@ -157,8 +222,11 @@ def c_style_comment_rm(text):
     return re.sub(pattern, replacer, text)
 
 
-def rec_find_fpath(dir,fname):
-    ret_val = 1
+def rec_find_fpath(dir: str,fname: str) -> Union[str, None]:
+    """
+    Finds a file recursivley in a directory and returns the path to it
+    """
+    ret_val = None
     for root, dirs, files in os.walk(dir):
         if fname in files:
             ret_val = os.path.join(root, fname)
@@ -418,17 +486,31 @@ def traverse_nested_dict(in_dict: Dict[str, Any], callable_fn: Callable, *args, 
     for k,v in in_dict.items():
         if isinstance(v, dict):
             in_dict[k] = traverse_nested_dict(v, callable_fn, *args, **kwargs)
+        elif isinstance(v, list) and any(isinstance(ele, dict) for ele in v):
+                in_dict[k] = []
+                for ele in v:
+                    if isinstance(ele, dict):
+                        # Pass to the traverse_nested_dict function again, adding the "parent_key" to the dickt to give info to following function
+                        in_dict[k].append(traverse_nested_dict(ele, callable_fn, *args, **dict(kwargs, parent_key=k) ))
+                    else:
+                        raise Exception("ERROR: Currently mixing dicts with non dicts in a list is not supported")
         else:
             # Callable function applies to each non dict element in nested dict
             in_dict[k] = callable_fn(k, v, *args, **kwargs)
     return in_dict
 
-def sanitize_element(param: str, ele_val: Any, validate_paths: bool = True) -> Any:
+def sanitize_element(param: str, ele_val: Any, validate_paths: bool = True, *args, **kwargs) -> Any:
     # Here are the key matches which makes sanitizer think its a path
     # TODO there may be a better way to do but this way you just have to list all path related keys below
     path_keys = ["path", "sram_parameters", "file", "dir", "home"]
     inv_path_keys = ["meta", "use_latest_obj_dir", "manual_obj_dir"] # even if path keys are in param if negative keys are in param then its not a path
+    # Special list for lists of dicts, we want to ignore any element with this key in the parent dict
+    parent_inv_path_keys = ["placement_constraints"]
+    # We check if the supplied inv path keys exist in our parent key as its expected to be heirarchical Ex.  "a.b.c"
+    if "parent_key" in kwargs.keys() and any( parent_key in kwargs["parent_key"] for parent_key in parent_inv_path_keys):
+        return ele_val
     is_param_path_lists = []
+    # if isinstance(ele_val, str) or isinstance(ele_val, list):
     for path_key in path_keys:
         is_param_path_list = []
         for neg_key in inv_path_keys:
@@ -446,6 +528,7 @@ def sanitize_element(param: str, ele_val: Any, validate_paths: bool = True) -> A
             raise ValueError(f"ERROR: (k, v) pair: ({param} {ele_val}) is wrong datatype for paths")
     else:
         ret_val = ele_val
+
     return ret_val
 
 def sanitize_config(config_dict: Dict[str, Any], validate_paths: bool = True) -> dict:
@@ -465,12 +548,13 @@ def parse_config(conf_path: str, validate_paths: bool = True, sanitize: bool = T
     else:
         raise ValueError(f"ERROR: config file {conf_path} is not a yaml or json file")
 
+    loaded_config = load_config_from_string(Path(conf_path).read_text(), is_yaml=is_yaml, path=str(Path(conf_path).resolve().parent))
     if sanitize:
         conf_dict = sanitize_config( 
-            load_config_from_string(Path(conf_path).read_text(), is_yaml=is_yaml, path=str(Path(conf_path).resolve().parent)),
+            loaded_config,
             validate_paths)
     else:
-        conf_dict = load_config_from_string(Path(conf_path).read_text(), is_yaml=is_yaml, path=str(Path(conf_path).resolve().parent))
+        conf_dict = loaded_config
         
     return conf_dict
 
@@ -484,6 +568,20 @@ def parse_yml_config(yaml_file: str, validate_paths: bool = True) -> dict:
     
     return sanitize_config(config, validate_paths)
 
+def find_common_root_dir(dpaths: List[str]) -> Union[None, List[str]]:
+    """
+        Finds the common root of a list of unsorted directories and makes sure they all exist in it and the common root was provided in the list
+        Returns the common root if conditions are met, None otherwise 
+    """
+
+    common_root = os.path.commonpath(dpaths)
+    # Check if all other paths are inside the upper most path (index 0)
+    # If its not true then we return None to show that there is no common root dir in dpath list
+    ret_val = None
+    if all(os.path.relpath(path, common_root).startswith('..') is False for path in dpaths):
+        if any(common_root == dpath for dpath in dpaths):
+            ret_val = common_root
+    return ret_val
 
 
 """
@@ -1078,33 +1176,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                             - SRAM GEN / RTL GEN / ASIC CONFIG GEN (Hammer / maybe something else ?? not sure now)
                                 - ASIC CONFIG GEN = VLSI or RTL param sweeps
     """ 
-
-    # For each CLI / config input we need to check that it exists in dict and is not None
-    # if asic_dse_conf["input_tree_top_path"] != None:
-    #     input_tree_top_path = clean_path(asic_dse_conf["input_tree_top_path"])
-    # if asic_dse_conf["output_tree_top_path"] != None:
-    #     output_tree_top_path = clean_path(asic_dse_conf["output_tree_top_path"])
-    
-    # Input dir structure for asic-dse asic flow, instantiated under <user_defined_design_name> dir under "asic_dse" in input tree
-
-    # hammer_obj_dir_tree = rg_ds.Tree()
-
-
-
-    # spice_dir_tree = rg_ds.Tree(
-
-    # )
-
-    # output_tree = rg_ds.Tree("outputs", 
-    #         [
-    #             # Obj directories exist here
-    #             rg_ds.Tree("obj_dirs", tag="obj_dirs"),
-    #             # Guessing there should be a place to put high level reports / logs / scripts (by high level I mean not specific to a single obj dir)
-    #             rg_ds.Tree("reports", tag="report"),
-    #             rg_ds.Tree("scripts", tag="script"),
-    #             rg_ds.Tree("logs", tag="logs"),
-    #         ]
-    #     )
     
     design_out_tree = rg_ds.Tree("top_lvl_module",
         [
@@ -1116,18 +1187,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
             rg_ds.Tree("logs", tag="logs"),
         ], tag="top_lvl_module"
     )
-
-
-    # output_tree = rg_ds.Tree("outputs", 
-    #     [
-    #         # Obj directories exist here
-    #         rg_ds.Tree("obj_dirs", tag="obj_dirs"),
-    #         # Guessing there should be a place to put high level reports / logs / scripts (by high level I mean not specific to a single obj dir)
-    #         rg_ds.Tree("reports", tag="report"),
-    #         rg_ds.Tree("scripts", tag="script"),
-    #         rg_ds.Tree("logs", tag="logs"),
-    #     ]
-    # )
     
     configs_tree = rg_ds.Tree("configs", 
         [
@@ -1149,15 +1208,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
         ]
     )
 
-    # design_tree = rg_ds.Tree("top_lvl_module_name",
-    #     [
-    #         copy.deepcopy(configs_tree),
-    #         copy.deepcopy(rtl_tree),
-    #         copy.deepcopy(output_tree),
-    #     ]
-    # )
-
-
     # Create a copy of the conf tree with name configs to use for sram_compiler
 
     sram_tree = rg_ds.Tree("sram_lib", 
@@ -1168,24 +1218,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
             rg_ds.Tree("macros"),
         ]
     )
-
-    # pdk_tree = rg_ds.Tree(f"{asic_dse_conf['pdk.name']}",
-    #     [
-    #         rg_ds.Tree("tx_models", tag="tx_model"), # Stores tx model files (.sp)
-    #         rg_ds.Tree("sram", 
-    #             [   
-    #                 rg_ds.Tree("compiler", 
-    #                     [
-    #                         conf_tree_copy,
-    #                         copy.deepcopy(rtl_tree),
-    #                     ],
-    #                     tag = "compiler"
-    #                 ),
-    #                 rg_ds.Tree("macros"),
-    #             ], tag="sram"
-    #         ),
-    #     ]
-    # )
 
     # Make tree defined directories
     asic_dse_conf["common"].project_tree.create_tree()
@@ -1199,100 +1231,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     conf_tree_copy.update_tree_top_path(new_path = "asic_dse", new_tag = "asic_dse")
     asic_dse_conf["common"].project_tree.append_tagged_subtree("shared_resources.configs", conf_tree_copy, is_hier_tag = True) # append our shared configs tree to the project tree
     asic_dse_conf["common"].project_tree.append_tagged_subtree(f"shared_resources", copy.deepcopy(sram_tree), is_hier_tag = True) # append our pdk tree to the project tree
-
-
-
-    """
-    design_input_tree = rg_ds.Tree(
-        asic_dse_conf["common"].input_tree_top.root,
-        [
-            # Resources that could be shared across multiple tools are put here, this could be technology models, pdk collateral, sram_macros, etc      
-            rg_ds.Tree("resources",
-                [
-                    # The idea for this section is that Pdks come in many forms with different structures but most of the time we need a few specific files
-                    # So for each new PDK a user will have to parse the directory structure and copy the files into this directory.
-
-                    # I think this is going to be the easiest way to make sure that the stuff we need to use for various tools is findable
-                    rg_ds.Tree("pdks", 
-                        [
-                            rg_ds.Tree("tx_models", tag="tx_model"),
-                        ],
-                        tag="pdk"),
-                ],
-                tag="resource"),
-            rg_ds.Tree("projects",
-                [
-                    rg_ds.Tree(asic_dse_conf["project_name"],
-                        [
-                            rg_ds.Tree("configs", 
-                                [
-                                    rg_ds.Tree("gen", tag="gen"),
-                                    rg_ds.Tree("mod", tag="mod"),
-                                ], tag = "config"
-                            ),
-                            rg_ds.Tree("rtl", 
-                                [
-                                    rg_ds.Tree("gen", tag="gen"),
-                                    rg_ds.Tree("src", tag="src"),
-                                    rg_ds.Tree("include", tag="inc"),
-                                    rg_ds.Tree("verif", tag="verif"),
-                                    rg_ds.Tree("build", tag="build"),
-                                ], tag = "rtl"
-                            ),
-                            rg_ds.Tree("outputs",
-                                [
-                                    rg_ds.Tree("stdcell",
-                                        [
-                                            rg_ds.Tree(asic_dse_conf["top_lvl_module"],
-                                                [
-                                                    rg_ds.Tree("hammer", None, tag="hammer"),
-                                                    # Obj directories exist here
-                                                    rg_ds.Tree("custom", None, tag="custom")
-                                                    # Obj directories exist here
-                                                ], tag="top_lvl_mod"
-                                            )
-                                        ]
-                                    ),
-                                    rg_ds.Tree("custom_circuits",
-                                        [
-                                            rg_ds.Tree("3D", tag="3D"),
-                                            rg_ds.Tree("fpga_arch", tag="fpga_arch")
-                                        ]
-                                    )
-                                ], tag = "output"
-                            )
-                        ], tag = f"{asic_dse_conf['project_name']}"
-                    )
-                ], tag = "projects"
-            )
-                # ], tag = "asic_dse"
-            # )
-        ],
-        tag = "top"
-    )
-    """
-
-    # design_output_tree = rg_ds.Tree(
-    #     asic_dse_conf["common"].output_tree_top.root,
-    #     [
-    #         rg_ds.Tree("asic_dse",
-    #             [
-    #                 rg_ds.Tree("projects")
-    #                 rg_ds.Tree("hammer", 
-    #                     [
-    #                         rg_ds.Tree("scripts", tag="script"), # scripts to run hammer flow in parallel 
-    #                         rg_ds.Tree("obj_dir", tag="obj"), # hammer obj dir, will contain all outputs/scripts/reports from flow
-    #                     ], tag="hammer"),
-    #                 rg_ds.Tree("custom"),
-    #             ]
-    #         )
-    #     ]
-    # )
-
-    # Create the above trees
-    #design_input_tree.create_tree()
-    #design_output_tree.create_tree()
-
 
 
     """
@@ -1359,10 +1297,53 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                     "sram_template.sv"
                 )
                 sweep_type_info = init_dataclass(rg_ds.SRAMSweepInfo, design, sweep_type_inputs)
-            elif design["type"] == "rtl_params":
-                sweep_type_info = init_dataclass(rg_ds.RTLSweepInfo, design, sweep_type_inputs)
-            elif design["type"] == "vlsi_params":
-                sweep_type_info = init_dataclass(rg_ds.VLSISweepInfo, design, sweep_type_inputs)
+            else:                
+                # If we are either doing RTL or VLSI sweep then we should copy over the source RTL to our project tree
+                # Check to see if the RTL was passed in via CLI params
+                # Priority of getting to RTL + HDL search Paths for RTL
+                # 1. Conglomerated CLI/Conf ( asic_dse_conf["flow_conf_fpath"] ) -> sweep_config["base_config_path"] 
+                if asic_dse_conf.get("flow_conf_paths") and len(asic_dse_conf["flow_conf_paths"]) == 1:
+                    base_config = parse_config(asic_dse_conf["flow_conf_paths"][0])
+                else:                
+                    base_config = parse_config(design["base_config_path"])
+
+                if asic_dse_conf.get("hdl_path"):
+                    exts = ['.v','.sv','.vhd',".vhdl", ".vh", ".svh"]
+                    _, hdl_search_paths = rec_get_flist_of_ext(asic_dse_conf.get("hdl_path"), exts)
+                else:
+                    hdl_search_paths = base_config.get("synthesis.inputs.hdl_search_paths")
+                # Priority of Copying RTL from user inputs to project tree
+                # 1. Search for RTL inside of user provided HDL search paths 
+                #   a. Priority order: CLI -> base_config["synthesis.inputs.hdl_search_paths"] -> base_config["synthesis.inputs.input_files"] if equivalent files we do a diff to make sure they are the same, if not equal we copy them over
+                # Priority of HDL search paths:
+                # 1. Conglom CLI/Conf (asic_dse_conf["hdl_path"]) -> base_config["synthesis.inputs.hdl_search_paths"]
+                if hdl_search_paths:
+                    # Is assumed sanitized by the parse_config (ie path exists)
+                    rtl_src_dpath = find_common_root_dir(hdl_search_paths)
+                    rtl_dst_tree = asic_dse_conf["common"].project_tree.search_subtrees(f"{asic_dse_conf['common'].project_name}.rtl.src", is_hier_tag = True)[0]
+                    rtl_dst_tree.scan_dir = True
+                    rtl_dst_dpath = rtl_dst_tree.path
+                    # Copy tree recursivley to project tree, just including all files assuming they will be part of the RTL we want, possibly could filter for specific files in the future
+                    shutil.copytree(rtl_src_dpath, rtl_dst_dpath, dirs_exist_ok=True)
+                    rtl_dst_tree.update_tree()
+
+                    # rtl_dst_tree = rg_ds.Tree(rtl_dst_dpath, scan_dir = True)
+
+                # Now get RTL from the synthesis input files, will look through the current RTL src path and if the files already exist will not copy them over
+                rtl_src_fpaths = base_config.get("synthesis.inputs.input_files.input_file")
+                if rtl_src_fpaths:
+                    # Search for file recursivley
+                    rtl_dst_tree = asic_dse_conf["common"].project_tree.search_subtrees(f"{asic_dse_conf['common'].project_name}.rtl.src", is_hier_tag = True)[0]
+                    for fpath in rtl_src_fpaths:
+                        # If we don't find a matching file in our rtl.src dir we will copy what exists in our conf over
+                        if not rec_find_fpath(rtl_dst_tree.path, os.path.basename(fpath)):
+                            shutil.copy(fpath, rtl_dst_tree.path)
+
+
+                if design["type"] == "rtl_params":
+                    sweep_type_info = init_dataclass(rg_ds.RTLSweepInfo, design, sweep_type_inputs)
+                elif design["type"] == "vlsi_params":
+                    sweep_type_info = init_dataclass(rg_ds.VLSISweepInfo, design, sweep_type_inputs)
             
             design_inputs = {}
             design_inputs["type_info"] = sweep_type_info

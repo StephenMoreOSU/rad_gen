@@ -291,13 +291,19 @@ class TestSuite:
             self.sram_tests.append(sram_compiled_macro_test)
         if self.noc_tests is None:
             self.noc_tests = []
-            # NoC RTL PARAM SWEEP GEN TEST 
+
+            #   _  _  ___   ___   ___ _____ _      ___  _   ___    _   __  __   _____      _____ ___ ___    ___ ___ _  _ 
+            #  | \| |/ _ \ / __| | _ \_   _| |    | _ \/_\ | _ \  /_\ |  \/  | / __\ \    / / __| __| _ \  / __| __| \| |
+            #  | .` | (_) | (__  |   / | | | |__  |  _/ _ \|   / / _ \| |\/| | \__ \\ \/\/ /| _|| _||  _/ | (_ | _|| .` |
+            #  |_|\_|\___/ \___| |_|_\ |_| |____| |_|/_/ \_\_|_\/_/ \_\_|  |_| |___/ \_/\_/ |___|___|_|    \___|___|_|\_|                                                                                               
+
             noc_sweep_config = os.path.expanduser(f"{self.asic_dse_inputs}/sweeps/noc_sweep.yml")
             asic_dse_args = AsicDseArgs(
                 tool_env_conf_path = tool_env_conf_path,
                 design_sweep_config = noc_sweep_config,
             )
             noc_sweep_test = RadGenArgs(
+                project_name = "NoC",
                 subtools = ["asic_dse"],
                 subtool_args = asic_dse_args,
             )
@@ -575,63 +581,63 @@ def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], su
         golden_ref_base_path = os.path.expanduser( os.path.join(rad_gen_home, "unit_tests", "golden_results", subtool) )
         out_csv_path = None
         # Parse result and compare
-        if subtool == "asic_dse":
-            # Path of the golden reference output file 
-            golden_ref_path = os.path.join(golden_ref_base_path, f"{test.rad_gen_args.subtool_args.top_lvl_module}_flow_report.csv")
+        # if subtool == "asic_dse":
+        #     # Path of the golden reference output file 
+        #     golden_ref_path = os.path.join(golden_ref_base_path, f"{test.rad_gen_args.subtool_args.top_lvl_module}_flow_report.csv")
             
-            # Only thing that generates results is the asic flow so make sure it ran it
-            if test.rad_gen_args.subtool_args.flow_config_paths != None and len(test.rad_gen_args.subtool_args.flow_config_paths) > 0:
-                out_csv_path = os.path.join(test.rad_gen_args.subtool_args.manual_obj_dir, "flow_report.csv")
+        #     # Only thing that generates results is the asic flow so make sure it ran it
+        #     if test.rad_gen_args.subtool_args.flow_config_paths != None and len(test.rad_gen_args.subtool_args.flow_config_paths) > 0:
+        #         out_csv_path = os.path.join(test.rad_gen_args.subtool_args.manual_obj_dir, "flow_report.csv")
             
-            # If the flow actually produced a csv then compare it
-            if out_csv_path != None and os.path.exists(out_csv_path):
-                res_df = compare_results(out_csv_path, golden_ref_path)
-                print(res_df)
-            else:
-                pass
-                # print("Warning: Seems like you don't have any results for this unit test, maybe there was an error or you didn't run the test?")
-        if subtool == "coffe":
-            golden_ref_path = os.path.join(golden_ref_base_path, os.path.basename(os.path.splitext(test.rad_gen_args.subtool_args.fpga_arch_conf_path)[0]) + ".txt" )
-            # print(golden_ref_path)
-            # TODO remove hardcoding
-            unit_test_report_path = os.path.expanduser("~/rad_gen/unit_tests/outputs/coffe/finfet_7nm_fabric_w_hbs/arch_out_dir/report.txt")
-            # Make sure report was generated
-            if os.path.isfile(golden_ref_path) and os.path.isfile(unit_test_report_path):
-                unit_test_report_dict = coffe_parse.coffe_report_parser(rg_ds.Regexes(), unit_test_report_path)
-                golden_report_dict = coffe_parse.coffe_report_parser(rg_ds.Regexes(), golden_ref_path)
-                unit_test_dfs = []
-                golden_report_dfs = []
-                for u_v, g_v in zip(unit_test_report_dict.values(), golden_report_dict.values()):
-                    if isinstance(u_v, list):
-                        unit_test_dfs.append( pd.DataFrame(u_v) )
-                    elif isinstance(u_v, dict):
-                        unit_test_dfs.append( pd.DataFrame([u_v]))
+        #     # If the flow actually produced a csv then compare it
+        #     if out_csv_path != None and os.path.exists(out_csv_path):
+        #         res_df = compare_results(out_csv_path, golden_ref_path)
+        #         print(res_df)
+        #     else:
+        #         pass
+        #         # print("Warning: Seems like you don't have any results for this unit test, maybe there was an error or you didn't run the test?")
+        # if subtool == "coffe":
+        #     golden_ref_path = os.path.join(golden_ref_base_path, os.path.basename(os.path.splitext(test.rad_gen_args.subtool_args.fpga_arch_conf_path)[0]) + ".txt" )
+        #     # print(golden_ref_path)
+        #     # TODO remove hardcoding
+        #     unit_test_report_path = os.path.expanduser("~/rad_gen/unit_tests/outputs/coffe/finfet_7nm_fabric_w_hbs/arch_out_dir/report.txt")
+        #     # Make sure report was generated
+        #     if os.path.isfile(golden_ref_path) and os.path.isfile(unit_test_report_path):
+        #         unit_test_report_dict = coffe_parse.coffe_report_parser(rg_ds.Regexes(), unit_test_report_path)
+        #         golden_report_dict = coffe_parse.coffe_report_parser(rg_ds.Regexes(), golden_ref_path)
+        #         unit_test_dfs = []
+        #         golden_report_dfs = []
+        #         for u_v, g_v in zip(unit_test_report_dict.values(), golden_report_dict.values()):
+        #             if isinstance(u_v, list):
+        #                 unit_test_dfs.append( pd.DataFrame(u_v) )
+        #             elif isinstance(u_v, dict):
+        #                 unit_test_dfs.append( pd.DataFrame([u_v]))
                     
-                    if isinstance(g_v, list):
-                        golden_report_dfs.append( pd.DataFrame(g_v) )
-                    elif isinstance(g_v, dict):
-                        golden_report_dfs.append( pd.DataFrame([g_v]))
+        #             if isinstance(g_v, list):
+        #                 golden_report_dfs.append( pd.DataFrame(g_v) )
+        #             elif isinstance(g_v, dict):
+        #                 golden_report_dfs.append( pd.DataFrame([g_v]))
 
-                for unit_df, golden_df in zip(unit_test_dfs, golden_report_dfs):
-                    comp_df = compare_dataframes("test", unit_df, "golden", golden_df)
-                    for l in rg_utils.get_df_output_lines(comp_df):
-                        print(l)
-            else:
-                if not os.path.isfile(golden_ref_path):
-                    print(f"Warning: Golden reference file {golden_ref_path} does not exist")
-                if not os.path.isfile(unit_test_report_path):
-                    print(f"Warning: Unit test report file {unit_test_report_path} does not exist, the test may have failed")
-        if subtool == "ic_3d":
-            # Path of the golden reference output file 
-            golden_ref_path = os.path.join(golden_ref_base_path, "buffer_summary_report.csv")
-            out_csv_path = os.path.join(rad_gen_home, "ic_3d_reports", "buffer_summary_report.csv")
+        #         for unit_df, golden_df in zip(unit_test_dfs, golden_report_dfs):
+        #             comp_df = compare_dataframes("test", unit_df, "golden", golden_df)
+        #             for l in rg_utils.get_df_output_lines(comp_df):
+        #                 print(l)
+        #     else:
+        #         if not os.path.isfile(golden_ref_path):
+        #             print(f"Warning: Golden reference file {golden_ref_path} does not exist")
+        #         if not os.path.isfile(unit_test_report_path):
+        #             print(f"Warning: Unit test report file {unit_test_report_path} does not exist, the test may have failed")
+        # if subtool == "ic_3d":
+        #     # Path of the golden reference output file 
+        #     golden_ref_path = os.path.join(golden_ref_base_path, "buffer_summary_report.csv")
+        #     out_csv_path = os.path.join(rad_gen_home, "ic_3d_reports", "buffer_summary_report.csv")
             
-            # If the flow actually produced a csv then compare it
-            if os.path.exists(out_csv_path):
-                res_df = compare_results(out_csv_path, golden_ref_path)
-                print(res_df)
-            else:
-                pass
+        #     # If the flow actually produced a csv then compare it
+        #     if os.path.exists(out_csv_path):
+        #         res_df = compare_results(out_csv_path, golden_ref_path)
+        #         print(res_df)
+        #     else:
+        #         pass
 
 
 

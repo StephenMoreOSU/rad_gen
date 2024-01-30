@@ -428,11 +428,13 @@ def modify_config_file(rad_gen: rg_ds.AsicDSE) -> str:
 
     return modified_config_path
 
-def replace_rtl_param(top_p_name_val, p_names, p_vals, base_config_path, base_param_hdr, base_param_hdr_path, param_sweep_hdr_dir):
+
+
+def replace_rtl_param(top_p_name_val: Any, p_names: str, p_vals: Any, base_config_path: str, mod_config_out_dpath: str, base_param_hdr: str,  param_sweep_hdr_dir: str) -> Tuple[str,str]:
     # p_names and p_vals are lists of parameters which need to be edited_concurrently
 
     mod_param_dir_str = ""
-    mod_param_hdr = base_param_hdr
+    mod_param_hdr = copy.copy(base_param_hdr)
     for p_name, p_val in zip(p_names,p_vals):
         edit_params_re = re.compile(f"parameter\s+{p_name}.*$",re.MULTILINE)
         new_param_str = f'parameter {p_name} = {p_val};'
@@ -450,33 +452,41 @@ def replace_rtl_param(top_p_name_val, p_names, p_vals, base_config_path, base_pa
     with open(mod_param_out_fpath,"w") as param_out_fd:
         param_out_fd.write(mod_param_hdr)
     """ GENERATING AND WRITING RAD GEN CONFIG FILES """
-    with open(base_config_path,"r") as config_fd:
-        rad_gen_config = yaml.safe_load(config_fd)
-    rad_gen_config["synthesis"]["inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_path))
-    mod_config_path = os.path.splitext(base_config_path)[0]+f'_{mod_param_dir_name}.yaml'
-    
+
+    rad_gen_config = rg_utils.parse_config(base_config_path)
+    # with open(base_config_path,"r") as config_fd:
+        # rad_gen_config = yaml.safe_load(config_fd)
+    rad_gen_config["synthesis.inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_path))
+    mod_config_path = os.path.join( 
+        mod_config_out_dpath, os.path.splitext(os.path.basename(base_config_path))[0]+f'_{mod_param_dir_name}.json'
+    )
+
     # TODO remove hardcoding, connect to the "input_dir_struct" data structure in EnvSettings
     # mod_configs_dir = os.path.join( os.path.dirname(base_config_path), "mod")
     # mod_config_path = os.path.join(mod_configs_dir, os.path.splitext(base_config_path)[0]+f'_{mod_param_dir_name}.yaml')
     # # make modified config dir if it doesnt exist
     # os.makedirs(mod_configs_dir, exist_ok=True)
     
-    with open(mod_config_path,"w") as config_fd:
-        yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
+    dump_config_to_json_file(mod_config_path, rad_gen_config)
+    # with open(mod_config_path,"w") as config_fd:
+    #     yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
 
     return mod_param_out_fpath, mod_config_path
 
-def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_config_path):
+def edit_rtl_proj_params(asic_dse: rg_ds.AsicDSE, rtl_params: Dict[str, Any], rtl_dir_path: str, base_param_hdr_path: str, base_config_path: str) -> Tuple[List[str], List[str]]:
     """ 
         Edits the parameters specified in the design config file 
-        Specifically only works for parameters associated with NoC currently TODO
+        Currently only tested on NoC + Single simple parameter sweeps TODO test on more complicated designs
     """
 
     # Its expected that the modified parameter files will be generated in the directory above project src files
-    param_sweep_hdr_dir = os.path.join(rtl_dir_path,"..","param_sweep_headers")
+    # param_sweep_hdr_dir = os.path.join(rtl_dir_path,"..","param_sweep_headers")
+    rtl_gen_dpath = asic_dse.common.project_tree.search_subtrees(f"{asic_dse.common.project_name}.rtl.gen", is_hier_tag = True)[0].path
+    mod_config_out_dpath = asic_dse.common.project_tree.search_subtrees(f"{asic_dse.common.project_name}.configs.gen", is_hier_tag = True)[0].path
+    param_sweep_hdr_dpath = os.path.join(rtl_gen_dpath, "param_sweep_headers")
 
-    if not os.path.isdir(param_sweep_hdr_dir):
-        os.mkdir(param_sweep_hdr_dir)
+    if not os.path.isdir(param_sweep_hdr_dpath):
+        os.mkdir(param_sweep_hdr_dpath)
 
     base_param_hdr = rg_utils.c_style_comment_rm(open(base_param_hdr_path).read())
     
@@ -488,6 +498,7 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
         if(len(p_vals) > 0 or isinstance(p_vals,dict) ):
             # print(p_name)
             if(isinstance(p_vals,dict)):
+                # Multi parameter sweep
                 for i in range(len(p_vals["vals"])):
                     """ WRITE PARAMETER/CONFIG FILES FOR EACH ITERATION """
                     # Crate a sweep iter dict which will contain the param values which need to be set for a given iteration
@@ -506,18 +517,19 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
                             edit_param = p_name_i
                         p_names_i.append(edit_param)
                         p_vals_i.append(p_val_i)
-                    mod_param_fpath, mod_config_fpath = replace_rtl_param(top_p_val_name, p_names_i, p_vals_i, base_config_path, base_param_hdr, base_param_hdr_path, param_sweep_hdr_dir)
+                    mod_param_fpath, mod_config_fpath = replace_rtl_param(top_p_val_name, p_names_i, p_vals_i, base_config_path, mod_config_out_dpath, base_param_hdr, param_sweep_hdr_dpath)
                     mod_parameter_paths.append(mod_param_fpath)
                     mod_config_paths.append(mod_config_fpath)
             else:
+                # Single Param sweep
                 for p_val in p_vals:
                     """ GENERATING AND WRITING RTL PARAMETER FILES """
-                    mod_param_hdr = base_param_hdr
+                    mod_param_hdr = base_param_hdr.copy()
                     # each iteration creates a new parameter file
                     edit_params_re = re.compile(f"parameter\s+{p_name}.*$",re.MULTILINE)
                     new_param_str = f'parameter {p_name} = {p_val};'
-                    mod_param_hdr = edit_params_re.sub(string=mod_param_hdr,repl=new_param_str)
-                    mod_param_dir_str = os.path.join(param_sweep_hdr_dir,f'{p_name}_{p_val}_{os.path.splitext(os.path.split(base_param_hdr_path)[1])[0]}')
+                    mod_param_hdr = edit_params_re.sub(string=mod_param_hdr, repl=new_param_str)
+                    mod_param_dir_str = os.path.join(param_sweep_hdr_dpath,f'{p_name}_{p_val}_{os.path.splitext(os.path.basename(base_param_hdr_path))[0]}')
                     if not os.path.isdir(mod_param_dir_str):
                         os.mkdir(mod_param_dir_str)
                     mod_param_out_fpath = os.path.join(mod_param_dir_str,"parameters.v")
@@ -526,18 +538,24 @@ def edit_rtl_proj_params(rtl_params, rtl_dir_path, base_param_hdr_path, base_con
                         param_out_fd.write(mod_param_hdr)
                     mod_parameter_paths.append(mod_param_out_fpath)
                     """ GENERATING AND WRITING RAD GEN CONFIG FILES """
-                    with open(base_config_path,"r") as config_fd:
-                        rad_gen_config = yaml.safe_load(config_fd)
-                    rad_gen_config["synthesis"]["inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_str))
-                    mod_config_path = os.path.splitext(base_config_path)[0]+f'_{p_name}_{p_val}.yaml'
+                    rad_gen_config = rg_utils.parse_config(base_config_path)
+                    # with open(base_config_path,"r") as config_fd:
+                    #     rad_gen_config = yaml.safe_load(config_fd)
+                    rad_gen_config["synthesis.inputs.hdl_search_paths"].append(os.path.abspath(mod_param_dir_str))
+                    mod_config_path = os.path.join(
+                        asic_dse.common.project_tree.search_subtrees(f"{asic_dse.common.project_name}.configs.gen", is_hier_tag = True)[0].path,
+                        f'{p_name}_{p_val}_{os.path.splitext(os.path.basename(base_config_path))[0]}.json'
+                    )
+                    # mod_config_path = os.path.splitext(base_config_path)[0]+f'_{p_name}_{p_val}.json'
                     print("Writing modified config file to: " + mod_config_path, rad_gen_log_fd)
-                    with open(mod_config_path,"w") as config_fd:
-                        yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
+                    dump_config_to_json_file(mod_config_path, rad_gen_config)
+                    # with open(mod_config_path,"w") as config_fd:
+                    #     yaml.safe_dump(rad_gen_config, config_fd, sort_keys=False)
                     mod_config_paths.append(mod_config_path)
 
     return mod_parameter_paths, mod_config_paths
 
-def read_in_rtl_proj_params(rad_gen_settings: rg_ds.AsicDSE, rtl_params, top_level_mod, rtl_dir_path, sweep_param_inc_path=False):
+def read_in_rtl_proj_params(asic_dse: rg_ds.AsicDSE, rtl_params: Dict[str, Any], top_level_mod: str, rtl_dir_path: str, sweep_param_inc_path: str = False):
 
     # Find all parameters which will be used in the design (ie find top level module rtl, parse include files top to bottom and get those values )
     """ FIND TOP LEVEL MODULE IN RTL FILES """
@@ -584,9 +602,9 @@ def read_in_rtl_proj_params(rad_gen_settings: rg_ds.AsicDSE, rtl_params, top_lev
             for inc_line in clean_include_rtl.split("\n"):
                 
                 # Look for parameters
-                if rad_gen_settings.env_settings.res.find_params_re.search(inc_line):
+                if asic_dse.common.res.find_params_re.search(inc_line):
                     # TODO this parameter re will not work if no whitespace between params
-                    clean_line = " ".join(rad_gen_settings.env_settings.res.wspace_re.split(inc_line)[1:]).replace(";","")
+                    clean_line = " ".join(asic_dse.common.res.wspace_re.split(inc_line)[1:]).replace(";","")
                     # Get the parameter name and value
                     param_name = clean_line.split("=")[0].replace(" ","")
                     param_val = clean_line.split("=")[1].replace(" ","").replace("`","")
@@ -601,15 +619,15 @@ def read_in_rtl_proj_params(rad_gen_settings: rg_ds.AsicDSE, rtl_params, top_lev
                     #rtl_preproc["params"][param_name] = str(param_val)
                     rtl_preproc["vals"].append({"name" : param_name, "value" : str(param_val),"type": "param","line_idx": global_line_idx})
 
-                elif rad_gen_settings.env_settings.res.find_defines_re.search(inc_line):
+                elif asic_dse.common.res.find_defines_re.search(inc_line):
                     # TODO this define re will not work if no whitespace between params
-                    clean_line = " ".join(rad_gen_settings.env_settings.res.wspace_re.split(inc_line)[1:])
+                    clean_line = " ".join(asic_dse.common.res.wspace_re.split(inc_line)[1:])
                     # Get the define name and value
-                    define_name = rad_gen_settings.env_settings.res.wspace_re.split(clean_line)[0]
-                    if rad_gen_settings.env_settings.res.grab_bw_soft_bkt.search(clean_line):
-                        define_val = rad_gen_settings.env_settings.res.grab_bw_soft_bkt.search(clean_line).group(0)
+                    define_name = asic_dse.common.res.wspace_re.split(clean_line)[0]
+                    if asic_dse.common.res.grab_bw_soft_bkt.search(clean_line):
+                        define_val = asic_dse.common.res.grab_bw_soft_bkt.search(clean_line).group(0)
                     else:
-                        define_val = rad_gen_settings.env_settings.res.wspace_re.split(clean_line)[1].replace("`","")
+                        define_val = asic_dse.common.res.wspace_re.split(clean_line)[1].replace("`","")
                     # create dep list for defines
                     for i in range(len(rtl_preproc["vals"])):
                         if rtl_preproc["vals"][i]["name"] in define_val:
@@ -625,8 +643,8 @@ def read_in_rtl_proj_params(rad_gen_settings: rg_ds.AsicDSE, rtl_params, top_lev
     tmp_top_lvl_rtl = clean_top_lvl_rtl
     local_param_matches = []
     # Searching through the text in this way preserves initialization order
-    while rad_gen_settings.env_settings.res.find_localparam_re.search(tmp_top_lvl_rtl):
-        local_param = rad_gen_settings.env_settings.res.find_localparam_re.search(tmp_top_lvl_rtl).group(0)
+    while asic_dse.common.res.find_localparam_re.search(tmp_top_lvl_rtl):
+        local_param = asic_dse.common.res.find_localparam_re.search(tmp_top_lvl_rtl).group(0)
         local_param_matches.append(local_param)
         tmp_top_lvl_rtl = tmp_top_lvl_rtl.replace(local_param,"")
     """ EVALUATING BOOLEANS FOR LOCAL PARAMS W PARAMS AND DEFINES """
@@ -716,7 +734,7 @@ def read_in_rtl_proj_params(rad_gen_settings: rg_ds.AsicDSE, rtl_params, top_lev
     params = []
     for line in param_print_stdout.split("\n"):
         if line != "":
-            x = rad_gen_settings.env_settings.res.wspace_re.sub(repl="",string=line).split(":")
+            x = asic_dse.common.res.wspace_re.sub(repl="",string=line).split(":")
             p_dict = {x[0]:x[1]}
             params.append(p_dict)
 

@@ -9,6 +9,7 @@ RADGen documentation can be found at https://rad-gen.readthedocs.io/en/latest/
 # load_config_from_paths([config.yamls])
 
 import argparse
+import logging
 import sys, os
 import subprocess as sp
 import shlex
@@ -60,6 +61,33 @@ rad_gen_log_fd = "rad_gen.log"
 log_verbosity = 2
 cur_env = os.environ.copy()
 
+# ██╗      ██████╗  ██████╗  ██████╗ ██╗███╗   ██╗ ██████╗ 
+# ██║     ██╔═══██╗██╔════╝ ██╔════╝ ██║████╗  ██║██╔════╝ 
+# ██║     ██║   ██║██║  ███╗██║  ███╗██║██╔██╗ ██║██║  ███╗
+# ██║     ██║   ██║██║   ██║██║   ██║██║██║╚██╗██║██║   ██║
+# ███████╗╚██████╔╝╚██████╔╝╚██████╔╝██║██║ ╚████║╚██████╔╝
+# ╚══════╝ ╚═════╝  ╚═════╝  ╚═════╝ ╚═╝╚═╝  ╚═══╝ ╚═════╝ 
+
+
+def init_logger():
+    # Init Logger
+    logger = logging.getLogger("rad_gen_root")
+    
+    logger.root.setLevel(logging.DEBUG)
+    # Create Stream Handler
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.DEBUG) # Set this handler to print out everything (debug is lowest level)
+    file_handler = logging.FileHandler(os.path.abspath(f"rad_gen_logging_{rg_ds.create_timestamp()}.log"))
+    file_handler.setLevel(logging.DEBUG)
+    fmt = logging.Formatter('%(message)s')
+    stream_handler.setFormatter(fmt)
+    file_handler.setFormatter(fmt)     
+    logger.addHandler(stream_handler)
+    logger.addHandler(file_handler)
+
+
+    return logger
+
 # ██████╗  █████╗ ██████╗      ██████╗ ███████╗███╗   ██╗    ███████╗██╗  ██╗███████╗ ██████╗    ███╗   ███╗ ██████╗ ██████╗ ███████╗███████╗
 # ██╔══██╗██╔══██╗██╔══██╗    ██╔════╝ ██╔════╝████╗  ██║    ██╔════╝╚██╗██╔╝██╔════╝██╔════╝    ████╗ ████║██╔═══██╗██╔══██╗██╔════╝██╔════╝
 # ██████╔╝███████║██║  ██║    ██║  ███╗█████╗  ██╔██╗ ██║    █████╗   ╚███╔╝ █████╗  ██║         ██╔████╔██║██║   ██║██║  ██║█████╗  ███████╗
@@ -71,6 +99,9 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     global cur_env
     global rad_gen_log_fd
     global log_verbosity
+
+    # Get logger into main
+    logger = init_logger()
 
     #Clear rad gen log
     fd = open(rad_gen_log_fd, 'w')
