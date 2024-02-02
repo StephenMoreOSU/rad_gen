@@ -10,6 +10,7 @@ import src.coffe.vpr as coffe_vpr
 import datetime
 import math
 import src.common.data_structs as rg_ds
+import logging
 
 from collections import namedtuple
 from dataclasses import fields
@@ -20,6 +21,9 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     is_size_transistors = not coffe_info.no_sizing
     size_hb_interfaces = coffe_info.size_hb_interfaces
 
+
+    # Path to output telemetry file
+    telemetry_file_path = os.path.join(arch_folder, "telemetry.csv")
     # Print the options to both terminal and report file
     report_file_path = os.path.join(arch_folder, "report.txt") 
 
@@ -43,7 +47,7 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     total_start_time = time.time()
 
     # Create an FPGA instance
-    fpga_inst = fpga.FPGA(coffe_info, args, spice_interface)
+    fpga_inst = fpga.FPGA(coffe_info, args, spice_interface, telemetry_file_path)
                         
     ###############################################################
     ## GENERATE FILES

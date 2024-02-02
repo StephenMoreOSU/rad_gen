@@ -42,6 +42,7 @@
 import os
 import sys
 import math
+import logging
 
 # Subcircuit Modules
 import src.coffe.basic_subcircuits as basic_subcircuits
@@ -61,9 +62,11 @@ import src.coffe.spice as spice
 
 # Rad Gen data structures
 import src.common.data_structs as rg_ds
+import src.common.utils as rg_utils
 
 # ASIC DSE imports
 import src.asic_dse.asic_dse as asic_dse
+
 
 
 
@@ -2996,8 +2999,13 @@ class _RoutingWireLoad:
         # Each used routing multiplexer comes with (sb_level2_size - 1) partially on paths. 
         # If all wires were used, we'd have (sb_level2_size - 1) partially on paths per wire, TODO: Is this accurate? See ble output load
         # but since we are just using a fraction of the wires, each wire has (sb_level2_size - 1)*channel_usage partially on paths connected to it.
+        
+        # Stratix had around 50% channel usage, 60-70% is pushing it for most FPGAs
+        # Channel usage is correction factor because we dont turn all muxes on, if we use half of our routing wires we put 0.5 for channel usage
         self.sb_load_partial = int(round(float(sb_level2_size - 1.0)*channel_usage))
         # The number of off sb_mux is (total - partial)
+        # Everything that is not partially on will be off
+        # The one ON swtich was already considered so we dont include it in the load
         self.sb_load_off = sb_load_per_intermediate_tile*L - self.sb_load_partial
         
         # Calculate connection block load per tile
@@ -5289,12 +5297,24 @@ class _hard_block(_CompoundCircuit):
         #    utils.print_and_write(report_file, "  Dedicated output routing:")
         #    self.dedicated.print_details(report_file)
 
-  
+
 class FPGA:
     """ This class describes an FPGA. """
         
-    def __init__(self, coffe_info: rg_ds.Coffe, run_options, spice_interface):
+    def __init__(self, coffe_info: rg_ds.Coffe, run_options, spice_interface, telemetry_fpath):
         
+        # Telemetry file path
+        self.telemetry_fpath = telemetry_fpath
+
+        # Get our global logger
+        self.logger = logging.getLogger("rad_gen_root")
+
+        # Counters for various update functions
+        self.update_area_cnt = 0
+        self.update_wires_cnt = 0
+        self.compute_distance_cnt = 0
+        self.update_delays_cnt = 0
+
         # Initialize the specs
         self.specs = _Specs(coffe_info.fpga_arch_conf["fpga_arch_params"], run_options.quick_mode)
 
@@ -5621,6 +5641,9 @@ class FPGA:
         """ This function updates self.area_dict. It passes area_dict to member objects (like sb_mux)
             to update their area. Then, with an up-to-date area_dict it, calculate total tile area. """
         
+        # FPGA level update area log str
+        # top_log_str = "AREA"
+
         # We use the self.transistor_sizes to compute area. This dictionary has the form 'name': 'size'
         # And it knows the transistor sizes of all transistors in the FPGA
         # We first need to calculate the area for each transistor.
@@ -5869,6 +5892,14 @@ class FPGA:
         if self.lb_height != 0.0:  
             self.compute_distance()
 
+        # Area logging
+        self.update_area_cnt += 1
+        # for area_key, area_value in self.area_dict.items():
+        #     rg_utils.custom_log(self.logger, area_value, top_log_str, area_key)
+
+        # Width Logging
+        # for area_key, area_value in self.area_dict.items():
+        #     rg_utils.custom_log(self.logger, area_value, top_log_str, area_key)
         #self.debug_print("width_dict")
 
     def compute_distance(self):
@@ -6037,7 +6068,8 @@ class FPGA:
                             distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]/self.span_stripe_fraction
                         if self.d_ffble_to_ic < distance_temp:
                             self.d_ffble_to_ic = distance_temp       
-        
+        # Compute Dist logging
+        self.compute_distance_cnt += 1
         #print str(self.dict_real_widths["sb"])
         #print str(self.dict_real_widths["cb"])
         #print str(self.dict_real_widths["ic"])
@@ -6156,6 +6188,8 @@ class FPGA:
             hardblock.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)  
             hardblock.mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)   
 
+        # Update Wires logging
+        self.update_wires_cnt += 1
         #self.debug_print("wire_lengths")  
 
     def update_wire_rc(self):
@@ -7001,6 +7035,9 @@ class FPGA:
         self.RAM.wordlinedriver.power = float(spice_meas["meas_avg_power"][0])
         if self.RAM.wordlinedriver.wl_repeater == 1:
             self.RAM.wordlinedriver.power *=2
+
+        # Delay Logging
+        self.update_delays_cnt += 1
 
         return valid_delay
 

@@ -13,6 +13,12 @@ import time
 import src.coffe.spice as spice
 from itertools import product
 import sys
+import logging
+
+from typing import List, Dict, Tuple, Set, Union, Any, Type, Callable
+import src.common.utils as rg_utils
+
+import csv
 
 # This flag controls whether or not to print a bunch of ERF messages to the terminal
 ERF_MONITOR_VERBOSE = True
@@ -22,6 +28,59 @@ ERF_ERROR_TOLERANCE = 0.1
 # Maximum number of times the algorithm will try to meet ERF_ERROR_TOLERANCE before quitting.
 ERF_MAX_ITERATIONS = 4
 
+
+def log_fpga_telemetry(fpga_inst, *args):
+	""" Log the FPGA telemetry to the fpga_inst logger output"""
+	
+	# for arg in args:
+	# 	if isinstance(arg, str):
+	# 		arg = arg.upper()
+
+	for area_key, area_value in fpga_inst.area_dict.items():
+		fpga_inst.logger.debug(f'{rg_utils.log_format_list("AREA", *args, area_key)} {area_value}')
+	
+	for delay_key, delay_value in fpga_inst.delay_dict.items():
+		fpga_inst.logger.debug(f'{rg_utils.log_format_list("DELAY", *args, delay_key)} {delay_value}')
+	
+	for wire_key, wire_len in fpga_inst.wire_lengths.items():
+		fpga_inst.logger.debug(f'{rg_utils.log_format_list("WL", *args, wire_key)} {wire_len}')
+	
+	for tx_key, tx_val in fpga_inst.transistor_sizes.items():
+		fpga_inst.logger.debug(f'{rg_utils.log_format_list("TX_SIZE", *args, tx_key)} {tx_val}')
+
+
+# def update_fpga_info(fpga_inst):
+
+# 	fpga_inst.update_area()
+# 	fpga_inst.update_wires()
+# 	fpga_inst.update_wire_rc()
+
+def update_fpga_telemetry_csv(fpga_inst, outer_iter: int, sizing_subckt: str, inner_iter: int, tx_set_iter: int, tag: str):
+	""" Update the FPGA telemetry CSV file with the current FPGA telemetry, Create CSV if it doesnt exist """
+	
+	out_catagories = {
+		"wire_length": fpga_inst.wire_lengths,
+		"area": fpga_inst.area_dict,
+		"tx_size": fpga_inst.transistor_sizes,
+		"delay": fpga_inst.delay_dict
+	}
+	# Check to see if any repeating keys in any of these dicts
+	# if not set(fpga_inst.wire_lengths.keys()) & set(fpga_inst.area_dict.keys()) fpga_inst.transistor_sizes.keys()
+
+
+	# Write a CSV for each catagory of information we want to track
+	for cat_k, cat_v in out_catagories.items():
+		row_data = { "TAG": tag, "OUTER_ITER": outer_iter, "SIZING_SBCKT": sizing_subckt, "INNER_ITER": inner_iter, "TRAN_SET_ITER": tx_set_iter, **cat_v}
+		# Open the CSV file
+		with open(f"{cat_k}.csv", "a") as csv_file:
+			header = list(row_data.keys())
+			writer = csv.DictWriter(csv_file, fieldnames = header)
+		
+			# Check if the file is empty and write header if needed
+			if csv_file.tell() == 0:
+				writer.writeheader()
+
+			writer.writerow(row_data)
 
 
 def expand_ranges(sizing_ranges):
@@ -153,9 +212,10 @@ def export_transistor_sizes(filename, transistor_sizes):
 	tran_size_file.close()
 	
 	
-def export_all_results(results_filename, element_names, sizing_combos, cost_list, area_list, eval_delay_list, tfall_trise_list):
+def export_all_results(results_filename, element_names, sizing_combos, cost_list, area_list, eval_delay_list, tfall_trise_list) -> List[List[str]]:
 	""" Write all area and delay results to a file. """
 	
+	result_data = [] # List of list to write to a CSV and the log
 	# Open file for writing
 	results_file = open(results_filename, 'w')
 	
@@ -165,18 +225,22 @@ def export_all_results(results_filename, element_names, sizing_combos, cost_list
 		header_str += name + ","
 	header_str += "Cost,Area,EvalDelay,tfall,trise,"
 	
+	result_data.append(header_str.split(","))
 	# Write header string to the file
 	results_file.write(header_str + "\n")
 	
 	# Write out all results
 	for i in range(len(cost_list)):
+		result_row = []
 		# Get the combo index
 		combo_index = cost_list[i][1]
 		# Write rank
 		results_file.write(str(i+1) + ",")
+		result_row.append(str(i+1))
 		# Write transistor sizes
 		for j in range(len(element_names)):
 			results_file.write(str(sizing_combos[combo_index][j]) + ",")
+			result_row.append(str(sizing_combos[combo_index][j]))
 		# Write Cost, area, delay, tfall, trise, erf_error
 		results_file.write(str(cost_list[i][0]) + ",")
 		results_file.write(str(area_list[combo_index]) + ",")
@@ -184,15 +248,24 @@ def export_all_results(results_filename, element_names, sizing_combos, cost_list
 		results_file.write(str(tfall_trise_list[combo_index][0]) + ",")
 		results_file.write(str(tfall_trise_list[combo_index][1]) + ",")
 		results_file.write("\n")
+		# Add row to result data
+		result_row.append(str(cost_list[i][0]))
+		result_row.append(str(area_list[combo_index]))
+		result_row.append(str(eval_delay_list[combo_index]))
+		result_row.append(str(tfall_trise_list[combo_index][0]))
+		result_row.append(str(tfall_trise_list[combo_index][1]))
+		result_data.append(result_row)
 	
 	# Close file
 	results_file.close()
+	return result_data
 	
 
 def export_erf_results(results_filename, element_names, sizing_combos, best_results):
 	""" Export the post-erfed results to a CSV file.
 		best_results is a tuple: (cost, combo_index, area, delay, tfall, trise, erf_ratios)"""
 	
+	result_data = []
 	# Open file for writing
 	results_file = open(results_filename, 'w')
 	
@@ -207,15 +280,20 @@ def export_erf_results(results_filename, element_names, sizing_combos, best_resu
 	
 	# Write header string to the file
 	results_file.write(header_str + "\n")
-	
+
+	result_data.append(header_str.split(","))
+
 	# Write out all results
 	rank_counter = 1
 	for cost, combo_index, area, delay, tfall, trise, erf_ratios in best_results:
+		data_row = []
 		# Write rank
 		results_file.write(str(rank_counter) + ",")
+		data_row.append(rank_counter)
 		# Write transistor sizes
 		for j in range(len(element_names)):
 			results_file.write(str(sizing_combos[combo_index][j]) + ",")
+			data_row.append(str(sizing_combos[combo_index][j]))
 		# Write Cost, area, delay, tfall, trise, erf_error
 		results_file.write(str(cost) + ",")
 		results_file.write(str(area) + ",")
@@ -224,15 +302,27 @@ def export_erf_results(results_filename, element_names, sizing_combos, best_resu
 		results_file.write(str(trise) + ",")
 		erf_error = abs(tfall - trise)/min(tfall, trise)
 		results_file.write(str(erf_error) + ",")
+		
+		data_row.append(cost)
+		data_row.append(area)
+		data_row.append(delay)
+		data_row.append(tfall)
+		data_row.append(trise)
+		data_row.append(erf_error)
+
 		# Add ERF ratios
 		for name in erf_ratios_names:
 			results_file.write(str(erf_ratios[name]) + ",")
+			data_row.append(erf_ratios[name])
 		results_file.write("\n")
-		
+		result_data.append(data_row)
+
 		rank_counter += 1
 		
 	# Close file
 	results_file.close()
+
+	return result_data
 	
 	
 def get_eval_area(fpga_inst, opt_type, subcircuit, is_ram_component, is_cc_component):
@@ -1205,7 +1295,8 @@ def run_combo(fpga_inst, sp_path, element_names, combo, erf_ratios, spice_interf
 
 	
 def search_ranges(sizing_ranges, fpga_inst, sizable_circuit, opt_type, re_erf, area_opt_weight, 
-				  delay_opt_weight, outer_iter, inner_iter, bunch_num, spice_interface, is_ram_component, is_cc_component):
+				  delay_opt_weight, outer_iter, inner_iter, bunch_num, spice_interface, is_ram_component, is_cc_component,
+				  spice_filedir):
 	""" 
 		Function for searching a range of transistor sizes. 
 		The first thing we do is determine P/N ratios to use for these size ranges.
@@ -1223,12 +1314,18 @@ def search_ranges(sizing_ranges, fpga_inst, sizable_circuit, opt_type, re_erf, a
 	
 	# Export current transistor sizes
 	# TODO: Turning this off for now
-	#tran_sizes_filename = (spice_filedir + 
+	# tran_sizes_filename = (spice_filedir + 
 	#                       "sizes_" + sizable_circuit.name + 
 	#                       "_o" + str(outer_iter) + 
 	#                       "_i" + str(inner_iter) + 
 	#                       "_b" + str(bunch_num) + ".txt")
-	#export_transistor_sizes(tran_sizes_filename, fpga_inst.transistor_sizes)
+	# export_transistor_sizes(tran_sizes_filename, fpga_inst.transistor_sizes)
+	
+	# Logging Transistor Sizes , pre sizing
+	# for tx_key, tx_val in fpga_inst.transistor_sizes.items():
+	# 	fpga_inst.logger.debug(f'{rg_utils.log_format_list("TX_SIZE", outer_iter, sizable_circuit.name, inner_iter, bunch_num, tx_key)} {tx_val}')
+
+	
 	
 	# Expand ranges to get a list of all possible sizing combinations from ranges
 	element_names, sizing_combos = expand_ranges(sizing_ranges)
@@ -1413,18 +1510,27 @@ def search_ranges(sizing_ranges, fpga_inst, sizable_circuit, opt_type, re_erf, a
 	
 	# Write results to file
 	# TODO: Turning this off for now
-	#export_filename = (spice_filedir + 
-	#                   sizable_circuit.name + 
-	#                   "_o" + str(outer_iter) + 
-	#                   "_i" + str(inner_iter) + 
-	#                   "_b" + str(bunch_num) + ".csv")
-	#export_all_results(export_filename, 
-	#                   element_names, 
-	#                   sizing_combos, 
-	#                   cost_list, 
-	#                   area_list, 
-	#                   eval_delay_list, 
-	#                   tfall_trise_list)
+	export_filename = (spice_filedir + 
+	                  sizable_circuit.name + 
+	                  "_o" + str(outer_iter) + 
+	                  "_i" + str(inner_iter) + 
+	                  "_b" + str(bunch_num) + ".csv")
+	result_rows = export_all_results(export_filename, 
+	                  element_names, 
+	                  sizing_combos, 
+	                  cost_list, 
+	                  area_list, 
+	                  eval_delay_list, 
+	                  tfall_trise_list)
+	
+
+
+
+	# Log the combos pre re-ERF
+	# formatted_result_rows = rg_utils.format_csv_data(result_rows)
+	# for data_row in formatted_result_rows:
+	# 	fpga_inst.logger.debug(f'{rg_utils.log_format_list("CSV", "PRE_ERF", outer_iter, str(sizable_circuit.name).upper(), inner_iter, bunch_num)}{",".join(data_row)}')
+
 
 	# Re-ERF some of the top results
 	# This is the number of top results to re-ERF
@@ -1474,15 +1580,18 @@ def search_ranges(sizing_ranges, fpga_inst, sizable_circuit, opt_type, re_erf, a
 
 	# Write post-erf results to file
 	# TODO: Turn this off for now
-	#erf_export_filename = (spice_filedir + 
-	#                       sizable_circuit.name + 
-	#                       "_o" + str(outer_iter) + 
-	#                       "_i" + str(inner_iter) + 
-	#                       "_b" + str(bunch_num) + "_erf.csv")
-	#export_erf_results(erf_export_filename, 
-	#                   element_names, 
-	#                   sizing_combos, 
-	#                   best_results)
+	erf_export_filename = (spice_filedir + 
+	                      sizable_circuit.name + 
+	                      "_o" + str(outer_iter) + 
+	                      "_i" + str(inner_iter) + 
+	                      "_b" + str(bunch_num) + "_erf.csv")
+	result_rows = export_erf_results(erf_export_filename, 
+	                  element_names, 
+	                  sizing_combos, 
+	                  best_results)
+	# formatted_result_rows = rg_utils.format_csv_data(result_rows)
+	# for data_row in formatted_result_rows:
+	# 	fpga_inst.logger.debug(f'{rg_utils.log_format_list("CSV", "POST_ERF", outer_iter, str(sizable_circuit.name).upper(), inner_iter, bunch_num)}{",".join(data_row)}')
 	
 	# Update transistor sizes file as well as area and wires to best combo
 	best_combo = sizing_combos[best_results[0][1]]
@@ -1525,7 +1634,7 @@ def search_ranges(sizing_ranges, fpga_inst, sizable_circuit, opt_type, re_erf, a
 	return (best_combo_dict, best_combo_detailed, best_results[0])
   
 	
-def format_transistor_names_to_basic_subcircuits(transistor_names):
+def format_transistor_names_to_basic_subcircuits(transistor_names: List[str]) -> List[str]:
 	""" The input is a list of transistor names with the '_nmos' and '_pmos' tags.
 		The output is a list of element names without tags. """
 
@@ -1616,7 +1725,7 @@ def print_sizing_results(subcircuit_name, sizing_results_list):
 	print("")
 
 	
-def _divide_problem_into_sets(transistor_names):
+def _divide_problem_into_sets(transistor_names) -> List[List[str]]:
 	""" If there are too many elements to size, the number of different combinations to try will quickly blow up on us.
 		However, we want to size transistors together in as large groups as possible as this produces a more thorough search. 
 		In general, groups of 5-6 transistors yields a good balance between these two competing factors.  
@@ -1690,6 +1799,7 @@ def _find_initial_sizing_ranges(transistor_names, transistor_sizes):
 	"""
   
 	# We have to figure out what ranges to use.
+	# Chooses the number of sizing options we can have per element depending on size of set, this is to help runtime
 	set_length = len(transistor_names)
 	if set_length >= 6:
 		sizes_per_element = 4
@@ -1907,6 +2017,10 @@ def size_subcircuit_transistors(fpga_inst,
 		sizing_results_detailed_list = []
 		area_delay_results_list = []
 		inner_iter = 1
+
+		# Log the names of elements we're sizing
+		# fpga_inst.logger.debug("TX_SIZING_GROUP", ", ".join(sorted(sizing_ranges_complete.keys())))
+
 		while not sizes_are_valid:
 		
 			# Print past and current sizing ranges to terminal
@@ -1929,7 +2043,8 @@ def size_subcircuit_transistors(fpga_inst,
 												 set_num, 
 												 spice_interface,
 												 is_ram_component,
-												 is_cc_component)
+												 is_cc_component,
+												 spice_filedir)
 										 
 			sizing_results_set = search_ranges_return[0]
 			sizing_results_set_detailed = search_ranges_return[1]
@@ -1952,6 +2067,10 @@ def size_subcircuit_transistors(fpga_inst,
 			# Add a copy of sizing ranges to list
 			sizing_ranges_list.append(sizing_ranges.copy())
 			
+			# Log out FPGA stats for this inner iteration
+			update_fpga_telemetry_csv(fpga_inst, outer_iter, subcircuit.name, inner_iter, set_num, tag="POST_SWEEP_RE_ERF")
+			# log_fpga_telemetry(fpga_inst, outer_iter, subcircuit.name, inner_iter, set_num)
+
 			inner_iter += 1
 
 	sys.stdout.flush()
@@ -2253,7 +2372,12 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 		fpga_inst.update_wire_rc()
 		fpga_inst.update_delays(spice_interface)
 		
+		# Logging
+		# log_fpga_telemetry(fpga_inst, iteration)
+		# update_fpga_telemetry_csv(fpga_inst, outer_iter= iteration, sub)
 		
+
+
 		print("Sizing will begin now.")
 		# Useful for debugging
 		# tmp_area = get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0)
