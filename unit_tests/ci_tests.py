@@ -365,7 +365,9 @@ class TestSuite:
             coffe_cli_args = CoffeArgs(
                 fpga_arch_conf_path = fpga_arch_config, 
                 # hb_flows_conf_path = f"{self.coffe_inputs}/finfet_7nm_fabric_w_hbs/hb_flows.yml",
-                max_iterations = 2, # Low QoR but this is a unit test
+                max_iterations = 1, # Low QoR but this is a unit test,
+                area_opt_weight = 1,
+                delay_opt_weight = 2
             )
             coffe_7nm_hb_test = RadGenArgs(
                 top_config_path = self.top_config_path,

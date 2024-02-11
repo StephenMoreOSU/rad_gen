@@ -43,6 +43,12 @@ import os
 import sys
 import math
 import logging
+import random
+
+from typing import List, Dict, Any, Tuple, Union
+from collections import defaultdict
+import csv
+import traceback
 
 # Subcircuit Modules
 import src.coffe.basic_subcircuits as basic_subcircuits
@@ -91,6 +97,7 @@ DELAY_WEIGHT_GENERAL_BLE_OUTPUT = 0.0326
 DELAY_WEIGHT_RAM = 0.15
 HEIGHT_SPAN = 0.5
 
+LOCAL_WIRE_LAYER = 0
 # This parameter determines if RAM core uses the low power transistor technology
 # It is strongly suggested to keep it this way since our
 # core RAM modules were designed to operate with low power transistors.
@@ -109,7 +116,8 @@ class _Specs:
         self.N                       = arch_params_dict['N']
         self.K                       = arch_params_dict['K']
         self.W                       = arch_params_dict['W']
-        self.L                       = arch_params_dict['L']
+        # self.L                       = arch_params_dict['L']
+        self.wire_types: List[Dict[str, Any]]              = arch_params_dict['wire_types']
         self.I                       = arch_params_dict['I']
         self.Fs                      = arch_params_dict['Fs']
         self.Fcin                    = arch_params_dict['Fcin']
@@ -125,7 +133,6 @@ class _Specs:
         self.enable_carry_chain      = arch_params_dict['enable_carry_chain']
         self.carry_chain_type        = arch_params_dict['carry_chain_type']
         self.FAs_per_flut            = arch_params_dict['FAs_per_flut']
-
 
         # BRAM specs
         self.row_decoder_bits     = arch_params_dict['row_decoder_bits']
@@ -166,6 +173,44 @@ class _Specs:
         self.use_finfet               = arch_params_dict['use_finfet']
         self.gen_routing_metal_pitch  = arch_params_dict['gen_routing_metal_pitch']
         self.gen_routing_metal_layers = arch_params_dict['gen_routing_metal_layers']
+
+        # Specs post init
+        wire_ids = {}
+        for layer_id, wire in enumerate(self.wire_types):
+            # Adding 1 for now as we migrate from using old wire definitions with RC so we can just start at 1 (which is global routing) instead of 0 (local routing still using old stuff)
+            wire_ids[wire["len"]] = layer_id + 1 
+        # This is used to correlate wire lengths to legacy metal layer definitions
+        # self.wire_ids = wire_ids
+
+        # For multi wire length support
+        # Made this into a dict of lists so we can have multiple entries of same wire length
+
+        tracks = []
+        for id, wire in enumerate(self.wire_types):
+            tracks.append( int(self.W * wire["perc"]) )
+
+
+
+        # calculate the rounded number of wires of each type in channel
+        # wire_counts = {wire_length : int(math.floor(self.W * wire_perc)) for wire_length, wire_perc in zip(*self.wire_types)}
+
+        remaining_wires = self.W - sum(tracks)
+        # Adjust tracks to distribute remaining wires proportionally
+        while remaining_wires != 0:
+            for idx, wire in enumerate(self.wire_types):
+                # Calculate the adjustment based on the remaining wires
+                adjustment = round((self.W * wire["perc"] - tracks[idx]) * remaining_wires / sum(tracks))
+                # if we are reducing wires flip the sign of adjustment
+                if remaining_wires < 0:
+                    adjustment = -adjustment
+                tracks[idx] += adjustment
+                remaining_wires -= adjustment
+                if remaining_wires == 0:
+                    break
+        # set it back in wire types
+        for i, (wire, num_tracks) in enumerate(zip(self.wire_types, tracks)):
+            wire["num_tracks"] = num_tracks
+            wire["id"] = i
 
         
         
@@ -237,9 +282,12 @@ class _CompoundCircuit:
 class _SwitchBlockMUX(_SizableCircuit):
     """ Switch Block MUX Class: Pass-transistor 2-level mux with output driver """
     
-    def __init__(self, required_size, num_per_tile, use_tgate):
+    def __init__(self, required_size, num_per_tile, use_tgate, sb_mux_name : str, gen_r_wire: dict):
         # Subcircuit name
-        self.name = "sb_mux"
+        # self.name = "sb_mux"
+        self.name = sb_mux_name
+        # Which wire length is this sb mux driving?
+        self.gen_r_wire = gen_r_wire
         # How big should this mux be (dictated by architecture specs)
         self.required_size = required_size 
         # How big did we make the mux (it is possible that we had to make the mux bigger for level sizes to work out, this is how big the mux turned out)
@@ -310,7 +358,7 @@ class _SwitchBlockMUX(_SizableCircuit):
         """ Generate top level SPICE file """
         
         print("Generating top-level switch block mux")
-        self.top_spice_path = top_level.generate_switch_block_top(self.name)
+        self.top_spice_path = top_level.generate_switch_block_top(self.name, self.gen_r_wire)
    
    
     def update_area(self, area_dict, width_dict):
@@ -350,18 +398,19 @@ class _SwitchBlockMUX(_SizableCircuit):
             area_dict["switch_buf_size"] = area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"]
 
 
-    def update_wires(self, width_dict, wire_lengths, wire_layers, ratio):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], ratio: float):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
 
         # Update wire lengths
+        # Divide both driver widths by 4 to get wire from pin -> driver input? Maybe just a back of envelope estimate 
         wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_2"])/4
         wire_lengths["wire_" + self.name + "_L1"] = width_dict[self.name] * ratio
         wire_lengths["wire_" + self.name + "_L2"] = width_dict[self.name] * ratio
         
         # Update set wire layers
-        wire_layers["wire_" + self.name + "_driver"] = 0
-        wire_layers["wire_" + self.name + "_L1"] = 0
-        wire_layers["wire_" + self.name + "_L2"] = 0
+        wire_layers["wire_" + self.name + "_driver"] = LOCAL_WIRE_LAYER
+        wire_layers["wire_" + self.name + "_L1"] = LOCAL_WIRE_LAYER
+        wire_layers["wire_" + self.name + "_L2"] = LOCAL_WIRE_LAYER
     
     
     def print_details(self, report_file):
@@ -441,9 +490,9 @@ class _ConnectionBlockMUX(_SizableCircuit):
         return self.initial_transistor_sizes
 
 
-    def generate_top(self):
+    def generate_top(self, min_len_wire: dict):
         print("Generating top-level connection block mux")
-        self.top_spice_path = top_level.generate_connection_block_top(self.name)
+        self.top_spice_path = top_level.generate_connection_block_top(self.name, min_len_wire)
         
    
     def update_area(self, area_dict, width_dict):
@@ -579,9 +628,9 @@ class _LocalMUX(_SizableCircuit):
        
         return self.initial_transistor_sizes
 
-    def generate_top(self):
+    def generate_top(self, min_len_wire: dict):
         print("Generating top-level local mux")
-        self.top_spice_path = top_level.generate_local_mux_top(self.name)
+        self.top_spice_path = top_level.generate_local_mux_top(self.name, min_len_wire)
         
    
     def update_area(self, area_dict, width_dict):
@@ -2295,8 +2344,11 @@ class _LocalBLEOutput(_SizableCircuit):
 class _GeneralBLEOutput(_SizableCircuit):
     """ General BLE Output """
     
-    def __init__(self, use_tgate):
-        self.name = "general_ble_output"
+    def __init__(self, use_tgate, gen_r_wire: dict):
+        self.gen_r_wire = gen_r_wire
+        # default name format for general BLE output
+        name = f"general_ble_output_L{gen_r_wire['L']}_uid{gen_r_wire['id']}"
+        self.name = name
         self.delay_weight = DELAY_WEIGHT_GENERAL_BLE_OUTPUT
         self.use_tgate = use_tgate
         
@@ -2485,7 +2537,7 @@ class _flut_mux(_CompoundCircuit):
 
 class _BLE(_CompoundCircuit):
 
-    def __init__(self, K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, N):
+    def __init__(self, K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, N, wire_types):
         # BLE name
         self.name = "ble"
         # number of bles in a cluster
@@ -2501,7 +2553,9 @@ class _BLE(_CompoundCircuit):
         # Create BLE local output object
         self.local_output = _LocalBLEOutput(use_tgate)
         # Create BLE general output object
-        self.general_output = _GeneralBLEOutput(use_tgate)
+        # self.general_output = _GeneralBLEOutput(use_tgate)
+        # Creating a BLE general output object for each type of wire we have
+        self.general_outputs = [_GeneralBLEOutput(use_tgate, wire) for wire in wire_types]
         # Create LUT object
         self.lut = _LUT(K, Rsel, Rfb, use_tgate, use_finfet, use_fluts)
         # Create FF object
@@ -2534,6 +2588,9 @@ class _BLE(_CompoundCircuit):
                                                           min_tran_width))
         init_tran_sizes.update(self.general_output.generate(subcircuit_filename, 
                                                             min_tran_width))
+        for gen_output in self.general_outputs:
+            init_tran_sizes.update(gen_output.generate(subcircuit_filename, 
+                                                        min_tran_width))
         load_subcircuits.generate_ble_outputs(subcircuit_filename, self.num_local_outputs, self.num_general_outputs)
  
         #flut mux
@@ -2653,7 +2710,7 @@ class _GeneralBLEOutputLoad:
     """ Logic cluster output load (i.e. general BLE output load). 
         Made up of a wire loaded by SB muxes. """
 
-    def __init__(self):
+    def __init__(self, gen_r_wire: dict):
         # Subcircuit name
         self.name = "general_ble_output_load"
         # Assumed routing channel usage, we need this for load calculation 
@@ -2666,27 +2723,32 @@ class _GeneralBLEOutputLoad:
         self.num_sb_mux_off = -1
         # List of wires in this subcircuit
         self.wire_names = []
+        # The general routing wire length associated with this output load
+        self.gen_r_wire : dict = gen_r_wire 
         
         
     def generate(self, subcircuit_filename, specs, sb_mux):
         """ Compute cluster output load load and generate SPICE netlist. """
         
-        self._compute_load(specs, sb_mux, self.channel_usage_assumption, self.num_sb_mux_on_assumption)
-        self.wire_names = load_subcircuits.generate_general_ble_output_load(subcircuit_filename, self.num_sb_mux_off, self.num_sb_mux_partial, self.num_sb_mux_on_assumption)
+        self._compute_load(specs, sb_mux, self.channel_usage_assumption, self.num_sb_mux_on_assumption, self.gen_r_wire)
+        self.wire_names = load_subcircuits.generate_general_ble_output_load(subcircuit_filename, self.num_sb_mux_off, self.num_sb_mux_partial, self.num_sb_mux_on_assumption, self.gen_r_wire)
         
         
-    def update_wires(self, width_dict, wire_lengths, wire_layers, h_dist, height):
+    def update_wires(self, width_dict: dict, wire_lengths: dict, wire_layers: dict, h_dist: float, height: float):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
         # The BLE output wire is the wire that allows a BLE output to reach routing wires in
         # the routing channels. This wire spans some fraction of a tile. We can set what that
         # fraction is with the output track-access span (track-access locality).
-        wire_lengths["wire_general_ble_output"] = width_dict["tile"]*OUTPUT_TRACK_ACCESS_SPAN
+
+        gen_ble_out_wire_key = f"wire_general_ble_output_L{self.gen_r_wire['len']}_uid{self.gen_r_wire['id']}"
+        # height is the lb_height, I wonder why once we have initialized the lb_height we no longer use the output track locality
+        wire_lengths[gen_ble_out_wire_key] = width_dict["tile"]*OUTPUT_TRACK_ACCESS_SPAN
         if height != 0.0:
-            wire_lengths["wire_general_ble_output"] = (h_dist)
+            wire_lengths[gen_ble_out_wire_key] = (h_dist)
 
         # Update wire layers
-        wire_layers["wire_general_ble_output"] = 0
+        wire_layers[gen_ble_out_wire_key] = LOCAL_WIRE_LAYER
       
 
     def print_details(self, report_file):
@@ -2700,16 +2762,18 @@ class _GeneralBLEOutputLoad:
         utils.print_and_write(report_file, "")
         
       
-    def _compute_load(self, specs, sb_mux, channel_usage, sb_mux_on):
+    def _compute_load(self, specs, sb_mux, channel_usage, sb_mux_on, gen_r_wire: dict):
         """ Calculate how many on/partial/off switch block multiplexers are connected to each cluster output.
             Inputs are FPGA specs object, switch block mux object, assumed channel usage and assumed number of on muxes.
             The function will update the object's off & partial attributes."""
         
+        num_tracks = gen_r_wire["num_tracks"]
+
         # Size of second level of switch block mux, need this to figure out how many partially on muxes are connected
         sb_level2_size = sb_mux.level2_size
         
         # Total number of switch block multiplexers connected to cluster output
-        total_load = int(specs.Fcout*specs.W)
+        total_load = int(specs.Fcout * num_tracks)
         
         # Let's calculate how many partially on muxes are connected to each output
         # Based on our channel usage assumption, we can determine how many muxes are in use in a tile.
@@ -2728,10 +2792,12 @@ class _GeneralBLEOutputLoad:
         # We use the required size here because we assume that extra inputs that may be present in the "implemented" mux
         # might be connected to GND or VDD and not to routing wires
         sb_inputs_from_routing = sb_mux.required_size*sb_mux.num_per_tile - sb_inputs_from_cluster_outputs
+        # Percentage of sb inputs which are used for cluster outputs
         frac_partial_paths_on_cluster_out = float(sb_inputs_from_cluster_outputs)/(sb_inputs_from_cluster_outputs+sb_inputs_from_routing)
         # The total number of partial paths on the cluster outputs is calculated using that fraction
         total_cluster_output_partial_paths = int(frac_partial_paths_on_cluster_out*total_partial_paths)
         # And we divide by the number of cluster outputs to get partial paths per output
+        # Assuming that ceil is done to do the worst case, depending on the numbers ceil could be too pessimistic?
         cluster_output_partial_paths = int(math.ceil(float(total_cluster_output_partial_paths)/specs.num_cluster_outputs))
         
         # Now assign these numbers to the object
@@ -2814,13 +2880,13 @@ class _LocalRoutingWireLoad:
 
 class _LogicCluster(_CompoundCircuit):
     
-    def __init__(self, N, K, Or, Ofb, Rsel, Rfb, local_mux_size_required, num_local_mux_per_tile, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count):
+    def __init__(self, N, K, Or, Ofb, Rsel, Rfb, local_mux_size_required, num_local_mux_per_tile, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, wire_types: List[dict]):
         # Name of logic cluster
         self.name = "logic_cluster"
         # Cluster size
         self.N = N
         # Create BLE object
-        self.ble = _BLE(K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, N)
+        self.ble = _BLE(K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, N, wire_types)
         # Create local mux object
         self.local_mux = _LocalMUX(local_mux_size_required, num_local_mux_per_tile, use_tgate)
         # Create local routing wire load object
@@ -2842,8 +2908,11 @@ class _LogicCluster(_CompoundCircuit):
         return init_tran_sizes
 
 
-    def generate_top(self):
-        self.local_mux.generate_top()
+    def generate_top(self, min_len_wire: dict):
+        # pass min_len_wire to our local mux 
+        # gen programmable routing -> local mux -> ble 
+        # We assume that the shortest wire of our options is loading the input of our local muxes
+        self.local_mux.generate_top(min_len_wire)
         self.ble.generate_top()
         
         
@@ -2871,11 +2940,11 @@ class _RoutingWireLoad:
     """ This is the routing wire load for an architecture with direct drive and only one segment length.
         Two-level muxes are assumed and we model for partially on paths. """
         
-    def __init__(self, wire_length):
+    def __init__(self, gen_r_wire: dict):
         # Name of this wire
         self.name = "routing_wire_load"
-        # Length of wire (in tiles)
-        self.wire_length = wire_length
+        # General routing wire information
+        self.gen_r_wire = gen_r_wire
         # We assume that half of the wires in a routing channel are used (limited by routability)
         self.channel_usage_assumption = 0.5
         # We assume that half of the cluster inputs are used
@@ -2900,65 +2969,90 @@ class _RoutingWireLoad:
         self.wire_names = []
         
         
-    def generate(self, subcircuit_filename, specs, sb_mux, cb_mux):
+    def generate(self, subcircuit_filename: str, specs: _Specs, sb_mux: _SwitchBlockMUX, cb_mux: _ConnectionBlockMUX):
         """ Generate the SPICE circuit for general routing wire load
             Need specs object, switch block object and connection block object """
         print("Generating routing wire load")
         # Calculate wire load based on architecture parameters
         self._compute_load(specs, sb_mux, cb_mux, self.channel_usage_assumption, self.cluster_input_usage_assumption)
         # Generate SPICE deck
-        self.wire_names = load_subcircuits.general_routing_load_generate(subcircuit_filename, self.wire_length, self.tile_sb_on, self.tile_sb_partial, self.tile_sb_off, self.tile_cb_on, self.tile_cb_partial, self.tile_cb_off)
+        self.wire_names = load_subcircuits.general_routing_load_generate(subcircuit_filename, self.tile_sb_on, self.tile_sb_partial, self.tile_sb_off, self.tile_cb_on, self.tile_cb_partial, self.tile_cb_off, self.gen_r_wire, sb_mux)
     
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers, height, num_sb_stripes, num_cb_stripes):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], height: float, num_sb_stripes: int, num_cb_stripes: int):
         """ Calculate wire lengths and wire layers. """
 
+        # Get information from the general routing wire
+        wire_length = self.gen_r_wire["len"]
+        wire_id = self.gen_r_wire["id"]
+        wire_layer = self.gen_r_wire["metal"]
+
+        key_str_suffix = f"_L{wire_length}_uid{wire_id}"
+        # Get get keys for wires
+        # TODO remove duplication figure out somewhere to define and save these keys
+        wire_gen_routing_load_key = f"wire_gen_routing{key_str_suffix}"
+        wire_sb_load_on_key = f"wire_sb_load_on{key_str_suffix}"
+        wire_sb_load_partial_key = f"wire_sb_load_partial{key_str_suffix}"
+        wire_sb_load_off_key = f"wire_sb_load_off{key_str_suffix}"
+
+        wire_cb_load_on_key = f"wire_cb_load_on{key_str_suffix}"
+        wire_cb_load_partial_key = f"wire_cb_load_partial{key_str_suffix}"
+        wire_cb_load_off_key = f"wire_cb_load_off{key_str_suffix}"
+
+
+
         # This is the general routing wire that spans L tiles
-        wire_lengths["wire_gen_routing"] = self.wire_length*width_dict["tile"]
+        wire_lengths[wire_gen_routing_load_key] = wire_length*width_dict["tile"]
+        # if lb_height has been initialized
         if height != 0.0:
+            # If the height is greater than the width of the tile, then the wire length is the height, else width
+            # This takes the larger of the two values to get wirelength, worst case?
             if height > ((width_dict["tile"]*width_dict["tile"])/height):
-                wire_lengths["wire_gen_routing"] = self.wire_length*(height)
+                wire_lengths[wire_gen_routing_load_key] = wire_length*(height)
             else:
-                wire_lengths["wire_gen_routing"] = self.wire_length*((width_dict["tile"]*width_dict["tile"])/height)
+                wire_lengths[wire_gen_routing_load_key] = wire_length*((width_dict["tile"]*width_dict["tile"])/height)
 
         # These are the pieces of wire that are required to connect routing wires to switch 
         # block inputs. We assume that on average, they span half a tile.
-        wire_lengths["wire_sb_load_on"] = width_dict["tile"]/2
-        wire_lengths["wire_sb_load_partial"] = width_dict["tile"]/2
-        wire_lengths["wire_sb_load_off"] = width_dict["tile"]/2 
+        wire_lengths[wire_sb_load_on_key] = width_dict["tile"]/2
+        wire_lengths[wire_sb_load_partial_key] = width_dict["tile"]/2
+        wire_lengths[wire_sb_load_off_key] = width_dict["tile"]/2 
         if height != 0.0:
+            # This is saying that if we have a single stripe we have to travel the entire width of the LB to get from the routing wire to the SB input
             if num_sb_stripes == 1:
-                wire_lengths["wire_sb_load_on"] = wire_lengths["wire_gen_routing"]/self.wire_length
-                wire_lengths["wire_sb_load_partial"] = wire_lengths["wire_gen_routing"]/self.wire_length
-                wire_lengths["wire_sb_load_off"] = wire_lengths["wire_gen_routing"]/self.wire_length
+                wire_lengths[wire_sb_load_on_key] = wire_lengths[wire_gen_routing_load_key]/wire_length
+                wire_lengths[wire_sb_load_partial_key] = wire_lengths[wire_gen_routing_load_key]/wire_length
+                wire_lengths[wire_sb_load_off_key] = wire_lengths[wire_gen_routing_load_key]/wire_length
+            # I guess this says if there are more than 1 then just estimate by traveling half of the width of the LB
             else:
-                wire_lengths["wire_sb_load_on"] = wire_lengths["wire_gen_routing"]/(2*self.wire_length)
-                wire_lengths["wire_sb_load_partial"] = wire_lengths["wire_gen_routing"]/(2*self.wire_length)
-                wire_lengths["wire_sb_load_off"] = wire_lengths["wire_gen_routing"]/(2*self.wire_length)			
+                wire_lengths[wire_sb_load_on_key] = wire_lengths[wire_gen_routing_load_key]/(2*wire_length)
+                wire_lengths[wire_sb_load_partial_key] = wire_lengths[wire_gen_routing_load_key]/(2*wire_length)
+                wire_lengths[wire_sb_load_off_key] = wire_lengths[wire_gen_routing_load_key]/(2*wire_length)			
         
         # These are the pieces of wire that are required to connect routing wires to 
         # connection block multiplexer inputs. They span some fraction of a tile that is 
         # given my the input track-access span (track-access locality). 
-        wire_lengths["wire_cb_load_on"] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
-        wire_lengths["wire_cb_load_partial"] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
-        wire_lengths["wire_cb_load_off"] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
+        wire_lengths[wire_cb_load_on_key] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
+        wire_lengths[wire_cb_load_partial_key] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
+        wire_lengths[wire_cb_load_off_key] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
+        # Doing something similar to switch blocks, if we have an initialized lb_height & single stripe then use full width of LB as base wire length being multiplied by input track access factor
         if height != 0 and num_cb_stripes == 1:
-            wire_lengths["wire_cb_load_on"] = (wire_lengths["wire_gen_routing"]/self.wire_length) * INPUT_TRACK_ACCESS_SPAN
-            wire_lengths["wire_cb_load_partial"] = (wire_lengths["wire_gen_routing"]/self.wire_length) * INPUT_TRACK_ACCESS_SPAN
-            wire_lengths["wire_cb_load_off"] = (wire_lengths["wire_gen_routing"]/self.wire_length) * INPUT_TRACK_ACCESS_SPAN
+            wire_lengths[wire_cb_load_on_key] = (wire_lengths[wire_gen_routing_load_key]/wire_length) * INPUT_TRACK_ACCESS_SPAN
+            wire_lengths[wire_cb_load_partial_key] = (wire_lengths[wire_gen_routing_load_key]/wire_length) * INPUT_TRACK_ACCESS_SPAN
+            wire_lengths[wire_cb_load_off_key] = (wire_lengths[wire_gen_routing_load_key]/wire_length) * INPUT_TRACK_ACCESS_SPAN
         elif height != 0 :
-            wire_lengths["wire_cb_load_on"] = (wire_lengths["wire_gen_routing"]/(2*self.wire_length)) * INPUT_TRACK_ACCESS_SPAN
-            wire_lengths["wire_cb_load_partial"] = (wire_lengths["wire_gen_routing"]/(2*self.wire_length)) * INPUT_TRACK_ACCESS_SPAN
-            wire_lengths["wire_cb_load_off"] = (wire_lengths["wire_gen_routing"]/(2*self.wire_length)) * INPUT_TRACK_ACCESS_SPAN
+            wire_lengths[wire_cb_load_on_key] = (wire_lengths[wire_gen_routing_load_key]/(2*wire_length)) * INPUT_TRACK_ACCESS_SPAN
+            wire_lengths[wire_cb_load_partial_key] = (wire_lengths[wire_gen_routing_load_key]/(2*wire_length)) * INPUT_TRACK_ACCESS_SPAN
+            wire_lengths[wire_cb_load_off_key] = (wire_lengths[wire_gen_routing_load_key]/(2*wire_length)) * INPUT_TRACK_ACCESS_SPAN
 			
        # Update wire layers
-        wire_layers["wire_gen_routing"] = 1 
-        wire_layers["wire_sb_load_on"] = 0 
-        wire_layers["wire_sb_load_partial"] = 0 
-        wire_layers["wire_sb_load_off"] = 0
-        wire_layers["wire_cb_load_on"] = 0
-        wire_layers["wire_cb_load_partial"] = 0 
-        wire_layers["wire_cb_load_off"] = 0 
+        wire_layers[wire_gen_routing_load_key] = wire_layer # used to be 1 -> the first metal layer above local
+        wire_layers[wire_sb_load_on_key] = LOCAL_WIRE_LAYER 
+        wire_layers[wire_sb_load_partial_key] = LOCAL_WIRE_LAYER
+        wire_layers[wire_sb_load_off_key] = LOCAL_WIRE_LAYER
+        wire_layers[wire_cb_load_on_key] = LOCAL_WIRE_LAYER
+        wire_layers[wire_cb_load_partial_key] = LOCAL_WIRE_LAYER
+        wire_layers[wire_cb_load_off_key] = LOCAL_WIRE_LAYER
     
     
     def print_details(self, report_file):
@@ -2969,18 +3063,18 @@ class _RoutingWireLoad:
         utils.print_and_write(report_file, "  Number of CB inputs connected to routing wire = " + str(self.cb_load_on + self.cb_load_partial + self.cb_load_off))
         utils.print_and_write(report_file, "  Wire: CB (on = " + str(self.cb_load_on) + ", partial = " + str(self.cb_load_partial) + ", off = " + str(self.cb_load_off) + ")")
 
-        for i in range(self.wire_length):
+        for i in range(self.gen_r_wire["len"]):
             utils.print_and_write(report_file, "  Tile " + str(i+1) + ": SB (on = " + str(self.tile_sb_on[i]) + ", partial = " + str(self.tile_sb_partial[i]) + 
             ", off = " + str(self.tile_sb_off[i]) + "); CB (on = " + str(self.tile_cb_on[i]) + ", partial = " + str(self.tile_cb_partial[i]) + ", off = " + str(self.tile_cb_off[i]) + ")")
         utils.print_and_write(report_file, "")
         
        
-    def _compute_load(self, specs, sb_mux, cb_mux, channel_usage, cluster_input_usage):
+    def _compute_load(self, specs: _Specs, sb_mux: _SwitchBlockMUX, cb_mux: _ConnectionBlockMUX, channel_usage: float, cluster_input_usage: float):
         """ Computes the load on a routing wire """
         
         # Local variables
-        W = specs.W
-        L = specs.L
+        W = self.gen_r_wire["num_tracks"]
+        L = self.gen_r_wire["len"]
         I = specs.I
         Fs = specs.Fs
         sb_mux_size = sb_mux.implemented_size
@@ -5298,6 +5392,39 @@ class _hard_block(_CompoundCircuit):
         #    self.dedicated.print_details(report_file)
 
 
+def get_current_stack_trace() -> str:
+    stack = traceback.extract_stack()
+    return '/'.join([f.name for f in stack])  # Exclude the current function call itself
+
+def update_fpga_telemetry_csv(fpga_inst: 'FPGA', tag):
+	""" Update the FPGA telemetry CSV file with the current FPGA telemetry, Create CSV if it doesnt exist """
+	
+	out_catagories = {
+		"wire_length": fpga_inst.wire_lengths,
+		"area": fpga_inst.area_dict,
+		"tx_size": fpga_inst.transistor_sizes,
+		"delay": fpga_inst.delay_dict
+	}
+	# Check to see if any repeating keys in any of these dicts
+	# if not set(fpga_inst.wire_lengths.keys()) & set(fpga_inst.area_dict.keys()) fpga_inst.transistor_sizes.keys()
+
+
+	# Write a CSV for each catagory of information we want to track
+	for cat_k, cat_v in out_catagories.items():
+		row_data = { "TAG": tag, "AREA_UPDATE_ITER": fpga_inst.update_area_cnt, "WIRE_UPDATE_ITER": fpga_inst.update_wires_cnt, "DELAY_UPDATE_ITER": fpga_inst.update_delays_cnt, "COMPUTE_DISTANCE_ITER": fpga_inst.compute_distance_cnt, **cat_v}
+		# Open the CSV file
+		with open(f"{cat_k}_debug.csv", "a") as csv_file:
+			header = list(row_data.keys())
+			writer = csv.DictWriter(csv_file, fieldnames = header)
+		
+			# Check if the file is empty and write header if needed
+			if csv_file.tell() == 0:
+				writer.writeheader()
+
+			writer.writerow(row_data)
+
+
+
 class FPGA:
     """ This class describes an FPGA. """
         
@@ -5315,8 +5442,21 @@ class FPGA:
         self.compute_distance_cnt = 0
         self.update_delays_cnt = 0
 
+        # Stuff for multi wire length support
+        self.sb_muxes: List[_SwitchBlockMUX] = []
+        self.num_sbs_per_tile = 0
+        self.routing_wire_loads : List[_RoutingWireLoad] = []
+        self.cluster_output_loads : List[_GeneralBLEOutputLoad] = []
+
         # Initialize the specs
         self.specs = _Specs(coffe_info.fpga_arch_conf["fpga_arch_params"], run_options.quick_mode)
+
+        # From specs init
+        # We need the minimum length wire to use for some circuits
+        # Currently we are just using the minimum length wire type as the input to connection block mux
+        wire_lens = [ wire["len"] for wire in self.specs.wire_types]
+        self.min_len_wire = self.specs.wire_types[wire_lens.index(min(wire_lens))]
+
 
         ######################################
         ### INITIALIZE SPICE LIBRARY NAMES ###
@@ -5334,18 +5474,44 @@ class FPGA:
         ### CREATE SWITCH BLOCK OBJECT ###
         ##################################
 
+
+        # For each wire type we calculate the switch block mux sizes
+        for i, wire in enumerate(self.specs.wire_types):
+            wire_length = wire["len"]
+            num_tracks = wire["num_tracks"]
+            
+            # Calculate switch block mux size (for direct-drive routing)
+            # The mux will need Fs + (Fs-1)(L-1) inputs for routing-to-routing connections
+            # The Fs term comes from starting wires, the (Fs-1) term comes from non-starting wires, of which there are (L-1)
+            r_to_r_sb_mux_size = self.specs.Fs + (self.specs.Fs-1)*(wire_length-1)
+            # Then, each mux needs No*Fcout*L/2 additional inputs for logic cluster outputs (No = number of cluster outputs (Or))
+            No = self.specs.num_cluster_outputs
+            clb_to_r_sb_mux_size = No * self.specs.Fcout * wire_length/2
+            sb_mux_size_required = int(r_to_r_sb_mux_size + clb_to_r_sb_mux_size)
+            # Calculate number of switch block muxes per tile
+            # round to nearest integer
+            num_sb_mux_per_tile = 2 * num_tracks // wire_length
+            # add up our total number of sbs per tile
+            self.num_sbs_per_tile += num_sb_mux_per_tile
+            # Sb mux names are based on wire type
+            sb_mux_name = f"sb_mux_L{wire_length}_uid{i}"
+            # Initialize the switch block
+            self.sb_muxes.append(
+                _SwitchBlockMUX(sb_mux_size_required, num_sb_mux_per_tile, self.specs.use_tgate, sb_mux_name, wire)
+            )  
+
         # Calculate switch block mux size (for direct-drive routing)
         # The mux will need Fs + (Fs-1)(L-1) inputs for routing-to-routing connections
         # The Fs term comes from starting wires, the (Fs-1) term comes from non-starting wires, of which there are (L-1)
-        r_to_r_sb_mux_size = self.specs.Fs + (self.specs.Fs-1)*(self.specs.L-1)
-        # Then, each mux needs No*Fcout*L/2 additional inputs for logic cluster outputs (No = number of cluster outputs (Or))
-        No = self.specs.num_cluster_outputs
-        clb_to_r_sb_mux_size = No*self.specs.Fcout*self.specs.L/2
-        sb_mux_size_required = int(r_to_r_sb_mux_size + clb_to_r_sb_mux_size)
-        # Calculate number of switch block muxes per tile
-        num_sb_mux_per_tile = 2*self.specs.W//self.specs.L
-        # Initialize the switch block
-        self.sb_mux = _SwitchBlockMUX(sb_mux_size_required, num_sb_mux_per_tile, self.specs.use_tgate)
+        # r_to_r_sb_mux_size = self.specs.Fs + (self.specs.Fs-1)*(self.specs.L-1)
+        # # Then, each mux needs No*Fcout*L/2 additional inputs for logic cluster outputs (No = number of cluster outputs (Or))
+        # No = self.specs.num_cluster_outputs
+        # clb_to_r_sb_mux_size = No*self.specs.Fcout*self.specs.L/2
+        # sb_mux_size_required = int(r_to_r_sb_mux_size + clb_to_r_sb_mux_size)
+        # # Calculate number of switch block muxes per tile
+        # num_sb_mux_per_tile = 2*self.specs.W//self.specs.L
+        # # Initialize the switch block
+        # self.sb_mux = _SwitchBlockMUX(sb_mux_size_required, num_sb_mux_per_tile, self.specs.use_tgate)
 
         
         ######################################
@@ -5376,18 +5542,28 @@ class FPGA:
         if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip":
             self.carry_skip_periphery_count = int(math.floor((self.specs.N * self.specs.FAs_per_flut)/self.skip_size))
         # initialize the logic cluster
-        self.logic_cluster = _LogicCluster(self.specs.N, self.specs.K, self.specs.num_ble_general_outputs, self.specs.num_ble_local_outputs, self.specs.Rsel, self.specs.Rfb, 
-                                           local_mux_size_required, num_local_mux_per_tile, self.specs.use_tgate, self.specs.use_finfet, self.specs.use_fluts, 
-                                           self.specs.enable_carry_chain, self.specs.FAs_per_flut, self.carry_skip_periphery_count)
+        self.logic_cluster = _LogicCluster(
+            self.specs.N, self.specs.K, self.specs.num_ble_general_outputs, self.specs.num_ble_local_outputs, self.specs.Rsel, self.specs.Rfb, 
+            local_mux_size_required, num_local_mux_per_tile, self.specs.use_tgate, self.specs.use_finfet, self.specs.use_fluts, 
+            self.specs.enable_carry_chain, self.specs.FAs_per_flut, self.carry_skip_periphery_count
+        )
         
         ###########################
         ### CREATE LOAD OBJECTS ###
         ###########################
 
-        # Create cluster output load object
-        self.cluster_output_load = _GeneralBLEOutputLoad()
-        # Create routing wire load object
-        self.routing_wire_load = _RoutingWireLoad(self.specs.L)
+        # Create cluster output load object (for each wire type)
+        # Create routing wire load object (for each wire type)
+        # self.cluster_output_load = _GeneralBLEOutputLoad()
+        for i, wire in enumerate(self.specs.wire_types):
+            wire_length = wire["len"]
+            self.cluster_output_loads.append(
+                _GeneralBLEOutputLoad(wire)
+            )
+            self.routing_wire_loads.append(
+                # Pass in wire length + unique id used for metal_layers dict
+                _RoutingWireLoad(wire)
+            )
 
 
         ##################################
@@ -5527,6 +5703,7 @@ class FPGA:
                 for k,v in self.width_dict.items():
                     print("%s---------------%f" % (k,v))
             print("%s WIDTH DICTS %s" % (title_buffer,title_buffer))
+        
 
         
 
@@ -5565,15 +5742,31 @@ class FPGA:
         self._create_lib_files()
         
         # Generate the various subcircuits netlists of the FPGA (call members)
-        self.transistor_sizes.update(self.sb_mux.generate(self.subcircuits_filename, 
-                                                          self.specs.min_tran_width))
+
         self.transistor_sizes.update(self.cb_mux.generate(self.subcircuits_filename, 
                                                           self.specs.min_tran_width))
         self.transistor_sizes.update(self.logic_cluster.generate(self.subcircuits_filename, 
                                                                  self.specs.min_tran_width, 
                                                                  self.specs))
-        self.cluster_output_load.generate(self.subcircuits_filename, self.specs, self.sb_mux)
-        self.routing_wire_load.generate(self.subcircuits_filename, self.specs, self.sb_mux, self.cb_mux)
+        # Iterate over all existing sb muxes and generate them + cluster / gen routing load collateral 
+        for sb_mux, routing_wire_load, cluster_output_load in zip(
+                self.sb_muxes,
+                self.routing_wire_loads,
+                self.cluster_output_loads):
+
+            self.transistor_sizes.update(
+                sb_mux.generate(
+                    self.subcircuits_filename, 
+                    self.specs.min_tran_width
+                )
+            )
+            # Generate a cluster_output_load (BLE output to general routing load) for each wire type
+            cluster_output_load.generate(self.subcircuits_filename, self.specs, sb_mux)
+            # Generate a routing_wire_load for each wire type
+            routing_wire_load.generate(self.subcircuits_filename, self.specs, sb_mux, self.cb_mux)
+            # Generate the top files
+            sb_mux.generate_top()
+            
 
         if self.specs.enable_carry_chain == 1:
             self.transistor_sizes.update(self.carrychain.generate(self.subcircuits_filename, self.specs.min_tran_width, self.specs.use_finfet))
@@ -5605,9 +5798,9 @@ class FPGA:
         
         # Generate top-level files. These top-level files are the files that COFFE uses to measure 
         # the delay of FPGA circuitry. 
-        self.sb_mux.generate_top()
-        self.cb_mux.generate_top()
-        self.logic_cluster.generate_top()
+        # self.sb_mux.generate_top()
+        self.cb_mux.generate_top(self.min_len_wire)
+        self.logic_cluster.generate_top(self.min_len_wire)
 
         if self.specs.enable_carry_chain == 1:
             self.carrychain.generate_top()
@@ -5676,7 +5869,9 @@ class FPGA:
 
 
         # Call area calculation functions of sub-blocks
-        self.sb_mux.update_area(self.area_dict, self.width_dict)
+        for sb_mux in self.sb_muxes:
+            sb_mux.update_area(self.area_dict, self.width_dict)
+        
         self.cb_mux.update_area(self.area_dict, self.width_dict)
         self.logic_cluster.update_area(self.area_dict, self.width_dict)
         
@@ -5688,7 +5883,21 @@ class FPGA:
             self.RAM.update_area(self.area_dict, self.width_dict)
         
         # Calculate total area of switch block
-        switch_block_area = self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name + "_sram"]
+        switch_block_area = 0
+        switch_block_area_no_sram = 0
+        # weighted avg area of switch blocks based on percentage of tracks, used this for calculations looking for a single SB mux area value
+        # Seems better to provide a weighted avg corresponding to percentage of tracks used for a particular SB Mux
+        switch_block_avg_area = 0
+
+        # Add up areas of all switch blocks of all types
+        for i, sb_mux in enumerate(self.sb_muxes):
+            # For weighted average use the number of tracks per wire length corresponding SB / total tracks as the weight 
+            switch_block_avg_area += (self.specs.wire_types[i]["num_tracks"]/self.specs.W) * self.area_dict[sb_mux.name + "_sram"]
+            switch_block_area += sb_mux.num_per_tile * self.area_dict[sb_mux.name + "_sram"]
+            switch_block_area_no_sram += sb_mux.num_per_tile * self.area_dict[sb_mux.name]
+
+        self.area_dict["sb_mux_avg"] = switch_block_avg_area 
+        self.area_dict["sb_total_no_sram"] = switch_block_area_no_sram
         self.area_dict["sb_total"] = switch_block_area
         self.width_dict["sb_total"] = math.sqrt(switch_block_area)
         
@@ -5728,10 +5937,10 @@ class FPGA:
         else:
 
             # lets do it assuming a given order for the wire updates and no minimum width on sram size.
-            sb_area_total = self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name]
-            sb_area_sram =  self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name + "_sram"] - sb_area_total
-            cb_area_total = self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name]
-            cb_area_total_sram = self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name + "_sram"] - cb_area_total
+            # sb_area_total = self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name]
+            # sb_area_sram =  self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name + "_sram"] - sb_area_total
+            # cb_area_total = self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name]
+            # cb_area_total_sram = self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name + "_sram"] - cb_area_total
 
             local_mux_area = self.logic_cluster.local_mux.num_per_tile*self.area_dict[self.logic_cluster.local_mux.name]            
             local_mux_sram_area = self.logic_cluster.local_mux.num_per_tile* (self.area_dict[self.logic_cluster.local_mux.name + "_sram"] - self.area_dict[self.logic_cluster.local_mux.name])
@@ -5771,7 +5980,7 @@ class FPGA:
             self.width_dict["ff_total"] = math.sqrt(self.specs.N*self.area_dict[self.logic_cluster.ble.ff.name])
 
             self.area_dict["ffableout_area_total"] = ffableout_area_total
-            self.width_dict["ffableout_area_total"] = math.sqrt(ffableout_area_total)            
+            self.width_dict["ffableout_area_total"] = math.sqrt(ffableout_area_total)
 
             self.area_dict["ble_output_total"] = self.specs.N*(self.area_dict["ble_output"])
             self.width_dict["ble_output_total"] = math.sqrt(self.specs.N*(self.area_dict["ble_output"]))
@@ -5946,16 +6155,20 @@ class FPGA:
                 self.num_luts_stripes =  self.num_luts_stripes + 1
 
         # measure the width of each stripe:
-
         self.w_cb = (self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name])/(self.num_cb_stripes * self.lb_height)
-        self.w_sb = (self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name])/(self.num_sb_stripes * self.lb_height)
+        # width of switch block
+        self.w_sb = self.area_dict["sb_total"] / (self.num_sb_stripes * self.lb_height) 
+        # self.w_sb = (self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name])/(self.num_sb_stripes * self.lb_height)
         self.w_ic = (self.logic_cluster.local_mux.num_per_tile*self.area_dict[self.logic_cluster.local_mux.name])/(self.num_ic_stripes * self.lb_height)
         self.w_lut = (self.specs.N*self.area_dict["lut_and_drivers"] - self.specs.N*(2**self.specs.K)*self.area_dict["sram"])/(self.num_lut_stripes * self.lb_height)
         #if self.specs.enable_carry_chain == 1:
         self.w_cc = self.area_dict["cc_area_total"]/(self.num_cc_stripes * self.lb_height)
         self.w_ffble = self.area_dict["ffableout_area_total"]/(self.num_ffble_stripes * self.lb_height)
+        # These are SRAM widths from subcircuits
         self.w_scb = (self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name + "_sram"] - self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name])/(self.num_cbs_stripes * self.lb_height)
-        self.w_ssb = (self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name + "_sram"] - self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name])/(self.num_sbs_stripes * self.lb_height)
+        self.w_ssb = (self.area_dict["sb_total"] - self.area_dict["sb_total_no_sram"])/(self.num_sbs_stripes * self.lb_height)
+
+        # self.w_ssb = (self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name + "_sram"] - self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name])/(self.num_sbs_stripes * self.lb_height)        
         self.w_sic = (self.logic_cluster.local_mux.num_per_tile* (self.area_dict[self.logic_cluster.local_mux.name + "_sram"] - self.area_dict[self.logic_cluster.local_mux.name]))/(self.num_ics_stripes * self.lb_height)
         self.w_slut = (self.specs.N*(2**self.specs.K)*self.area_dict["sram"]) / (self.num_luts_stripes * self.lb_height)
 
@@ -6126,13 +6339,20 @@ class FPGA:
 
 
         if self.lb_height == 0:
-            self.cluster_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 0.0, 0.0)
-            self.sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 1.0)
+            # iterate through subcircuits associated with wire types
+            for sb_mux, cluster_output_load, routing_wire_load in zip(self.sb_muxes, self.cluster_output_loads, self.routing_wire_loads):
+                sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 1.0)
+                cluster_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 0.0, 0.0)
+                routing_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 0.0, 2.0, 2.0)
+
+
+            # self.cluster_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 0.0, 0.0)
+            # self.sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 1.0)
             self.cb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 1.0)
             self.logic_cluster.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 1.0, 1.0, 0.0, 0.0)
-            self.routing_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 0.0, 2.0, 2.0)
         else:
-            sb_ratio = (self.lb_height/(self.sb_mux.num_per_tile/self.num_sb_stripes)) / self.dict_real_widths["sb"]
+            # These ratios seem to be in units of stripes per switch block 
+            sb_ratio = (self.lb_height/(self.num_sbs_per_tile/self.num_sb_stripes)) / self.dict_real_widths["sb"]
             if sb_ratio < 1.0:
                 sb_ratio = 1/sb_ratio
 			
@@ -6164,11 +6384,18 @@ class FPGA:
 
             #this was used for debugging so I commented it
             #print "ratios " + str(sb_ratio) +" "+ str(cb_ratio) +" "+ str(ic_ratio) +" "+ str(lut_ratio)
-            self.cluster_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.d_ffble_to_sb, self.lb_height)
-            self.sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, sb_ratio)
+            
+            # iterate thorough subckts associated with wire types
+            for sb_mux, cluster_output_load, routing_wire_load in zip(self.sb_muxes, self.cluster_output_loads, self.routing_wire_loads):
+                sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, sb_ratio)
+                cluster_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.d_ffble_to_sb, self.lb_height)
+                routing_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.lb_height, self.num_sb_stripes, self.num_cb_stripes)
+
+            # self.cluster_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.d_ffble_to_sb, self.lb_height)
+            # self.sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, sb_ratio)
             self.cb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, cb_ratio)
             self.logic_cluster.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, ic_ratio, lut_ratio, self.d_ffble_to_ic, self.d_cb_to_ic + self.lb_height)
-            self.routing_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.lb_height, self.num_sb_stripes, self.num_cb_stripes)
+            # self.routing_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.lb_height, self.num_sb_stripes, self.num_cb_stripes)
 
 
         
@@ -6205,8 +6432,10 @@ class FPGA:
             resistance = rc[0]*length
             capacitance = rc[1]*length/2
             # Add to wire_rc dictionary
-            self.wire_rc_dict[wire] = (resistance, capacitance)     
+            self.wire_rc_dict[wire] = (resistance, capacitance)    
 
+        # Debug print, this update function is almost always called after update_area and update_wires 
+        update_fpga_telemetry_csv(self, get_current_stack_trace())
 
 
     #TODO: break this into different functions or form a loop out of it; it's too long
@@ -6240,23 +6469,26 @@ class FPGA:
         # second and set our valid_delay flag to False.
 
         # Switch Block MUX 
-        print("  Updating delay for " + self.sb_mux.name)
-        spice_meas = spice_interface.run(self.sb_mux.top_spice_path, parameter_dict)
-        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
-            valid_delay = False
-            tfall = 1
-            trise = 1
-        else :  
-            tfall = float(spice_meas["meas_total_tfall"][0])
-            trise = float(spice_meas["meas_total_trise"][0])
-        if tfall < 0 or trise < 0 :
-            valid_delay = False
-        self.sb_mux.tfall = tfall
-        self.sb_mux.trise = trise
-        self.sb_mux.delay = max(tfall, trise)
-        crit_path_delay += self.sb_mux.delay*self.sb_mux.delay_weight
-        self.delay_dict[self.sb_mux.name] = self.sb_mux.delay 
-        self.sb_mux.power = float(spice_meas["meas_avg_power"][0])
+        # For each SB mux type in our switch block update delay
+        for sb_mux in self.sb_muxes:
+            print("  Updating delay for " + sb_mux.name)
+            spice_meas = spice_interface.run(sb_mux.top_spice_path, parameter_dict)
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            sb_mux.tfall = tfall
+            sb_mux.trise = trise
+            sb_mux.delay = max(tfall, trise)
+            crit_path_delay += sb_mux.delay * sb_mux.delay_weight
+            # append to FPGA delay
+            self.delay_dict[sb_mux.name] = sb_mux.delay 
+            sb_mux.power = float(spice_meas["meas_avg_power"][0])
         
         # Connection Block MUX
         print("  Updating delay for " + self.cb_mux.name)
@@ -6306,7 +6538,7 @@ class FPGA:
             valid_delay = False
             tfall = 1
             trise = 1
-        else :  
+        else:  
             tfall = float(spice_meas["meas_total_tfall"][0])
             trise = float(spice_meas["meas_total_trise"][0])
         if tfall < 0 or trise < 0 :
@@ -7277,11 +7509,15 @@ class FPGA:
         utils.print_and_write(report_file, "|------------------------------------------------------------------------------|")
         utils.print_and_write(report_file, "")
 
-        self.sb_mux.print_details(report_file)
+        for sb_mux, cluster_output_load, routing_wire_load in zip(self.sb_muxes, self.cluster_output_loads, self.routing_wire_loads):
+            sb_mux.print_details(report_file)
+            cluster_output_load.print_details(report_file)
+            routing_wire_load.print_details(report_file)
+        # self.sb_mux.print_details(report_file)
         self.cb_mux.print_details(report_file)
         self.logic_cluster.print_details(report_file)
-        self.cluster_output_load.print_details(report_file)
-        self.routing_wire_load.print_details(report_file)
+        # self.cluster_output_load.print_details(report_file)
+        # self.routing_wire_load.print_details(report_file)
         if self.specs.enable_bram_block == 1:
             self.RAM.print_details(report_file)
         for hb in self.hardblocklist:

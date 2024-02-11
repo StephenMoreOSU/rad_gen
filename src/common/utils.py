@@ -171,6 +171,9 @@ def write_csv_file(filename, formatted_data):
         csv_writer = csv.writer(csvfile)
         csv_writer.writerows(formatted_data)
 
+def are_lists_mutually_exclusive(lists: List[List[Any]]):
+    return all(not set(lists[i]) & set(lists[j]) for i in range(len(lists)) for j in range(i + 1, len(lists)))
+
 def write_dict_to_csv(csv_lines,csv_fname):
     csv_fd = open(f"{csv_fname}.csv","w")
     writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
@@ -1884,6 +1887,7 @@ def load_arch_params(filename): #,run_options):
     arch_params = {
         'W': -1,
         'L': -1,
+        'wire_types': [],
         'Fs': -1,
         'N': -1,
         'K': -1,
@@ -1972,6 +1976,14 @@ def load_arch_params(filename): #,run_options):
             param_dict["fpga_arch_params"]['W'] = int(value)
         elif param == 'L':
             param_dict["fpga_arch_params"]['L'] = int(value)
+        elif param == 'wire_types':
+            # should be a list of dicts
+            tmp_list = []
+            for wire_type in param_dict["fpga_arch_params"]["wire_types"]:
+                tmp_list.append(
+                    wire_type
+                )
+            param_dict["fpga_arch_params"]["wire_types"] = tmp_list
         elif param == 'Fs':
             param_dict["fpga_arch_params"]['Fs'] = int(value)
         elif param == 'N':

@@ -1,4 +1,7 @@
-def general_routing_load_generate(spice_filename, wire_length, tile_sb_on, tile_sb_partial, tile_sb_off, tile_cb_on, tile_cb_partial, tile_cb_off):
+from typing import List, Dict, Any, Tuple, Union
+
+
+def general_routing_load_generate(spice_filename: str, tile_sb_on: List[int], tile_sb_partial: List[int], tile_sb_off: List[int], tile_cb_on: List[int], tile_cb_partial: List[int], tile_cb_off: List[int], gen_r_wire: Dict[str, Any], sb_mux: Any) -> List[str]:
     """ Generates a routing wire load SPICE deck  """
     
     # Open SPICE file for appending
@@ -7,6 +10,35 @@ def general_routing_load_generate(spice_filename, wire_length, tile_sb_on, tile_
     ###############################################################
     ## ROUTING WIRE LOAD
     ###############################################################
+
+
+    # Get gen routing wire information
+    wire_length = gen_r_wire["len"]
+    wire_id = gen_r_wire["id"]
+
+    # param string suffixes
+    p_str_suffix = f"_L{wire_length}_uid{wire_id}"
+    routing_wire_load_pstr = f"wire_gen_routing{p_str_suffix}"
+    wire_sb_load_on_pstr = f"wire_sb_load_on{p_str_suffix}"
+    wire_sb_load_partial_pstr = f"wire_sb_load_partial{p_str_suffix}"
+    wire_sb_load_off_pstr = f"wire_sb_load_off{p_str_suffix}"
+    
+    # for ease defining subckt names here
+    sb_mux_on_str = f"{sb_mux.name}_on"
+    sb_mux_partial_str = f"{sb_mux.name}_partial"
+    sb_mux_off_str = f"{sb_mux.name}_off"
+
+    # Not using a seperate cb mux for each wire type
+    wire_cb_load_on_pstr = f"wire_cb_load_on{p_str_suffix}"
+    wire_cb_load_partial_pstr = f"wire_cb_load_partial{p_str_suffix}"
+    wire_cb_load_off_pstr = f"wire_cb_load_off{p_str_suffix}"
+
+    subckt_cb_mux_on_str = f"cb_mux_on"
+    subckt_cb_mux_partial_str = f"cb_mux_partial"
+    subckt_cb_mux_off_str = f"cb_mux_off"
+
+    # wire load sbckt name
+    routing_wire_load_subckt_str = f"routing_wire_load{p_str_suffix}"
 
     # First we write the individual tile loads
     # Tiles are generated such that if you drive a wire from the left you get
@@ -17,10 +49,10 @@ def general_routing_load_generate(spice_filename, wire_length, tile_sb_on, tile_
         spice_file.write("******************************************************************************************\n")
         # If this is Tile 1, we need to add a nodes to which we can connect the ON sb_mux and cb_mux so that we can measure power.
         if i == 0:
-            spice_file.write(".SUBCKT routing_wire_load_tile_" + str(i+1) + " n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on\n")
+            spice_file.write(f".SUBCKT routing_wire_load_tile_{i+1}{p_str_suffix} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on\n")
         else:
-            spice_file.write(".SUBCKT routing_wire_load_tile_" + str(i+1) + " n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd\n")
-        spice_file.write("Xwire_gen_routing_1 n_in n_1_1 wire Rw='wire_gen_routing_res/" + str(2*wire_length) + "' Cw='wire_gen_routing_cap/" + str(2*wire_length) + "'\n\n")
+            spice_file.write(f".SUBCKT routing_wire_load_tile_{i+1}{p_str_suffix} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd\n")
+        spice_file.write(f"Xwire_gen_routing_1 n_in n_1_1 wire Rw='{routing_wire_load_pstr}_res/" + str(2*wire_length) + f"' Cw='{routing_wire_load_pstr}_cap/" + str(2*wire_length) + "'\n\n")
         
         # SWITCH BLOCK LOAD
         # Write the ON switch block loads 
@@ -28,19 +60,19 @@ def general_routing_load_generate(spice_filename, wire_length, tile_sb_on, tile_
             # Tile 1 is terminated by a on SB, if this is tile 1 and sb_on 1, we ignore it because we put that one at the end.
             if i == 0:
                 if sb_on != 0:
-                    spice_file.write("Xwire_sb_load_on_" + str(sb_on+1) + " n_1_1 n_1_sb_on_" + str(sb_on+1) + " wire Rw=wire_sb_load_on_res Cw=wire_sb_load_on_cap\n")
-                    spice_file.write("Xsb_load_on_" + str(sb_on+1) + " n_1_sb_on_" + str(sb_on+1) + " n_sb_mux_on_" + str(sb_on+1) + "_hang n_gate n_gate_n n_vdd n_gnd sb_mux_on\n\n")
+                    spice_file.write("Xwire_sb_load_on_" + str(sb_on+1) + " n_1_1 n_1_sb_on_" + str(sb_on+1) + f" wire Rw={wire_sb_load_on_pstr}_res Cw={wire_sb_load_on_pstr}_cap\n")
+                    spice_file.write("Xsb_load_on_" + str(sb_on+1) + " n_1_sb_on_" + str(sb_on+1) + " n_sb_mux_on_" + str(sb_on+1) + f"_hang n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n\n")
             else:
-                spice_file.write("Xwire_sb_load_on_" + str(sb_on+1) + " n_1_1 n_1_sb_on_" + str(sb_on+1) + " wire Rw=wire_sb_load_on_res Cw=wire_sb_load_on_cap\n")
-                spice_file.write("Xsb_load_on_" + str(sb_on+1) + " n_1_sb_on_" + str(sb_on+1) + " n_sb_mux_on_" + str(sb_on+1) + "_hang n_gate n_gate_n n_vdd n_gnd sb_mux_on\n\n")
+                spice_file.write("Xwire_sb_load_on_" + str(sb_on+1) + " n_1_1 n_1_sb_on_" + str(sb_on+1) + f" wire Rw={wire_sb_load_on_pstr}_res Cw={wire_sb_load_on_pstr}_cap\n")
+                spice_file.write("Xsb_load_on_" + str(sb_on+1) + " n_1_sb_on_" + str(sb_on+1) + " n_sb_mux_on_" + str(sb_on+1) + f"_hang n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n\n")
         # Write partially on switch block loads
         for sb_partial in range(tile_sb_partial[i]):
-            spice_file.write("Xwire_sb_load_partial_" + str(sb_partial+1) + " n_1_1 n_1_sb_partial_" + str(sb_partial+1) + " wire Rw=wire_sb_load_partial_res Cw=wire_sb_load_partial_cap\n")
-            spice_file.write("Xsb_load_partial_" + str(sb_partial+1) + " n_1_sb_partial_" + str(sb_partial+1) + " n_gate n_gate_n n_vdd n_gnd sb_mux_partial\n\n")
+            spice_file.write("Xwire_sb_load_partial_" + str(sb_partial+1) + " n_1_1 n_1_sb_partial_" + str(sb_partial+1) + f" wire Rw={wire_sb_load_partial_pstr}_res Cw={wire_sb_load_partial_pstr}_cap\n")
+            spice_file.write("Xsb_load_partial_" + str(sb_partial+1) + " n_1_sb_partial_" + str(sb_partial+1) + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_partial_str}\n\n")
         # Write off switch block loads
         for sb_off in range(tile_sb_off[i]):
-            spice_file.write("Xwire_sb_load_off_" + str(sb_off+1) + " n_1_1 n_1_sb_off_" + str(sb_off+1) + " wire Rw=wire_sb_load_off_res Cw=wire_sb_load_off_cap\n")
-            spice_file.write("Xsb_load_off_" + str(sb_off+1) + " n_1_sb_off_" + str(sb_off+1) + " n_gate n_gate_n n_vdd n_gnd sb_mux_off\n\n")
+            spice_file.write("Xwire_sb_load_off_" + str(sb_off+1) + " n_1_1 n_1_sb_off_" + str(sb_off+1) + f" wire Rw={wire_sb_load_off_pstr}_res Cw={wire_sb_load_off_pstr}_cap\n")
+            spice_file.write("Xsb_load_off_" + str(sb_off+1) + " n_1_sb_off_" + str(sb_off+1) + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_off_str}\n\n")
         
         # CONNECTION BLOCK LOAD
         # Write the ON connection block load
@@ -50,27 +82,27 @@ def general_routing_load_generate(spice_filename, wire_length, tile_sb_on, tile_
                 # We only connect one of them, so the first one in this case.
                 # This cb_mux is connected to a different power rail so that we can measure power.
                 if cb_on == 0:
-                    spice_file.write("Xwire_cb_load_on_" + str(cb_on+1) + " n_1_1 n_1_cb_on_" + str(cb_on+1) + " wire Rw=wire_cb_load_on_res Cw=wire_cb_load_on_cap\n")
-                    spice_file.write("Xcb_load_on_" + str(cb_on+1) + " n_1_cb_on_" + str(cb_on+1) + " n_cb_out n_gate n_gate_n n_vdd_cb_mux_on n_gnd cb_mux_on\n\n")
+                    spice_file.write("Xwire_cb_load_on_" + str(cb_on+1) + " n_1_1 n_1_cb_on_" + str(cb_on+1) + f" wire Rw={wire_cb_load_on_pstr}_res Cw={wire_cb_load_on_pstr}_cap\n")
+                    spice_file.write("Xcb_load_on_" + str(cb_on+1) + " n_1_cb_on_" + str(cb_on+1) + f" n_cb_out n_gate n_gate_n n_vdd_cb_mux_on n_gnd {subckt_cb_mux_on_str}\n\n")
             else:
-                spice_file.write("Xwire_cb_load_on_" + str(cb_on+1) + " n_1_1 n_1_cb_on_" + str(cb_on+1) + " wire Rw=wire_cb_load_on_res Cw=wire_cb_load_on_cap\n")
-                spice_file.write("Xcb_load_on_" + str(cb_on+1) + " n_1_cb_on_" + str(cb_on+1) + " n_cb_mux_on_" + str(cb_on+1) + "_hang n_gate n_gate_n n_vdd n_gnd cb_mux_on\n\n")
+                spice_file.write("Xwire_cb_load_on_" + str(cb_on+1) + " n_1_1 n_1_cb_on_" + str(cb_on+1) + f" wire Rw={wire_cb_load_on_pstr}_res Cw={wire_cb_load_on_pstr}_cap\n")
+                spice_file.write("Xcb_load_on_" + str(cb_on+1) + " n_1_cb_on_" + str(cb_on+1) + " n_cb_mux_on_" + str(cb_on+1) + f"_hang n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_on_str}\n\n")
         # Write partially on connection block loads
         for cb_partial in range(tile_cb_partial[i]):
-            spice_file.write("Xwire_cb_load_partial_" + str(cb_partial+1) + " n_1_1 n_1_cb_partial_" + str(cb_partial+1) + " wire Rw=wire_cb_load_partial_res Cw=wire_cb_load_partial_cap\n")
-            spice_file.write("Xcb_load_partial_" + str(cb_partial+1) + " n_1_cb_partial_" + str(cb_partial+1) + " n_gate n_gate_n n_vdd n_gnd cb_mux_partial\n\n")
+            spice_file.write("Xwire_cb_load_partial_" + str(cb_partial+1) + " n_1_1 n_1_cb_partial_" + str(cb_partial+1) + f" wire Rw={wire_cb_load_partial_pstr}_res Cw={wire_cb_load_partial_pstr}_cap\n")
+            spice_file.write("Xcb_load_partial_" + str(cb_partial+1) + " n_1_cb_partial_" + str(cb_partial+1) + f" n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_partial_str}\n\n")
         # Write off connection block loads
         for cb_off in range(tile_cb_off[i]):
-            spice_file.write("Xwire_cb_load_off_" + str(cb_off+1) + " n_1_1 n_1_cb_off_" + str(cb_off+1) + " wire Rw=wire_cb_load_off_res Cw=wire_cb_load_off_cap\n")
-            spice_file.write("Xcb_load_off_" + str(cb_off+1) + " n_1_cb_off_" + str(cb_off+1) + " n_gate n_gate_n n_vdd n_gnd cb_mux_off\n\n")
+            spice_file.write("Xwire_cb_load_off_" + str(cb_off+1) + " n_1_1 n_1_cb_off_" + str(cb_off+1) + f" wire Rw={wire_cb_load_off_pstr}_res Cw={wire_cb_load_off_pstr}_cap\n")
+            spice_file.write("Xcb_load_off_" + str(cb_off+1) + " n_1_cb_off_" + str(cb_off+1) + f" n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_off_str}\n\n")
         
         # Tile 1 is terminated by a on switch block, other tiles just connect the wire to the output
         # Tile 1's sb_mux is connected to a different power rail so that we can measure dynamic power.
         if i == 0:
-            spice_file.write("Xwire_gen_routing_2 n_1_1 n_1_2 wire Rw='wire_gen_routing_res/" + str(2*wire_length) + "' Cw='wire_gen_routing_cap/" + str(2*wire_length) + "'\n")
-            spice_file.write("Xsb_mux_on_out n_1_2 n_out n_gate n_gate_n n_vdd_sb_mux_on n_gnd sb_mux_on\n")
+            spice_file.write(f"Xwire_gen_routing_2 n_1_1 n_1_2 wire Rw='{routing_wire_load_pstr}_res/" + str(2*wire_length) + f"' Cw='{routing_wire_load_pstr}_cap/" + str(2*wire_length) + "'\n")
+            spice_file.write(f"Xsb_mux_on_out n_1_2 n_out n_gate n_gate_n n_vdd_sb_mux_on n_gnd {sb_mux_on_str}\n")
         else:
-            spice_file.write("Xwire_gen_routing_2 n_1_1 n_out wire Rw='wire_gen_routing_res/" + str(2*wire_length) + "' Cw='wire_gen_routing_cap/" + str(2*wire_length) + "'\n")
+            spice_file.write(f"Xwire_gen_routing_2 n_1_1 n_out wire Rw='{routing_wire_load_pstr}_res/" + str(2*wire_length) + f"' Cw='{routing_wire_load_pstr}_cap/" + str(2*wire_length) + "'\n")
     
         spice_file.write(".ENDS\n\n\n")
     
@@ -79,15 +111,16 @@ def general_routing_load_generate(spice_filename, wire_length, tile_sb_on, tile_
     spice_file.write("******************************************************************************************\n")
     spice_file.write("* Routing wire load tile " + str(i+1) + "\n")
     spice_file.write("******************************************************************************************\n")
-    spice_file.write(".SUBCKT routing_wire_load n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on\n")
+    # spice_file.write(".SUBCKT routing_wire_load n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on\n")
+    spice_file.write(f".SUBCKT {routing_wire_load_subckt_str} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on\n")
     # Iterate through tiles backwards
     in_node = "n_in"
     for tile in range(wire_length,1,-1):
         out_node = "n_" + str(tile)
-        spice_file.write("Xrouting_wire_load_tile_" + str(tile) + " " + in_node + " " + out_node + " n_hang_" + str(tile) + " n_gate n_gate_n n_vdd n_gnd routing_wire_load_tile_"  + str(tile) + "\n")
+        spice_file.write("Xrouting_wire_load_tile_" + str(tile) + " " + in_node + " " + out_node + " n_hang_" + str(tile) + f" n_gate n_gate_n n_vdd n_gnd routing_wire_load_tile_{tile}{p_str_suffix}\n")
         in_node = out_node
     # Write tile 1
-    spice_file.write("Xrouting_wire_load_tile_1 " + in_node + " n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on routing_wire_load_tile_1\n")
+    spice_file.write("Xrouting_wire_load_tile_1 " + in_node + f" n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on routing_wire_load_tile_1{p_str_suffix}\n")
     spice_file.write(".ENDS\n\n\n")
     
     spice_file.close()
@@ -95,13 +128,13 @@ def general_routing_load_generate(spice_filename, wire_length, tile_sb_on, tile_
     
     # Create a list of all wires used in this subcircuit
     wire_names_list = []
-    wire_names_list.append("wire_gen_routing")
-    wire_names_list.append("wire_sb_load_on")
-    wire_names_list.append("wire_sb_load_partial")
-    wire_names_list.append("wire_sb_load_off")
-    wire_names_list.append("wire_cb_load_on")
-    wire_names_list.append("wire_cb_load_partial")
-    wire_names_list.append("wire_cb_load_off")
+    wire_names_list.append(routing_wire_load_pstr)
+    wire_names_list.append(wire_sb_load_on_pstr)
+    wire_names_list.append(wire_sb_load_partial_pstr)
+    wire_names_list.append(wire_sb_load_off_pstr)
+    wire_names_list.append(wire_cb_load_on_pstr)
+    wire_names_list.append(wire_cb_load_partial_pstr)
+    wire_names_list.append(wire_cb_load_off_pstr)
     
     return wire_names_list
     
@@ -413,45 +446,64 @@ def generate_local_ble_output_load(spice_filename):
     return wire_names_list
     
     
-def generate_general_ble_output_load(spice_filename, num_sb_mux_off, num_sb_mux_partial, num_sb_mux_on):
+def generate_general_ble_output_load(spice_filename: str, num_sb_mux_off: int, num_sb_mux_partial: int, num_sb_mux_on: int, gen_r_wire: dict):
     """ Create the cluster output load SPICE deck. We assume 2-level muxes. The load is distributed as
         off, then partial, then on. 
         Inputs are SPICE file, number of SB muxes that are off, then partially on, then on.
         Returns wire names used in this SPICE circuit."""
     
+    # Get gen routing wire information
+    wire_length = gen_r_wire["len"]
+    wire_id = gen_r_wire["id"]
+
+    # for ease defining subckt names here
+    p_str = f"_L{wire_length}_uid{wire_id}"
+    sb_mux_name = f"sb_mux{p_str}"
+    sb_mux_on_str = f"{sb_mux_name}_on"
+    sb_mux_partial_str = f"{sb_mux_name}_partial"
+    sb_mux_off_str = f"{sb_mux_name}_off"
+
+
     # Total number of sb muxes connected to this logic cluster output
     sb_mux_total = num_sb_mux_off + num_sb_mux_partial + num_sb_mux_on
     
     # Open SPICE file for appending
     spice_file = open(spice_filename, 'a')
+
+    # Define the parameters for wire RCs, these will be returned from this function
+    # Commenting out while testing to see if the multi sb mux itself is working, dont want to have to change LUT stuff
+    wire_general_ble_output_pstr = f"wire_general_ble_output_L{wire_length}_uid{wire_id}"
+    #wire_general_ble_output_pstr = f"wire_general_ble_output"
+
     
     spice_file.write("******************************************************************************************\n")
     spice_file.write("* General BLE output load\n")
     spice_file.write("******************************************************************************************\n")
-    spice_file.write(".SUBCKT general_ble_output_load n_1_1 n_out n_gate n_gate_n n_vdd n_gnd\n")
+    # For multi wire change to --> general_ble_output_load_L{gen_routing_wire_length}
+    spice_file.write(f".SUBCKT general_ble_output_load_L{wire_length}_uid{wire_id} n_1_1 n_out n_gate n_gate_n n_vdd n_gnd\n")
     current_node = "n_1_1"
     next_node = "n_1_2"
     for i in range(num_sb_mux_off):
-        spice_file.write("Xwire_general_ble_output_" + str(i+1) + " " + current_node + " " + next_node + " wire Rw='wire_general_ble_output_res/" + str(sb_mux_total) + "' Cw='wire_general_ble_output_cap/" + str(sb_mux_total) + "'\n")
-        spice_file.write("Xsb_mux_off_" + str(i+1) + " " + next_node + " n_gate n_gate_n n_vdd n_gnd sb_mux_off\n")
+        spice_file.write("Xwire_general_ble_output_" + str(i+1) + " " + current_node + " " + next_node + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
+        spice_file.write("Xsb_mux_off_" + str(i+1) + " " + next_node + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_off_str}\n")
         current_node = next_node
         next_node = "n_1_" + str(i+3)
     for i in range(num_sb_mux_partial):
-        spice_file.write("Xwire_general_ble_output_" + str(i+num_sb_mux_off+1) + " " + current_node + " " + next_node + " wire Rw='wire_general_ble_output_res/" + str(sb_mux_total) + "' Cw='wire_general_ble_output_cap/" + str(sb_mux_total) + "'\n")
-        spice_file.write("Xsb_mux_partial_" + str(i+1) + " " + next_node + " n_gate n_gate_n n_vdd n_gnd sb_mux_partial\n")
+        spice_file.write("Xwire_general_ble_output_" + str(i+num_sb_mux_off+1) + " " + current_node + " " + next_node + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
+        spice_file.write("Xsb_mux_partial_" + str(i+1) + " " + next_node + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_partial_str}\n")
         current_node = next_node
         next_node = "n_1_" + str(i+num_sb_mux_off+3)
     for i in range(num_sb_mux_on):
         
         # The last 'on' sb_mux needs to have special node names to be able to connect it to the output and also for measurements.
         if i == (num_sb_mux_on-1):
-            spice_file.write("Xwire_general_ble_output_" + str(i+num_sb_mux_off+num_sb_mux_partial+1) + " " + current_node + " n_meas_point" 
-                             + " wire Rw='wire_general_ble_output_res/" + str(sb_mux_total) + "' Cw='wire_general_ble_output_cap/" + str(sb_mux_total) + "'\n")
-            spice_file.write("Xsb_mux_on_" + str(i+1) + " n_meas_point n_out n_gate n_gate_n n_vdd n_gnd sb_mux_on\n")
+            spice_file.write(f"Xwire_general_ble_output_" + str(i+num_sb_mux_off+num_sb_mux_partial+1) + " " + current_node + " n_meas_point" 
+                             + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
+            spice_file.write("Xsb_mux_on_" + str(i+1) + f" n_meas_point n_out n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n")
         else:
             spice_file.write("Xwire_general_ble_output_" + str(i+num_sb_mux_off+num_sb_mux_partial+1) + " " + current_node + " " + next_node 
-                             + " wire Rw='wire_general_ble_output_res/" + str(sb_mux_total) + "' Cw='wire_general_ble_output_cap/" + str(sb_mux_total) + "'\n")
-            spice_file.write("Xsb_mux_on_" + str(i+1) + " " + next_node + " n_hang_" + str(i) + " n_gate n_gate_n n_vdd n_gnd sb_mux_on\n")
+                             + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
+            spice_file.write("Xsb_mux_on_" + str(i+1) + " " + next_node + " n_hang_" + str(i) + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n")
         current_node = next_node
         next_node = "n_1_" + str(i+num_sb_mux_off+num_sb_mux_partial+3)
 
@@ -461,6 +513,6 @@ def generate_general_ble_output_load(spice_filename, num_sb_mux_off, num_sb_mux_
     
     # Create a list of all wires used in this subcircuit
     wire_names_list = []
-    wire_names_list.append("wire_general_ble_output")
+    wire_names_list.append(wire_general_ble_output_pstr)
     
     return wire_names_list

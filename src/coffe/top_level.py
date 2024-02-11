@@ -1,6 +1,6 @@
 import os
 
-def generate_switch_block_top(mux_name):
+def generate_switch_block_top(mux_name: str, gen_r_wire: dict):
     """ Generate the top level switch block SPICE file """
     
     # Create directories
@@ -9,9 +9,16 @@ def generate_switch_block_top(mux_name):
     # Change to directory    
     os.chdir(mux_name)  
     
+    # get wire information from dict
+    wire_length = gen_r_wire["len"]
+    wire_id = gen_r_wire["id"]
+    # param string default format used by wire
+    # TODO remove duplicates
+    p_str = f"_L{wire_length}_uid{wire_id}"
+
     switch_block_filename = mux_name + ".sp"
     sb_file = open(switch_block_filename, 'w')
-    sb_file.write(".TITLE Switch block multiplexer\n\n") 
+    sb_file.write(f".TITLE Switch block multiplexer\n\n") 
     
     sb_file.write("********************************************************************************\n")
     sb_file.write("** Include libraries, parameters and other\n")
@@ -59,9 +66,9 @@ def generate_switch_block_top(mux_name):
     sb_file.write("********************************************************************************\n")
     sb_file.write("** Circuit\n")
     sb_file.write("********************************************************************************\n\n")
-    sb_file.write("Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd sb_mux_on\n\n")
-    sb_file.write("Xrouting_wire_load_1 n_1_1 n_2_1 n_hang_1 vsram vsram_n vdd gnd vdd_sb_mux vdd routing_wire_load\n\n")
-    sb_file.write("Xrouting_wire_load_2 n_2_1 n_3_1 n_hang_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n\n")
+    sb_file.write(f"Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd {mux_name}_on\n\n")
+    sb_file.write(f"Xrouting_wire_load_1 n_1_1 n_2_1 n_hang_1 vsram vsram_n vdd gnd vdd_sb_mux vdd routing_wire_load{p_str}\n\n")
+    sb_file.write(f"Xrouting_wire_load_2 n_2_1 n_3_1 n_hang_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load{p_str}\n\n")
     sb_file.write(".END")
     sb_file.close()
     
@@ -71,7 +78,7 @@ def generate_switch_block_top(mux_name):
     return (mux_name + "/" + mux_name + ".sp")
     
     
-def generate_connection_block_top(mux_name):
+def generate_connection_block_top(mux_name, min_len_wire: dict):
     """ Generate the top level switch block SPICE file """
     
     # Create directories
@@ -80,6 +87,11 @@ def generate_connection_block_top(mux_name):
     # Change to directory    
     os.chdir(mux_name)
     
+    # TODO link with other definiions elsewhere, duplicated
+    p_str = f"_L{min_len_wire['len']}_uid{min_len_wire['id']}"
+    subckt_sb_mux_on_str = f"sb_mux{p_str}_on"
+    subckt_routing_wire_load_str =  f"routing_wire_load{p_str}"
+
     connection_block_filename = mux_name + ".sp"
     cb_file = open(connection_block_filename, 'w')
     cb_file.write(".TITLE Connection block multiplexer\n\n") 
@@ -129,8 +141,8 @@ def generate_connection_block_top(mux_name):
     cb_file.write("********************************************************************************\n")
     cb_file.write("** Circuit\n")
     cb_file.write("********************************************************************************\n\n")
-    cb_file.write("Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd sb_mux_on\n")
-    cb_file.write("Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd_cb_mux routing_wire_load\n")
+    cb_file.write(f"Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd {subckt_sb_mux_on_str}\n")
+    cb_file.write(f"Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd_cb_mux {subckt_routing_wire_load_str}\n")
     cb_file.write("Xlocal_routing_wire_load_1 n_1_3 n_1_4 vsram vsram_n vdd gnd vdd local_routing_wire_load\n")
     cb_file.write("Xlut_a_driver_1 n_1_4 n_hang1 vsram vsram_n n_hang2 n_hang3 vdd gnd lut_a_driver\n\n")
     cb_file.write(".END")
@@ -142,7 +154,7 @@ def generate_connection_block_top(mux_name):
     return (mux_name + "/" + mux_name + ".sp")
 
 
-def generate_local_mux_top(mux_name):
+def generate_local_mux_top(mux_name, min_len_wire: dict):
     """ Generate the top level local mux SPICE file """
     
     # Create directories
@@ -151,6 +163,12 @@ def generate_local_mux_top(mux_name):
     # Change to directory    
     os.chdir(mux_name)
     
+    # TODO link with other definiions elsewhere, duplicated
+    p_str = f"_L{min_len_wire['len']}_uid{min_len_wire['id']}"
+    subckt_sb_mux_on_str = f"sb_mux{p_str}_on"
+    subckt_routing_wire_load_str =  f"routing_wire_load{p_str}"
+
+
     connection_block_filename = mux_name + ".sp"
     local_mux_file = open(connection_block_filename, 'w')
     local_mux_file.write(".TITLE Local routing multiplexer\n\n") 
@@ -195,8 +213,8 @@ def generate_local_mux_top(mux_name):
     local_mux_file.write("********************************************************************************\n")
     local_mux_file.write("** Circuit\n")
     local_mux_file.write("********************************************************************************\n\n")
-    local_mux_file.write("Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd sb_mux_on\n")
-    local_mux_file.write("Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n")
+    local_mux_file.write(f"Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd {subckt_sb_mux_on_str}\n")
+    local_mux_file.write(f"Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd {subckt_routing_wire_load_str}\n")
     local_mux_file.write("Xlocal_routing_wire_load_1 n_1_3 n_1_4 vsram vsram_n vdd gnd vdd_local_mux local_routing_wire_load\n")
     local_mux_file.write("Xlut_A_driver_1 n_1_4 n_hang1 vsram vsram_n n_hang2 n_hang3 vdd gnd lut_A_driver\n\n")
     local_mux_file.write(".END")
@@ -4593,7 +4611,7 @@ def generate_local_ble_output_top(name, use_tgate):
     return (name + "/" + name + ".sp")
     
     
-def generate_general_ble_output_top(name, use_tgate):
+def generate_general_ble_output_top(name, use_tgate, gen_r_wire: dict):
     """ """
     
     # Create directories
@@ -4602,6 +4620,9 @@ def generate_general_ble_output_top(name, use_tgate):
     # Change to directory    
     os.chdir(name)  
     
+    p_str = f"_L{gen_r_wire['L']}_uid{gen_r_wire['id']}"
+    subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
+
     general_ble_output_filename = name + ".sp"
     top_file = open(general_ble_output_filename, 'w')
     top_file.write(".TITLE General BLE output\n\n") 
