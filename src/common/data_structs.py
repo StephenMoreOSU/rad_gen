@@ -387,7 +387,11 @@ class Tree:
                 # Don't create tree on scan_dir
                 subtree.create_tree()
 
-    def append_tagged_subtree(self, tag: str, subtree: 'Tree', is_hier_tag: bool = False):        
+    def append_tagged_subtree(self, tag: str, subtree: 'Tree', is_hier_tag: bool = False, mkdirs: bool = True):        
+        """
+            Appends a subtree to the tree at the location of the input tag.
+            This updates the data structure and creates a new directory
+        """
         # find subtree in question
         found_subtree = self.search_subtrees(tag, is_hier_tag = is_hier_tag)[0]
         # update the subtree paths to reflect its new placement
@@ -400,7 +404,8 @@ class Tree:
                 found_subtree.is_leaf = False
                 found_subtree.subtrees = [subtree]
             # Make the dirs
-            found_subtree.create_tree()
+            if mkdirs:
+                found_subtree.create_tree()
         else:
             raise Exception(f"Tag {tag} not found in tree")
 
@@ -486,7 +491,7 @@ class Common:
 
     # Args 
     override_outputs: bool = False # If true will override any files which already exist in the output directory
-
+    manual_obj_dir: str = None # If set will use this as the object directory for the current run
     # Paths
     rad_gen_home_path: str = None
     hammer_home_path: str = None
@@ -677,6 +682,7 @@ class RadGenCLI(ParentCLI):
         GeneralCLI(key = "pdk_name", datatype = str, help_msg = "Naming convension for our current 'PDK' , the reason this can be different from stdcell_lib pdk name is because RAD-Gen allows mixing and matching of different stdcell libs, spice tx_models, and metal stacks with appropriate scaling. \
                    If using the asic_dse tool, then the below parameter will be overrided by the stdcell_lib name in the asic_dse config",
                    default_val = "custom_pdk"),
+        GeneralCLI(key = "just_config_init", datatype = bool, action = "store_true", help_msg = "Flag to return initialized data structures for whatever subtool is used, without running anything")
         
         # GeneralCLI(key = "input_tree_top_path", shortcut = "-itree", datatype = str, help_msg = "path to top level dir containing input designs", default_val = os.path.expanduser(f"{os.environ['RAD_GEN_HOME']}/unit_tests/inputs")),
         # GeneralCLI(key = "output_tree_top_path", shortcut = "-otree", datatype = str, help_msg = "path to top level dir which outputs will be produced into, will have a subdir for each subtool", default_val = os.path.expanduser(f"{os.environ['RAD_GEN_HOME']}/unit_tests/outputs")),
@@ -780,11 +786,11 @@ class AsicDseCLI(ParentCLI):
         # GeneralCLI(key = "use_latest_obj_dir", shortcut = "-l", action = "store_true", help_msg = "Uses latest obj / work dir found in the respective output_design_files/<top_module> dir"),
         # GeneralCLI(key = "use_manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj / work dir"),
         GeneralCLI(key = "compile_results", shortcut = "-c", datatype = bool, action = "store_true", help_msg = "Flag to compile results related a specific asic flow or sweep depending on additional provided configs"),
-        GeneralCLI(key = "synthesis", shortcut = "-syn", datatype = bool, help_msg = "Flag to run synthesis"),
-        GeneralCLI(key = "place_n_route", shortcut = "-par", datatype = bool, help_msg = "Flag to run place & route"),
-        GeneralCLI(key = "primetime", shortcut = "-pt", datatype = bool, help_msg = "Flag to run primetime (timing & power)"),
-        GeneralCLI(key = "sram_compiler", shortcut = "-sram", datatype = bool, help_msg = "Flag that must be provided if sram macros exist in design (ASIC-DSE)"),
-        GeneralCLI(key = "make_build", shortcut = "-make", datatype = bool, help_msg = "<TAG> <UNDER DEV> Generates a makefile to manage flow dependencies and execution"),
+        GeneralCLI(key = "synthesis", shortcut = "-syn", datatype = bool, action = "store_true", help_msg = "Flag to run synthesis"),
+        GeneralCLI(key = "place_n_route", shortcut = "-par", datatype = bool, action = "store_true", help_msg = "Flag to run place & route"),
+        GeneralCLI(key = "primetime", shortcut = "-pt", datatype = bool, action = "store_true", help_msg = "Flag to run primetime (timing & power)"),
+        GeneralCLI(key = "sram_compiler", shortcut = "-sram", datatype = bool, action = "store_true", help_msg = "Flag that must be provided if sram macros exist in design (ASIC-DSE)"),
+        GeneralCLI(key = "make_build", shortcut = "-make", datatype = bool, action = "store_true", help_msg = "<TAG> <UNDER DEV> Generates a makefile to manage flow dependencies and execution"),
         # Below are definitions for params nested in the hierarchy of AsicDSE dataclass
         # GeneralCLI(key = "tech.name", datatype= str, help_msg = "Name of tech lib for use with Cadence Virtuoso", default_val = "asap7"),
         GeneralCLI(key = "stdcell_lib.cds_lib", datatype= str, help_msg = "Name of cds lib for use with Cadence Virtuoso", default_val = "asap7_TechLib"),
@@ -903,7 +909,7 @@ class StdCellLib:
     """
         Paths and PDK information for the current rad gen run
     """
-    name: str = "asap7" # name of technology lib, this is what is searched for in either "hammer" or whatever other tool to find stuff like sram macros
+    pdk_name: str = "asap7" # name of technology lib, this is what is searched for in either "hammer" or whatever other tool to find stuff like sram macros
     cds_lib: str = "asap7_TechLib" # name of technology library in cdslib directory, contains views for stdcells, etc needed in design
     sram_lib_path: str = None # path to PDK sram library containing sub dirs named lib, lef, gds with each SRAM.
     # Process settings in RADGen settings as we may need to perform post processing (ASAP7)
@@ -981,7 +987,7 @@ class ASICFlowSettings:
     """
     
     # Hammer Info
-    hammer_env_paths: List[str] = None # paths to hammer environment file containing absolute paths to asic tools and licenses
+    # hammer_env_paths: List[str] = None # paths to hammer environment file containing absolute paths to asic tools and licenses
     hammer_cli_driver_path: str = None # path to hammer driver
     hammer_driver: HammerDriver = None # hammer settings
     
@@ -1112,6 +1118,8 @@ class EnvSettings:
 @dataclass
 class CommonAsicFlow:
     top_lvl_module: str = None # top level module of design
+    # db libs used in synopsys tool interactions, directory names not paths
+    db_libs: List[str] = None
 
 @dataclass
 class AsicDSE:
@@ -1131,7 +1139,7 @@ class AsicDSE:
     sweep_config_path: str = None # path to sweep configuration file containing design parameters to sweep
     result_search_path: str = None # path which will look for various output obj directories to parse results from
     # top_lvl_module: str = None # top level module of design being run or swept 
-    #common_asic_flow: CommonAsicFlow = None # common asic flow settings for all designs
+    common_asic_flow: CommonAsicFlow = None # common asic flow settings for all designs
     asic_flow_settings: ASICFlowSettings = None # asic flow settings for single design
     custom_asic_flow_settings: Dict[str, Any] = None # custom asic flow settings
     design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
@@ -1142,7 +1150,7 @@ class AsicDSE:
     
     def __post_init__(self):
         # Post inits required for structs that use other struct values as inputs and cannot be clearly defined, tradeoff is that these definitions cannot be changed via user input easily (as those intialized with init_dataclass() can)
-        self.stdcell_lib.sram_lib_path = self.common.project_tree.search_subtrees(f"hammer.technology.{self.stdcell_lib.name}.sram_compiler.memories", is_hier_tag=True)[0].path #os.path.join(self.env_settings.hammer_tech_path, self.tech_info.name, "sram_compiler", "memories")
+        self.stdcell_lib.sram_lib_path = self.common.project_tree.search_subtrees(f"hammer.technology.{self.stdcell_lib.pdk_name}.sram_compiler.memories", is_hier_tag=True)[0].path #os.path.join(self.env_settings.hammer_tech_path, self.tech_info.name, "sram_compiler", "memories")
         # TODO add user defined paths for sram compiler outputs in CLI (in case users want to send them somewhere else)
         if self.sram_compiler_settings is None:
             self.sram_compiler_settings = SRAMCompilerSettings()
@@ -1192,6 +1200,7 @@ class CoffeCLI(ParentCLI):
         GeneralCLI(key = "max_iterations", shortcut = "-mi", datatype = int, default_val = 6, help_msg = "max FPGA sizing iterations"),
         GeneralCLI(key = "size_hb_interfaces", shortcut = "-sh", datatype = float, default_val = 0.0, help_msg = "perform transistor sizing only for hard block interfaces"),
         GeneralCLI(key = "quick_mode", shortcut = "-q", datatype = float, default_val = -1.0, help_msg = "minimum cost function improvement for resizing, Ex. could try 0.03 for 3% improvement"),
+        GeneralCLI(key = "ctrl_comp_telemetry_fpath", shortcut = "-ct", datatype = str, help_msg = "path to control compare telemetry file"),
     ])
     arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [
         # FPGA ARCH CONFIG PATH
@@ -1271,6 +1280,7 @@ class Coffe:
     size_hb_interfaces: float # perform transistor sizing only for hard block interfaces
     quick_mode : float # minimum cost function improvement for resizing, could try 0.03 for 3% improvement
     fpga_arch_conf: Dict[str, Any] # FPGA architecture configuration dictionary TODO define as dataclass
+    ctrl_comp_telemetry_fpath: str # path to control compare telemetry file 
 
     # NON cli args are below:
     arch_name: str # name of FPGA architecture
@@ -1381,8 +1391,11 @@ class SpSubCkt:
 
 @dataclass
 class SpSubCktInst:
+    """
+        Information for instantiating a subcircuit in spice
+    """
     subckt: SpSubCkt
-    name: str
+    name: str                                           # Name of instantiation ie X<inst_name> ... <ports> ... <subckt_name>
     conns: dict = field(default_factory = lambda: {})
     param_values: dict = None 
     
@@ -2223,9 +2236,9 @@ class SpPNOptModel:
 
 @dataclass
 class SpSubCktLibs:
-    atomic_subckts: dict = None #= field(default_factory = lambda: sp_subckt_atomic_lib)
-    basic_subckts: dict = None #= field(default_factory = lambda: basic_subckts)
-    subckts: dict = None #= field(default_factory = lambda: subckts)
+    atomic_subckts: Dict[str, SpSubCkt] = None #= field(default_factory = lambda: sp_subckt_atomic_lib)
+    basic_subckts: Dict[str, SpSubCkt] = None #= field(default_factory = lambda: basic_subckts)
+    subckts: Dict[str, SpSubCkt] = None #= field(default_factory = lambda: subckts)
 
 """ Here defines the top class used for buffer exploration """
 @dataclass
@@ -2404,8 +2417,10 @@ IC3DArgs = get_dyn_class(
 
 @dataclass
 class Ic3d:
+    # data common to RAD Gen
+    common: Common # common settings for RAD Gen
+    
     # CLI arguments (for modes)
-    # cli_args: Ic3dCLI
     args: IC3DArgs
 
     # Buffer DSE specific data 

@@ -32,29 +32,29 @@ log_verbosity = 2
 cur_env = os.environ.copy()
 
 
-def compile_results(rad_gen_settings: rg_ds.AsicDSE):
+def compile_results(asic_dse: rg_ds.AsicDSE):
     # read in the result config file
-    report_search_dir = rad_gen_settings.env_settings.design_output_path
+    report_search_dir = asic_dse.env_settings.design_output_path
     csv_lines = []
     reports = []
-    for design in rad_gen_settings.design_sweep_infos:
-        rg_utils.rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {rad_gen_settings.sweep_config_path}",rad_gen_log_fd)
+    for design in asic_dse.design_sweep_infos:
+        rg_utils.rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {asic_dse.sweep_config_path}",rad_gen_log_fd)
         if design.type != None:
             if design.type == "sram":
                 for mem in design.type_info.mems:
                     mem_top_lvl_name = f"sram_macro_map_{mem['rw_ports']}x{mem['w']}x{mem['d']}"
                     num_bits = mem['w']*mem['d']
-                    reports += asic_hammer.gen_parse_reports(rad_gen_settings, report_search_dir, mem_top_lvl_name, design, num_bits)
-                reports += asic_hammer.gen_parse_reports(rad_gen_settings, report_search_dir, design.top_lvl_module, design)
+                    reports += asic_hammer.gen_parse_reports(asic_dse, report_search_dir, mem_top_lvl_name, design, num_bits)
+                reports += asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module, design)
             elif design.type == "rtl_params":
                 """ Currently focused on NoC rtl params"""
-                reports = asic_hammer.gen_parse_reports(rad_gen_settings, report_search_dir, design.top_lvl_module, design)
+                reports = asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module, design)
             else:
-                rg_utils.rad_gen_log(f"Error: Unknown design type {design.type} in {rad_gen_settings.sweep_config_path}",rad_gen_log_fd)
+                rg_utils.rad_gen_log(f"Error: Unknown design type {design.type} in {asic_dse.sweep_config_path}",rad_gen_log_fd)
                 sys.exit(1)
         else:
             # This parsing of reports just looks at top level and takes whatever is in the obj dir
-            reports = asic_hammer.gen_parse_reports(rad_gen_settings, report_search_dir, design.top_lvl_module)
+            reports = asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module)
         
         # General parsing of report to csv
         for report in reports:
@@ -66,10 +66,10 @@ def compile_results(rad_gen_settings: rg_ds.AsicDSE):
                 report_to_csv = asic_hammer.gen_report_to_csv(report)
             if len(report_to_csv) > 0:
                 csv_lines.append(report_to_csv)
-    result_summary_outdir = os.path.join(rad_gen_settings.env_settings.design_output_path,"result_summaries")
+    result_summary_outdir = os.path.join(asic_dse.env_settings.design_output_path,"result_summaries")
     if not os.path.isdir(result_summary_outdir):
         os.makedirs(result_summary_outdir)
-    csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(rad_gen_settings.sweep_config_path))[0] )
+    csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(asic_dse.sweep_config_path))[0] )
     rg_utils.write_dict_to_csv(csv_lines,csv_fname)
 
 def design_sweep(asic_dse: rg_ds.AsicDSE):
@@ -254,26 +254,26 @@ def design_sweep(asic_dse: rg_ds.AsicDSE):
             # permission_cmd = f"chmod +x {script_path}"
             # rg_utils.run_shell_cmd_no_logs(permission_cmd)
 
-def run_asic_flow(rad_gen_settings: rg_ds.AsicDSE) -> Dict[str, Any]:
-    if rad_gen_settings.mode.vlsi_flow.flow_mode == "custom":
-        if rad_gen_settings.mode.vlsi_flow.run_mode == "serial":
-            for hb_settings in rad_gen_settings.custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]:
+def run_asic_flow(asic_dse: rg_ds.AsicDSE) -> Dict[str, Any]:
+    if asic_dse.mode.vlsi_flow.flow_mode == "custom":
+        if asic_dse.mode.vlsi_flow.run_mode == "serial":
+            for hb_settings in asic_dse.custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]:
                 flow_results = asic_custom.hardblock_flow(hb_settings)
-        elif rad_gen_settings.mode.vlsi_flow.run_mode == "parallel":
-            for hb_settings in rad_gen_settings.custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]:
+        elif asic_dse.mode.vlsi_flow.run_mode == "parallel":
+            for hb_settings in asic_dse.custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]:
                 # Maybe 
                 asic_custom.hardblock_parallel_flow(hb_settings)
                 flow_results = None
-    elif rad_gen_settings.mode.vlsi_flow.flow_mode == "hammer":
+    elif asic_dse.mode.vlsi_flow.flow_mode == "hammer":
       # If the args for top level and rtl path are not set, we will use values from the config file
       in_configs = []
-      if rad_gen_settings.mode.vlsi_flow.config_pre_proc:
+      if asic_dse.mode.vlsi_flow.config_pre_proc:
           """ Check to make sure all parameters are assigned and modify if required to"""
-          mod_config_file = asic_hammer.modify_config_file(rad_gen_settings)
+          mod_config_file = asic_hammer.modify_config_file(asic_dse)
           in_configs.append(mod_config_file)
 
       # Run the flow
-      flow_results = asic_hammer.run_hammer_flow(rad_gen_settings, in_configs)
+      flow_results = asic_hammer.run_hammer_flow(asic_dse, in_configs)
        
     rg_utils.rad_gen_log("Done!", rad_gen_log_fd)
     return flow_results

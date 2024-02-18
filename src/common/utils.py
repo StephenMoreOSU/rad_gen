@@ -1031,6 +1031,7 @@ def init_hammer_config(conf_tree: rg_ds.Tree, conf_path: str) -> str:
 
     conf_fname = os.path.basename(os.path.splitext(conf_path)[0])
     conf_dict = parse_config(conf_path, validate_paths = False, sanitize = True)
+    # only searching for the mod directory inside of the designs config tree ie this is ok
     mod_confs_dpath = conf_tree.search_subtrees("mod")[0].path
     conf_out_fpath = os.path.join(mod_confs_dpath, conf_fname + "_pre_procd.json")
     dump_config_to_json_file(conf_out_fpath, conf_dict)
@@ -1259,6 +1260,8 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
             tech_info = init_dataclass(rg_ds.StdCellTechInfo, env_conf["tech"], {})
     """
     # tech_inputs = {k.replace("tech.",""):v for k,v in asic_dse_conf.items() if "tech." in k}
+
+    # Init meathod from heirarchical cli / configs to dataclasses
     stdcell_lib = init_dataclass(rg_ds.StdCellLib, strip_hier(asic_dse_conf, strip_tag="stdcell_lib"))
     scripts = init_dataclass(rg_ds.ScriptInfo, strip_hier(asic_dse_conf, strip_tag="scripts"))
 
@@ -1386,6 +1389,14 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 custom_asic_flow_settings = load_hb_params(clean_path(asic_dse_conf["flow_conf_paths"][0]))
                 top_lvl_module = custom_asic_flow_settings["top_level"]
 
+                # modify the project tree after top level module is found
+                design_out_tree_copy = copy.deepcopy(design_out_tree)
+                design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
+                
+                # Append to project tree
+                asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}.outputs", design_out_tree_copy, is_hier_tag = True) # append our asic_dse outputs
+
+
             elif asic_dse_conf["flow_mode"] == "hammer":
                 # search for conf tree below in our project_name dir
                 proj_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees(f"{asic_dse_conf['common'].project_name}.configs", is_hier_tag = True)[0] 
@@ -1393,7 +1404,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 for idx, conf_path in enumerate(asic_dse_conf["flow_conf_paths"]):
                     asic_dse_conf["flow_conf_paths"][idx] = init_hammer_config(proj_conf_tree, conf_path)
                 # Search for the shared conf tree in the project tree
-                shared_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees("shared_resource.configs.asic_dse", is_hier_tag = True)[0]
+                shared_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees("shared_resources.configs.asic_dse", is_hier_tag = True)[0]
                 # Pre process & validate env config path
                 for idx, conf_path in enumerate(asic_dse_conf["tool_env_conf_paths"]):
                     asic_dse_conf["tool_env_conf_paths"][idx] = init_hammer_config(shared_conf_tree, conf_path)
@@ -1434,20 +1445,26 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                     vlsi_mode_inputs["config_pre_proc"] = False
                     top_lvl_module = hammer_driver.database.get_setting("synthesis.inputs.top_module")
 
+                # modify the project tree after top level module is found
+                design_out_tree_copy = copy.deepcopy(design_out_tree)
+                design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
+                # Append to project tree
+                asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}.outputs", design_out_tree_copy, is_hier_tag = True) # append our asic_dse outputs
+                
                 # Create output directory for obj dirs to be created inside of
-                out_dir = asic_dse_conf["common"].project_tree.search_subtrees(f"outputs.{top_lvl_module}.hammer.obj_dirs", is_hier_tag = True)[0].path
+                out_dir = asic_dse_conf["common"].project_tree.search_subtrees(f"outputs.{top_lvl_module}.obj_dirs", is_hier_tag = True)[0].path
                 #os.path.join(env_settings.design_output_path, asic_flow_settings_input["top_lvl_module"])
                 obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp()}" # Still putting top level mod naming convension on obj_dirs because who knows where they will end up
                 
                 # Throw error if both obj_dir options are specified
-                assert not (asic_dse_conf["common"].use_latest_obj_dir and asic_dse_conf["common"].manual_obj_dir != None), "ERROR: cannot use both latest obj dir and manual obj dir arguments for ASIC-DSE subtool"
+                assert not (asic_dse_conf["common"].override_outputs and asic_dse_conf["common"].manual_obj_dir != None), "ERROR: cannot use both latest obj dir and manual obj dir arguments for ASIC-DSE subtool"
                 
                 obj_dir_path = None
                 # Users can specify a specific obj directory
                 if asic_dse_conf["common"].manual_obj_dir != None:
                     obj_dir_path = os.path.realpath(os.path.expanduser(asic_dse_conf["common"].manual_obj_dir))
                 # Or they can use the latest created obj dir
-                elif asic_dse_conf["common"].use_latest_obj_dir:
+                elif asic_dse_conf["common"].override_outputs:
                     if os.path.isdir(out_dir):
                         obj_dir_path = find_newest_obj_dir(search_dir = out_dir, obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
                     else:
@@ -1457,9 +1474,45 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                     obj_dir_path = os.path.join(out_dir,obj_dir_fmt)
                     print( f"WARNING: No obj dir specified or found, creating new one @: {obj_dir_path}")
 
-                # TODO move directory creation / destruction to Tree class
-                if not os.path.isdir(obj_dir_path):
-                    os.makedirs(obj_dir_path)
+                # This could be either at the same path as next variable or at manual specified location
+                obj_dname = os.path.basename(obj_dir_path)
+                # This will always be at consistent project path
+                project_obj_dpath = os.path.join(out_dir, obj_dname)
+                
+                if asic_dse_conf["common"].manual_obj_dir:
+                    # Check to see if symlink already points to the correct location
+                    if os.path.islink(project_obj_dpath) and os.readlink(project_obj_dpath) == obj_dir_path:
+                        rad_gen_log(f"Symlink already exists @ {project_obj_dpath}", rad_gen_log_fd)
+                    else:
+                        os.symlink(obj_dir_path, project_obj_dpath)
+                    mkdirs = False
+                else:
+                    mkdirs = True
+                # If we don't specify a manual obj directory we can directly append our new obj directory to the project tree to create it + add to data structure
+                # Won't create it if symlink already exists
+                obj_tree = rg_ds.Tree(
+                    path = os.path.basename(obj_dir_path),
+                    tag = "cur_flow_obj_dir" # NAMING CONVENTION FOR OUR ACTIVE OBJ DIRECTORY
+                )
+                asic_dse_conf["common"].project_tree.append_tagged_subtree(
+                    f"{asic_dse_conf['common'].project_name}.outputs.{top_lvl_module}.obj_dirs",
+                    obj_tree,
+                    is_hier_tag = True,
+                    mkdirs = mkdirs
+                )
+
+                # else:
+                #     # create directory @ manual location, then create sym link
+                #     os.makedirs(obj_dir_path, exist_ok = True)
+                #     os.symlink()
+
+                # # TODO move directory creation / destruction to Tree class
+                # if not os.path.isdir(obj_dir_path):
+                #     os.makedirs(obj_dir_path)
+                    # if this was a manually specified path, to be able to find this later we should create a sym link to it inside of our project tree
+                    # if asic_dse_conf["common"].manual_obj_dir != None:
+
+                        
 
                 # rad_gen_log(f"Using obj_dir: {obj_dir_path}",rad_gen_log_fd)
 
@@ -1483,22 +1536,29 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 #     config_file_input = env_conf["asic_flow"]
                 # else:
                 #     config_file_input = {}
+                
+                # TODO REFACTOR see if we can do less intermediate transfer from asic_dse_conf to asic_flow_settings_input, and just pass asic_dse_conf to below function 
                 asic_flow_settings = init_dataclass(rg_ds.ASICFlowSettings, {}, asic_flow_settings_input, validate_paths = not vlsi_mode_inputs["config_pre_proc"] )
             
             # Perform all intiailizations which require "top_lvl_module" to be set (Common to both "custom" & "hammer")
             # high_lvl_inputs["top_lvl_module"] = top_lvl_module
+
+            # UNCOMMENT WHEN REFACTORING FOR COMMON ASIC FLOW
             common_asic_flow_inputs["top_lvl_module"] = asic_flow_settings_input["top_lvl_module"] 
-            common_asic_flow = rg_ds.init_dataclass(rg_ds.CommonAsicFlow, common_asic_flow_inputs)
+            # Don't look in sram db libs if we don't use SRAM in design
+            common_asic_flow_inputs["db_libs"] = ["sram_db_libs",f"{stdcell_lib.pdk_name}_db_libs"] if asic_dse_conf["sram_compiler"] else [f"{stdcell_lib.pdk_name}_db_libs"]
+            common_asic_flow = init_dataclass(rg_ds.CommonAsicFlow, common_asic_flow_inputs)
 
 
             # Create copy of output tree (rename to top_lvl_module)
-            design_out_tree_copy = copy.deepcopy(design_out_tree)
-            design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
+            # design_out_tree_copy = copy.deepcopy(design_out_tree)
+            # design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
+
             # design_out_tree_copy.path = top_lvl_module
             # design_out_tree_copy.tag = top_lvl_module
 
-            # Append to project tree
-            asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}.outputs", design_out_tree, is_hier_tag = True) # append our asic_dse outputs
+            # # Append to project tree
+            # asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}.outputs", design_out_tree, is_hier_tag = True) # append our asic_dse outputs
             
             # create the tree for the vlsi outputs (its ok to call multiple times, or if dirs already exist)
             # asic_dse_conf["common"].project_tree.create_tree()
@@ -1588,25 +1648,29 @@ def init_coffe_structs(coffe_conf: Dict[str, Any]):
 def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
 
     # Add ic_3d specific trees to common
-    ic_3d_conf["common"].project_tree.append_tagged_subtree("config", rg_ds.Tree("ic_3d", tag="ic_3d.config"))
-    output_subtrees = [
-        rg_ds.Tree("includes", tag="inc"),
-        rg_ds.Tree("obj_dirs", tag="obj_dirs"),
-        rg_ds.Tree("subckts", tag="subckt"),
-        rg_ds.Tree("reports", tag="report"),
-        rg_ds.Tree("scripts", tag="script"),
-    ]
-    for output_subtree in output_subtrees:
-        ic_3d_conf["common"].project_tree.append_tagged_subtree("output", output_subtree)
 
-    cli_arg_inputs = {}
+    # ic_3d_conf["common"].project_tree.append_tagged_subtree("config", rg_ds.Tree("ic_3d", tag="ic_3d.config"))
+    # output_subtrees = [
+    #     rg_ds.Tree("includes", tag="inc"),
+    #     rg_ds.Tree("obj_dirs", tag="obj_dirs"),
+    #     rg_ds.Tree("subckts", tag="subckt"),
+    #     rg_ds.Tree("reports", tag="report"),
+    #     rg_ds.Tree("scripts", tag="script"),
+    # ]
+    # for output_subtree in output_subtrees:
+    #     ic_3d_conf["common"].project_tree.append_tagged_subtree("output", output_subtree)
+
+    arg_inputs = {}
     for k, v in ic_3d_conf.items():
-        if k in rg_ds.Ic3dCLI.__dataclass_fields__:
-            cli_arg_inputs[k] = v
-    cli_args = init_dataclass(rg_ds.Ic3dCLI, cli_arg_inputs)
+        if k in rg_ds.IC3DArgs.__dataclass_fields__:
+            arg_inputs[k] = v
+    args = init_dataclass(rg_ds.IC3DArgs, arg_inputs)
 
     # TODO update almost all the parsing in this function
-    ic_3d_conf = parse_yml_config(ic_3d_conf["input_config_path"])
+    ic_3d_conf = { 
+        **ic_3d_conf,
+        **parse_yml_config(ic_3d_conf["input_config_path"])
+    }
     # check that inputs are in proper format (all metal layer lists are of same length)
     for process_info in ic_3d_conf["process_infos"]:
         if not (all(length == process_info["mlayers"] for length in [len(v) for v in process_info["mlayer_lists"].values()])\
@@ -1828,6 +1892,8 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
 
 
     ic3d_inputs = {
+        "common": ic_3d_conf["common"],
+        "args": args,
         # BUFFER DSE STUFF
         "design_info": design_info,
         "process_infos": process_infos,
@@ -1852,7 +1918,6 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
         # PDN STUFF
         "pdn_sim_settings": pdn_sim_settings,
         "design_pdn": design_pdn,
-        "cli_args": cli_args,
     }
 
 
@@ -1888,6 +1953,7 @@ def load_arch_params(filename): #,run_options):
         'W': -1,
         'L': -1,
         'wire_types': [],
+        'sb_conn' : {},
         'Fs': -1,
         'N': -1,
         'K': -1,
@@ -1984,6 +2050,9 @@ def load_arch_params(filename): #,run_options):
                     wire_type
                 )
             param_dict["fpga_arch_params"]["wire_types"] = tmp_list
+        elif param == 'sb_conn':
+            # Dict of sb connectivity params
+            param_dict["fpga_arch_params"]["sb_conn"] = value
         elif param == 'Fs':
             param_dict["fpga_arch_params"]['Fs'] = int(value)
         elif param == 'N':

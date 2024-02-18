@@ -1,6 +1,9 @@
 import os, sys
 from dataclasses import dataclass, make_dataclass
 from dataclasses import field
+import dataclasses
+import json
+
 import argparse
 import yaml
 
@@ -35,6 +38,7 @@ class TestSuite:
     # TODO pass this from cli so users can specify which rad_gen_home they are using
     rad_gen_home: str = os.environ["RAD_GEN_HOME"] 
     unit_test_home: str = None
+    golden_ref_path: str = None
     # input paths for subtools
     asic_dse_inputs: str = None
     coffe_inputs: str = None
@@ -45,6 +49,8 @@ class TestSuite:
     coffe_outputs: str = None
     ic_3d_outputs: str = None
 
+    # Config Parse Init Tests
+    config_parse_init_tests: List[Test] = None
 
     # ASIC DSE TESTS
     alu_tests: List[Test] = None
@@ -61,7 +67,7 @@ class TestSuite:
     # IC 3D TESTS
     buff_dse_tests: List[Test] = None
     pdn_tests: List[Test] = None
-    # ic_3d_tests: List[Test] = None
+    ic_3d_tests: List[Test] = None
 
 
     def __post_init__(self):
@@ -76,9 +82,11 @@ class TestSuite:
                 # env_config_dict = rg_utils.parse_yml_config(top_config_dict["asic_dse"]["env_config_path"])
                 # assert os.path.exists( os.path.expanduser(env_config_dict["env"]["rad_gen_home_path"]) )
                 # self.rad_gen_home = os.path.expanduser(env_config_dict["env"]["rad_gen_home_path"])
-                
+
         if self.unit_test_home is None:
             self.unit_test_home = os.path.expanduser(f"{self.rad_gen_home}/unit_tests")
+        if self.golden_ref_path is None:
+            self.golden_ref_path = os.path.expanduser(f"{self.unit_test_home}/golden_results")
         if self.asic_dse_inputs is None:
             self.asic_dse_inputs = os.path.expanduser(f"{self.rad_gen_home}/unit_tests/inputs/asic_dse")
         if self.coffe_inputs is None:
@@ -120,6 +128,9 @@ class TestSuite:
             bases= (rg_ds.RadGenCLI,),
         )
 
+
+
+        
         #  █████╗ ███████╗██╗ ██████╗    ██████╗ ███████╗███████╗
         # ██╔══██╗██╔════╝██║██╔════╝    ██╔══██╗██╔════╝██╔════╝
         # ███████║███████╗██║██║         ██║  ██║███████╗█████╗  
@@ -146,8 +157,6 @@ class TestSuite:
         #     bases = (rg_ds.AsicDseCLI,)
         # )
 
-
-
         if self.alu_tests is None:
             self.alu_tests = []
 
@@ -157,10 +166,10 @@ class TestSuite:
             #  /_/ \_\____\___/    \_/ |____|___/___| |___/ \_/\_/ |___|___|_|     |_| |___|___/ |_|  
 
             alu_sweep_config = os.path.expanduser(f"{self.asic_dse_inputs}/sweeps/alu_sweep.yml")
-            tool_env_conf_path = os.path.expanduser(f"{self.asic_dse_inputs}/sys_configs/cadence_tools.yml")
+            tool_env_conf_path = os.path.expanduser(f"{self.asic_dse_inputs}/sys_configs/env.yml")
             # Init the arguments we want to use for this test
             asic_dse_args = AsicDseArgs(
-                tool_env_conf_path = tool_env_conf_path,
+                # tool_env_conf_path = tool_env_conf_path,
                 design_sweep_config = alu_sweep_config,
             )
             alu_sweep_args = RadGenArgs(
@@ -183,12 +192,14 @@ class TestSuite:
             top_lvl_mod = "alu_ver"
             flow_mode = "hammer"
             asic_dse_args = AsicDseArgs(
-                tool_env_conf_path = tool_env_conf_path,
-                flow_config_paths = self.sys_configs + [alu_config],
+                tool_env_conf_paths = [tool_env_conf_path],
+                flow_conf_paths = self.sys_configs + [alu_config],
                 top_lvl_module = top_lvl_mod,
                 hdl_path = os.path.expanduser(f"{self.asic_dse_inputs}/alu/rtl"),
+                stdcell_lib__pdk_name = "asap7",
             )
             alu_asic_flow_args = RadGenArgs(
+                project_name = "alu",
                 subtools = ["asic_dse"],
                 subtool_args = asic_dse_args,
                 manual_obj_dir = os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{flow_mode}_{ci_test_obj_dir_suffix}"),
@@ -206,13 +217,14 @@ class TestSuite:
             asic_dse_args = AsicDseArgs(
                 run_mode = "parallel",
                 flow_mode = flow_mode,
-                tool_env_conf_path = tool_env_conf_path,
+                tool_env_conf_paths = [tool_env_conf_path],
                 flow_config_paths = [alu_config], # not supplying sys_configs as not needed in custom flow
                 top_lvl_module = top_lvl_mod,
                 manual_obj_dir = os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{flow_mode}_{ci_test_obj_dir_suffix}"),
                 hdl_path = os.path.expanduser(f"{self.asic_dse_inputs}/alu/rtl"),
             )
             alu_asic_flow_args = RadGenArgs(
+                project_name = "alu",
                 subtools = ["asic_dse"],
                 subtool_args = asic_dse_args,
             )
@@ -228,7 +240,7 @@ class TestSuite:
                                                                                                              
             sram_gen_config = os.path.expanduser(f"{self.asic_dse_inputs}/sweeps/sram_sweep.yml")
             asic_dse_args = AsicDseArgs(
-                tool_env_conf_path = tool_env_conf_path,
+                # tool_env_conf_path = tool_env_conf_path,
                 design_sweep_config = sram_gen_config,
             )
             sram_gen_test = RadGenArgs(
@@ -353,12 +365,12 @@ class TestSuite:
             #  | __| _ \_   _( )_  )__ / | _ \ | | | \| / __|
             #  | _||  _/ | | |/ / / |_ \ |   / |_| | .` \__ \
             #  |_| |_|   |_|   /___|___/ |_|_\\___/|_|\_|___/
-            fpga_arch_config = os.path.expanduser(f"{self.coffe_inputs}/fpt23/finfet_7nm_pt_asap7_L4_m6_rl_10.yaml")                    
-            coffe_cli_args = CoffeArgs(
-                fpga_arch_conf_path = fpga_arch_config, 
-                # hb_flows_conf_path = f"{self.coffe_inputs}/finfet_7nm_fabric_w_hbs/hb_flows.yml",
-                max_iterations = 4,
-            )
+            # fpga_arch_config = os.path.expanduser(f"{self.coffe_inputs}/fpt23/finfet_7nm_pt_asap7_L4_m6_rl_10.yaml")                    
+            # coffe_cli_args = CoffeArgs(
+            #     fpga_arch_conf_path = fpga_arch_config, 
+            #     # hb_flows_conf_path = f"{self.coffe_inputs}/finfet_7nm_fabric_w_hbs/hb_flows.yml",
+            #     max_iterations = 4,
+            # )
         
             # 7nm with ALU + INV hardblocks this may take a while (5+ hrs) hehe
             fpga_arch_config = os.path.expanduser(f"{self.coffe_inputs}/finfet_7nm_fabric_w_hbs/finfet_7nm_fabric_w_hbs.yml")
@@ -439,6 +451,22 @@ class TestSuite:
             )
             pdn_test = Test(rad_gen_args=pdn_test_cli, test_name="pdn_modeling")
             self.pdn_tests.append(pdn_test)
+        
+        if self.config_parse_init_tests is None:
+            # Careful this isn't copying these tests but putting references
+            self.config_parse_init_tests = [
+                *self.alu_tests,
+                *self.sram_tests,
+                *self.noc_tests,
+                *self.coffe_tests,
+                *self.buff_dse_tests,
+                *self.pdn_tests
+            ]
+            # for test in self.config_parse_init_tests:
+            #     test.rad_gen_args.just_config_init = True
+            
+
+
 
 
 
@@ -559,9 +587,13 @@ def parse_args() -> argparse.Namespace:
     top_lvl_parser = argparse.ArgumentParser(description="RADGen CI Test Suite")
     top_lvl_parser.add_argument("-p", "--just_print",  help="Don't execute test just print commands to console, this parses & compares results if they already exist", action='store_true')
     #subtools_group = top_lvl_parser.add_argument_group("Subtool Selection", "Select which subtools to run tests for")
+    top_lvl_parser.add_argument("-conf", "--config_parse_init",  help="Run Configuration Parsing / Init Tests", action='store_true')
     top_lvl_parser.add_argument("-ic_3d", "--ic_3d",  help="Run IC 3D tests", action='store_true')
     top_lvl_parser.add_argument("-coffe", "--coffe",  help="Run COFFE test", action='store_true')
     top_lvl_parser.add_argument("-asic", "--asic_dse",  help="Run ASIC DSE tests", action='store_true')
+    top_lvl_parser.add_argument("-alu", "--alu",  help="Run ALU tests", action='store_true')
+    top_lvl_parser.add_argument("-sram", "--sram",  help="Run SRAM tests", action='store_true')
+    top_lvl_parser.add_argument("-noc", "--noc",  help="Run NoC tests", action='store_true')
     top_lvl_parser.add_argument_group("Subtool Tests", "Select which subtool tests to run")
     top_lvl_parser.add_argument("-pdn", "--pdn_modeling",  help="Run PDN modeling test", action='store_true')
     top_lvl_parser.add_argument("-buff_dse", "--buff_dse_modeling",  help="Run Buff DSE test", action='store_true')
@@ -569,18 +601,48 @@ def parse_args() -> argparse.Namespace:
     return top_lvl_parser.parse_args()
 
 
+class EnhancedJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.asdict(obj)
+        return super().default(obj)
+
+def rec_convert_dataclass_to_dict(obj):
+    """
+        Converts a dict / dataclass of nested dicts / dataclasses into a dictionary object
+    """
+    if dataclasses.is_dataclass(obj):
+        return {k: rec_convert_dataclass_to_dict(v) for k, v in dataclasses.asdict(obj).items()}
+    elif isinstance(obj, list):
+        return [rec_convert_dataclass_to_dict(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: rec_convert_dataclass_to_dict(v) for k, v in obj.items()}
+    # checks if instance is any primitive type, if its not then its a non dataclass class so we have to ignore for now
+    elif not isinstance(obj, (str, int, float, bool)) and obj is not None:
+        return None
+    else:
+        return obj
+
+
 
 
 def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], subtool: str, result_path: str = None, golden_ref_path: str = None):
+    golden_ref_base_path = os.path.expanduser( os.path.join(rad_gen_home, "unit_tests", "golden_results", subtool) )
+    
     for idx, test in enumerate(tests):
         cmd_str, sys_args, sys_args_dict = test.rad_gen_args.get_rad_gen_cli_cmd(rad_gen_home)        
         print(f"Running Test {test.test_name}: {cmd_str}\n")
         if not args.just_print:   
             # sp.call(" ".join(cmd_str.split(" ") + ["|", "tee", f"{test.test_name}_unit_test_{idx}.log"]), env=cur_env, shell=True)
             rad_gen_args = argparse.Namespace(**sys_args_dict)
-            rg.main(rad_gen_args)
+            ret_val = rg.main(rad_gen_args)
+            if sys_args_dict.get("just_config_init"):
+                # Now we compare the return value from the config initialization with some golden reference for this test
+                json_text = json.dumps(rec_convert_dataclass_to_dict(ret_val), cls=EnhancedJSONEncoder, indent=4)
+                with open(os.path.join(golden_ref_base_path, f"{test.test_name}_init.json"), "w") as f:
+                    f.write(json_text)
+                exit()
         
-        golden_ref_base_path = os.path.expanduser( os.path.join(rad_gen_home, "unit_tests", "golden_results", subtool) )
         out_csv_path = None
         # Parse result and compare
         # if subtool == "asic_dse":
@@ -649,31 +711,42 @@ cur_env = os.environ.copy()
 def main():
     global cur_env
     
-    # num_cores = mp.cpu_count()
-    # pool = mp.Pool(processes = num_cores)
-
     args = parse_args()
     test_suite = TestSuite()
 
-    # tests_list = [
-    #     (test_suite.alu_tests, "asic_dse"),
-    #     (test_suite.sram_tests, "asic_dse"),
-    #     (test_suite.noc_tests, "asic_dse"),
-    #     (test_suite.coffe_tests, "coffe"),
-    #     (test_suite.ic_3d_tests, "ic_3d"),
-    # ]
 
-    # results = [pool.apply_async(run_tests, (args, test_suite.rad_gen_home, tests, subtool)) for tests, subtool in tests_list]
 
-    run_all = True if not args.asic_dse and not args.coffe and not args.pdn_modeling and not args.buff_dse_modeling else False
 
-    if run_all or args.asic_dse:
-        if args.asic_dse_sweeps:
-            print("Running ASIC DSE sweeps tests\n")
-            run_tests(args, test_suite.rad_gen_home, test_suite.asic_dse_sweep_tests, "asic_dse")
-        else:
-            print("Running ALU tests\n")
-            run_tests(args, test_suite.rad_gen_home, test_suite.alu_tests, "asic_dse")
+    # if args.config_parse_init:
+    #     print("Running Configuration Parsing / Init Tests\n")
+    #     run_tests(args, test_suite.rad_gen_home, test_suite.config_parse_init_tests, "config_parse_init", golden_ref_path = test_suite.golden_ref_path)
+
+    # and not args.buff_dse_modeling
+    run_all = True if not args.asic_dse and not args.coffe and not args.ic_3d else False
+
+    # ASIC DSE SWEEP TESTS
+    if args.asic_dse_sweeps:
+        print("Running ASIC DSE sweeps tests\n")
+        run_tests(args, test_suite.rad_gen_home, test_suite.asic_dse_sweep_tests, "asic_dse")
+    if args.alu:
+        print("Running ALU tests\n")
+        run_tests(args, test_suite.rad_gen_home, test_suite.alu_tests, "asic_dse")
+    if args.sram:
+        print("Running SRAM tests\n")
+        run_tests(args, test_suite.rad_gen_home, test_suite.sram_tests, "asic_dse")
+    if args.noc:
+        print("Running NoC tests\n")
+        run_tests(args, test_suite.rad_gen_home, test_suite.noc_tests, "asic_dse")
+
+
+
+    # if run_all or args.alu:
+
+    #     else:
+    #         print("Running ALU tests\n")
+    #         run_tests(args, test_suite.rad_gen_home, test_suite.alu_tests, "asic_dse")
+
+
 
     #     print("Running SRAM tests\n")
     #     run_tests(args, test_suite.rad_gen_home, test_suite.sram_tests, "asic_dse")
@@ -689,9 +762,9 @@ def main():
     #     print("Running PDN modeling tests\n")
     #     run_tests(args, test_suite.rad_gen_home, test_suite.pdn_tests, "ic_3d")
         
-    # if run_all or args.buff_dse_modeling:
-    #     print("Running Buffer DSE tests\n")
-    #     run_tests(args, test_suite.rad_gen_home, test_suite.buff_dse_tests, "ic_3d")
+    if run_all or args.ic_3d:
+        print("Running Buffer DSE tests\n")
+        run_tests(args, test_suite.rad_gen_home, test_suite.buff_dse_tests, "ic_3d")
 
     # print("Running IC 3D tests\n")
     # run_tests(args, test_suite.rad_gen_home, test_suite.ic_3d_tests, "ic_3d")

@@ -35,7 +35,7 @@ import datetime
 
 from dataclasses import dataclass
 
-from typing import List, Dict, Any, Tuple, Type, NamedTuple, Set, Optional
+from typing import List, Dict, Any, Tuple, Type, NamedTuple, Set, Optional, Union
 
 
 
@@ -95,7 +95,7 @@ def init_logger():
 # ██║  ██║██║  ██║██████╔╝    ╚██████╔╝███████╗██║ ╚████║    ███████╗██╔╝ ██╗███████╗╚██████╗    ██║ ╚═╝ ██║╚██████╔╝██████╔╝███████╗███████║
 # ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝      ╚═════╝ ╚══════╝╚═╝  ╚═══╝    ╚══════╝╚═╝  ╚═╝╚══════╝ ╚═════╝    ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝
 
-def main(args: Optional[argparse.Namespace] = None) -> None:
+def main(args: Optional[argparse.Namespace] = None) -> Union[None, Any]:
     global cur_env
     global rad_gen_log_fd
     global log_verbosity
@@ -115,6 +115,11 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
     # rad_gen_settings = init_structs(args)
     rad_gen_info = rg_utils.init_structs_top(args, default_arg_vals)
 
+    arg_dict = vars(args)
+    # If we want to return initialized data structs for a subtool, just return here
+    if arg_dict["common.just_config_init"]:
+        return rad_gen_info
+
     cur_env = os.environ.copy()
 
     """ Ex. args python3 rad_gen.py -s param_sweep/configs/noc_sweep.yml -c """
@@ -130,14 +135,14 @@ def main(args: Optional[argparse.Namespace] = None) -> None:
         # COFFE RUN OPTIONS
         coffe.run_coffe_flow(rad_gen_info["coffe"])
     elif "ic_3d" in rad_gen_info.keys():
-        if rad_gen_info["ic_3d"].cli_args.buffer_dse:
+        if rad_gen_info["ic_3d"].args.buffer_dse:
             # ic_3d.run_buffer_dse(rad_gen_info["ic_3d"])
             ic_3d.run_buffer_dse_updated(rad_gen_info["ic_3d"]) 
-        if rad_gen_info["ic_3d"].cli_args.pdn_modeling:
+        if rad_gen_info["ic_3d"].args.pdn_modeling:
             ic_3d.run_pdn_modeling(rad_gen_info["ic_3d"])
-        if rad_gen_info["ic_3d"].cli_args.buffer_sens_study:
+        if rad_gen_info["ic_3d"].args.buffer_sens_study:
             ic_3d.run_buffer_sens_study(rad_gen_info["ic_3d"])
-        if rad_gen_info["ic_3d"].cli_args.debug_spice != None:
+        if rad_gen_info["ic_3d"].args.debug_spice != None:
             debug_procs = [ rg_ds.SpProcess(top_sp_dir=rg_utils.clean_path("~/rad_gen/spice_sim"), title = title) for title in rad_gen_info["ic_3d"].cli_args.debug_spice ]
             for sp_process in debug_procs:
                 ic_3d.run_spice_debug(rad_gen_info["ic_3d"], sp_process)
