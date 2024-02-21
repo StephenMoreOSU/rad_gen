@@ -154,7 +154,7 @@ def generate_connection_block_top(mux_name, min_len_wire: dict):
     return (mux_name + "/" + mux_name + ".sp")
 
 
-def generate_local_mux_top(mux_name, min_len_wire: dict):
+def generate_local_mux_top(mux_name, gen_r_wire: dict):
     """ Generate the top level local mux SPICE file """
     
     # Create directories
@@ -164,7 +164,7 @@ def generate_local_mux_top(mux_name, min_len_wire: dict):
     os.chdir(mux_name)
     
     # TODO link with other definiions elsewhere, duplicated
-    p_str = f"_L{min_len_wire['len']}_uid{min_len_wire['id']}"
+    p_str = f"_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
     subckt_sb_mux_on_str = f"sb_mux{p_str}_on"
     subckt_routing_wire_load_str =  f"routing_wire_load{p_str}"
 
@@ -4537,7 +4537,7 @@ def generate_lut_and_driver_top(input_driver_name, input_driver_type, use_tgate,
     os.chdir("../")  
   
     
-def generate_local_ble_output_top(name, use_tgate):
+def generate_local_ble_output_top(name, use_tgate, gen_r_wire: dict):
     """ Generate the top level local ble output SPICE file """
     
     # Create directories
@@ -4620,7 +4620,7 @@ def generate_general_ble_output_top(name, use_tgate, gen_r_wire: dict):
     # Change to directory    
     os.chdir(name)  
     
-    p_str = f"_L{gen_r_wire['L']}_uid{gen_r_wire['id']}"
+    p_str = f"_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
     subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
 
     general_ble_output_filename = name + ".sp"
@@ -4678,7 +4678,7 @@ def generate_general_ble_output_top(name, use_tgate, gen_r_wire: dict):
         top_file.write("Xlut n_in n_1_1 vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
         top_file.write("Xlut_output_load n_1_1 n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd_general_output lut_output_load\n\n")
 
-    top_file.write("Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd general_ble_output_load\n")
+    top_file.write(f"Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd {subckt_gen_ble_out_load_str}\n")
     top_file.write(".END")
     top_file.close()
 
@@ -4689,7 +4689,7 @@ def generate_general_ble_output_top(name, use_tgate, gen_r_wire: dict):
     
 
 
-def generate_flut_mux_top(name, use_tgate, enable_carry_chain):
+def generate_flut_mux_top(name, use_tgate, enable_carry_chain, gen_r_wire: dict):
     
     #TODO: 
     #- I think the general ble output load should be removed from this ciruit in case of an ALM
@@ -4697,6 +4697,9 @@ def generate_flut_mux_top(name, use_tgate, enable_carry_chain):
     #- I also think that in both cases whether there is a carry chain mux or not the delay should 
     #  be measured between the n_1_1 and n_1_3 and not between n_1_1 and n_local_out.
     
+    p_str = f"_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+    subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
+
     # Create directories
     if not os.path.exists(name):
         os.makedirs(name)  
@@ -4772,7 +4775,7 @@ def generate_flut_mux_top(name, use_tgate, enable_carry_chain):
         else:
             top_file.write("Xlut_output_load n_1_3 n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
 
-    top_file.write("Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd general_ble_output_load\n")
+    top_file.write(f"Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd {subckt_gen_ble_out_load_str}\n")
     top_file.write(".END")
     top_file.close()
 
@@ -4782,9 +4785,12 @@ def generate_flut_mux_top(name, use_tgate, enable_carry_chain):
     return (name + "/" + name + ".sp")
 
 
-def generate_cc_mux_top(name, use_tgate):
+def generate_cc_mux_top(name, use_tgate, gen_r_wire: dict):
     """ Creating the SPICE netlist for calculating the delay of the carry chain mux"""
     
+    p_str = f"_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+    subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
+
     # Create directories
     if not os.path.exists(name):
         os.makedirs(name)  
@@ -4850,7 +4856,7 @@ def generate_cc_mux_top(name, use_tgate):
     top_file.write("Xlut_output_load n_1_5 n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
 
 
-    top_file.write("Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd general_ble_output_load\n")
+    top_file.write(f"Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd {subckt_gen_ble_out_load_str}\n")
     top_file.write(".END")
     top_file.close()
 

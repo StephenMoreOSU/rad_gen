@@ -348,10 +348,10 @@ def init_subckt_libs(design_info: rg_ds.DesignInfo) -> rg_ds.SpSubCktLibs:
                         "L" : "gate_length",
                         "M" : "fanout",
                         "nfin" : f"{nfet_width_param}",
-                        "ASEO" : f"{nfet_width_param} * min_tran_width * trans_diffusion_length",
-                        "ADEO" : f"{nfet_width_param} * min_tran_width * trans_diffusion_length",
-                        "PSEO" : f"{nfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
-                        "PDEO" : f"{nfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
+                        "ASEO" : f"{nfet_width_param}*min_tran_width*trans_diffusion_length",
+                        "ADEO" : f"{nfet_width_param}*min_tran_width*trans_diffusion_length",
+                        "PSEO" : f"{nfet_width_param}*(min_tran_width+2*trans_diffusion_length)",
+                        "PDEO" : f"{nfet_width_param}*(min_tran_width+2*trans_diffusion_length)",
                     }
                     # if param values are not defined they are set to default
                 ),
@@ -371,10 +371,10 @@ def init_subckt_libs(design_info: rg_ds.DesignInfo) -> rg_ds.SpSubCktLibs:
                         "L" : "gate_length",
                         "M" : "fanout",
                         "nfin" : f"{pfet_width_param}",
-                        "ASEO" : f"{pfet_width_param} * min_tran_width * trans_diffusion_length",
-                        "ADEO" : f"{pfet_width_param} * min_tran_width * trans_diffusion_length",
-                        "PSEO" : f"{pfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
-                        "PDEO" : f"{pfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
+                        "ASEO" : f"{pfet_width_param}*min_tran_width*trans_diffusion_length",
+                        "ADEO" : f"{pfet_width_param}*min_tran_width*trans_diffusion_length",
+                        "PSEO" : f"{pfet_width_param}*(min_tran_width+2*trans_diffusion_length)",
+                        "PDEO" : f"{pfet_width_param}*(min_tran_width+2*trans_diffusion_length)",
                     }
                     # if param values are not defined they are set to default
                 ),
@@ -1038,7 +1038,7 @@ def write_sp_buffer_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any]
 
     sp_title = f"buffer-{title}-{rg_ds.create_timestamp()}"
 
-    if ic_3d_info.cli_args.use_latest_obj_dir:
+    if ic_3d_info.common.use_latest_obj_dir:
         obj_dir_path = rg_utils.find_newest_obj_dir(search_dir = ic_3d_info.spice_info.sp_dir, obj_dir_fmt = f"buffer-{title}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
         if obj_dir_path != None:
             sp_title = os.path.basename(obj_dir_path)

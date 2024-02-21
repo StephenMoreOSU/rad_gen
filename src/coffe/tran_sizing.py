@@ -2383,7 +2383,9 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 		# tmp_area = get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0)
 		# tmp_delay = get_current_delay(fpga_inst, 0)
 		# print(tmp_area,tmp_delay)
-		current_cost = cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)
+
+
+		current_cost = cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)
 		print("Current Cost: " + str(current_cost))
 		time_before_sizing = time.time()
 
@@ -2463,7 +2465,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 				time_after_sizing = time.time()
 				
 				past_cost = current_cost
-				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 				if (past_cost - current_cost)/past_cost <fpga_inst.specs.quick_mode_threshold:
 					quick_mode_dict[name] = 0
 
@@ -2496,7 +2498,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 				time_after_sizing = time.time()
 				
 				past_cost = current_cost
-				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 				if (past_cost - current_cost)/past_cost <fpga_inst.specs.quick_mode_threshold:
 					quick_mode_dict[name] = 0
 
@@ -2530,7 +2532,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 				time_after_sizing = time.time()
 				
 				past_cost = current_cost
-				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 				if (past_cost - current_cost)/past_cost <fpga_inst.specs.quick_mode_threshold:
 					quick_mode_dict[name] = 0
 
@@ -2566,7 +2568,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 				time_after_sizing = time.time()
 				
 				past_cost = current_cost
-				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 				if (past_cost - current_cost)/past_cost <fpga_inst.specs.quick_mode_threshold:
 					quick_mode_dict[name] = 0
 
@@ -2600,7 +2602,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 					
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost <fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict[name] = 0
 
@@ -2648,7 +2650,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 				time_after_sizing = time.time()
 				
 				past_cost = current_cost
-				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 				if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 					quick_mode_dict["input_drivers"] = 0
 
@@ -2680,7 +2682,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 				time_after_sizing = time.time()
 				
 				past_cost = current_cost
-				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 				if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 					quick_mode_dict[name] = 0
 
@@ -2712,14 +2714,14 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 				time_after_sizing = time.time()
 				
 				past_cost = current_cost
-				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 				if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 					quick_mode_dict[name] = 0
 
 				print("Duration: " + str(time_after_sizing - time_before_sizing))
 				print("Current Cost: " + str(current_cost))
 
-				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+				current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 
 			time_before_sizing = time.time()
 
@@ -2748,14 +2750,14 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 					
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 1), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 1), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict[name] = 0
 
 					print("Duration: " + str(time_after_sizing - time_before_sizing))
 					print("Current Cost: " + str(current_cost))
 
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 1), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 1), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 
 				time_before_sizing = time.time()
 
@@ -2783,14 +2785,14 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 					
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 1), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 1), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict[name] = 0
 
 					print("Duration: " + str(time_after_sizing - time_before_sizing))
 					print("Current Cost: " + str(current_cost))
 
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 1), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 1), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 
 				time_before_sizing = time.time()
 
@@ -2818,14 +2820,14 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 					
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 1), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 1), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict[name] = 0
 
 					print("Duration: " + str(time_after_sizing - time_before_sizing))
 					print("Current Cost: " + str(current_cost))
 
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 1), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 1), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 
 				time_before_sizing = time.time()
 
@@ -2854,14 +2856,14 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 						time_after_sizing = time.time()
 						
 						past_cost = current_cost
-						current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 1), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+						current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 1), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 						if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 							quick_mode_dict[name] = 0
 
 						print("Duration: " + str(time_after_sizing - time_before_sizing))
 						print("Current Cost: " + str(current_cost))
 
-						current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 1), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+						current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 1), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 
 					time_before_sizing = time.time()
 
@@ -2886,14 +2888,14 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 						time_after_sizing = time.time()
 						
 						past_cost = current_cost
-						current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 1), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+						current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 1), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 						if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 							quick_mode_dict[name] = 0
 
 						print("Duration: " + str(time_after_sizing - time_before_sizing))
 						print("Current Cost: " + str(current_cost))
 
-						current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 1), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+						current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 1), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 
 					time_before_sizing = time.time()
 
@@ -2921,14 +2923,14 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 					
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 0), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict[name] = 0
 
 					print("Duration: " + str(time_after_sizing - time_before_sizing))
 					print("Current Cost: " + str(current_cost))
 
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 0, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 0, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 
 				time_before_sizing = time.time()
 
@@ -2960,7 +2962,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 				
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict[name] = 0
 
@@ -2993,7 +2995,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 				
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict[name] = 0
 
@@ -3045,7 +3047,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 				
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict[name] = 0
 
@@ -3127,7 +3129,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 				
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict["rowdecoder"] = 0
 
@@ -3177,7 +3179,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 				
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict[name] = 0
 
@@ -3258,7 +3260,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 				
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict["confdec"] = 0
 
@@ -3290,7 +3292,7 @@ def size_fpga_transistors(fpga_inst, run_options, spice_interface):
 					time_after_sizing = time.time()
 				
 					past_cost = current_cost
-					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.sb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+					current_cost =  cost_function(get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
 					if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
 						quick_mode_dict[name] = 0
 

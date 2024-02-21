@@ -60,6 +60,8 @@ import src.coffe.memory_subcircuits as memory_subcircuits
 import src.coffe.utils as utils
 import src.coffe.tran_sizing as tran_sizing
 
+from src.coffe.circuit_baseclasses import _SizableCircuit, _CompoundCircuit
+
 # Top level file generation module
 import src.coffe.top_level as top_level
 
@@ -73,8 +75,11 @@ import src.common.utils as rg_utils
 # ASIC DSE imports
 import src.asic_dse.asic_dse as asic_dse
 
-
-
+# Importing individual constructors for subckt classes
+from src.coffe.sb_mux import _SwitchBlockMUX
+from src.coffe.cb_mux import _ConnectionBlockMUX 
+from src.coffe.logic_block import _LogicCluster
+from src.coffe.gen_routing_loads import _GeneralBLEOutputLoad, _RoutingWireLoad
 
 # Track-access locality constants
 OUTPUT_TRACK_ACCESS_SPAN = 0.25
@@ -107,6 +112,8 @@ LOCAL_WIRE_LAYER = 0
 # In that case the user doesn't need to commit any code changes.
 use_lp_transistor = 1
 
+
+min_len_wire: dict = {}
 class _Specs:
     """ General FPGA specs. """
  
@@ -117,7 +124,8 @@ class _Specs:
         self.K                       = arch_params_dict['K']
         self.W                       = arch_params_dict['W']
         # self.L                       = arch_params_dict['L']
-        self.wire_types: List[Dict[str, Any]]              = arch_params_dict['wire_types']
+        self.wire_types:    List[Dict[str, Any]]                = arch_params_dict['wire_types']
+        self.Fs_mtx:        List[Dict[str, Any]]                = arch_params_dict['Fs_mtx']
         self.I                       = arch_params_dict['I']
         self.Fs                      = arch_params_dict['Fs']
         self.Fcin                    = arch_params_dict['Fcin']
@@ -212,1465 +220,1479 @@ class _Specs:
             wire["num_tracks"] = num_tracks
             wire["id"] = i
 
+        # Get our switch block connectivity params
+        self.sb_conn = arch_params_dict['sb_conn']
+
         
         
-class _SizableCircuit:
-    """ This is a base class used to identify FPGA circuits that can be sized (e.g. transistor sizing on lut)
-        and declare attributes common to all SizableCircuits.
-        If a class inherits _SizableCircuit, it should override all methods (error is raised otherwise). """
+# class _SizableCircuit:
+#     """ This is a base class used to identify FPGA circuits that can be sized (e.g. transistor sizing on lut)
+#         and declare attributes common to all SizableCircuits.
+#         If a class inherits _SizableCircuit, it should override all methods (error is raised otherwise). """
         
-    # A list of the names of transistors in this subcircuit. This list should be logically sorted such 
-    # that transistor names appear in the order that they should be sized.
-    transistor_names = []
-    # A list of the names of wires in this subcircuit
-    wire_names = []
-    # A dictionary of the initial transistor sizes
-    initial_transistor_sizes = {}
-    # Path to the top level spice file
-    top_spice_path = ""    
-    # Fall time for this subcircuit
-    tfall = 1
-    # Rise time for this subcircuit
-    trise = 1
-    # Delay to be used for this subcircuit
-    delay = 1
-    # Delay weight used to calculate delay of representative critical path
-    delay_weight = 1
-    # Dynamic power for this subcircuit
-    power = 1
+#     # A list of the names of transistors in this subcircuit. This list should be logically sorted such 
+#     # that transistor names appear in the order that they should be sized.
+#     transistor_names = []
+#     # A list of the names of wires in this subcircuit
+#     wire_names = []
+#     # A dictionary of the initial transistor sizes
+#     initial_transistor_sizes = {}
+#     # Path to the top level spice file
+#     top_spice_path = ""    
+#     # Fall time for this subcircuit
+#     tfall = 1
+#     # Rise time for this subcircuit
+#     trise = 1
+#     # Delay to be used for this subcircuit
+#     delay = 1
+#     # Delay weight used to calculate delay of representative critical path
+#     delay_weight = 1
+#     # Dynamic power for this subcircuit
+#     power = 1
 
     
-    def generate(self):
-        """ Generate SPICE subcircuits.
-            Generate method for base class must be overridden by child. """
-        msg = "Function 'generate' must be overridden in class _SizableCircuit."
-        raise NotImplementedError(msg)
+#     def generate(self):
+#         """ Generate SPICE subcircuits.
+#             Generate method for base class must be overridden by child. """
+#         msg = "Function 'generate' must be overridden in class _SizableCircuit."
+#         raise NotImplementedError(msg)
        
        
-    def generate_top(self):
-        """ Generate top-level SPICE circuit.
-            Generate method for base class must be overridden by child. """
-        msg = "Function 'generate_top' must be overridden in class _SizableCircuit."
-        raise NotImplementedError(msg)
+#     def generate_top(self):
+#         """ Generate top-level SPICE circuit.
+#             Generate method for base class must be overridden by child. """
+#         msg = "Function 'generate_top' must be overridden in class _SizableCircuit."
+#         raise NotImplementedError(msg)
      
      
-    def update_area(self, area_dict, width_dict):
-        """ Calculate area of circuit.
-            Update area method for base class must be overridden by child. """
-        msg = "Function 'update_area' must be overridden in class _SizableCircuit."
-        raise NotImplementedError(msg)
+#     def update_area(self, area_dict, width_dict):
+#         """ Calculate area of circuit.
+#             Update area method for base class must be overridden by child. """
+#         msg = "Function 'update_area' must be overridden in class _SizableCircuit."
+#         raise NotImplementedError(msg)
         
         
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
-        msg = "Function 'update_wires' must be overridden in class _SizableCircuit."
-        raise NotImplementedError(msg)
+#     def update_wires(self, width_dict, wire_lengths, wire_layers):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#         msg = "Function 'update_wires' must be overridden in class _SizableCircuit."
+#         raise NotImplementedError(msg)
                 
   
-class _CompoundCircuit:
-    """ This is a base class used to identify FPGA circuits that should not be sized. These circuits are
-        usually composed of multiple smaller circuits, so we call them 'compound' circuits.
-        Examples: circuits representing routing wires and loads. 
-        If a class inherits _CompoundCircuit, it should override all methods."""
+# class _CompoundCircuit:
+#     """ This is a base class used to identify FPGA circuits that should not be sized. These circuits are
+#         usually composed of multiple smaller circuits, so we call them 'compound' circuits.
+#         Examples: circuits representing routing wires and loads. 
+#         If a class inherits _CompoundCircuit, it should override all methods."""
 
-    def generate(self):
-        """ Generate method for base class must be overridden by child. """
-        msg = "Function 'generate' must be overridden in class _CompoundCircuit."
-        raise NotImplementedError(msg)
+#     def generate(self):
+#         """ Generate method for base class must be overridden by child. """
+#         msg = "Function 'generate' must be overridden in class _CompoundCircuit."
+#         raise NotImplementedError(msg)
         
         
-class _SwitchBlockMUX(_SizableCircuit):
-    """ Switch Block MUX Class: Pass-transistor 2-level mux with output driver """
+# class _SwitchBlockMUX(_SizableCircuit):
+#     """ Switch Block MUX Class: Pass-transistor 2-level mux with output driver """
     
-    def __init__(self, required_size, num_per_tile, use_tgate, sb_mux_name : str, gen_r_wire: dict):
-        # Subcircuit name
-        # self.name = "sb_mux"
-        self.name = sb_mux_name
-        # Which wire length is this sb mux driving?
-        self.gen_r_wire = gen_r_wire
-        # How big should this mux be (dictated by architecture specs)
-        self.required_size = required_size 
-        # How big did we make the mux (it is possible that we had to make the mux bigger for level sizes to work out, this is how big the mux turned out)
-        self.implemented_size = -1
-        # This is simply the implemented_size-required_size
-        self.num_unused_inputs = -1
-        # Number of switch block muxes in one FPGA tile
-        self.num_per_tile = num_per_tile
-        # Number of SRAM cells per mux
-        self.sram_per_mux = -1
-        # Size of the first level of muxing
-        self.level1_size = -1
-        # Size of the second level of muxing
-        self.level2_size = -1
-        # Delay weight in a representative critical path
-        self.delay_weight = DELAY_WEIGHT_SB_MUX
-        # use pass transistor or transmission gates
-        self.use_tgate = use_tgate
+#     def __init__(self, required_size, num_per_tile, use_tgate, sb_mux_name : str, gen_r_wire: dict):
+#         # Subcircuit name
+#         # self.name = "sb_mux"
+#         self.name = sb_mux_name
+#         # Which wire length is this sb mux driving?
+#         self.gen_r_wire = gen_r_wire
+#         # How big should this mux be (dictated by architecture specs)
+#         self.required_size = required_size 
+#         # How big did we make the mux (it is possible that we had to make the mux bigger for level sizes to work out, this is how big the mux turned out)
+#         self.implemented_size = -1
+#         # This is simply the implemented_size-required_size
+#         self.num_unused_inputs = -1
+#         # Number of switch block muxes in one FPGA tile
+#         self.num_per_tile = num_per_tile
+#         # Number of SRAM cells per mux
+#         self.sram_per_mux = -1
+#         # Size of the first level of muxing
+#         self.level1_size = -1
+#         # Size of the second level of muxing
+#         self.level2_size = -1
+#         # Delay weight in a representative critical path
+#         self.delay_weight = DELAY_WEIGHT_SB_MUX
+#         # use pass transistor or transmission gates
+#         self.use_tgate = use_tgate
         
         
-    def generate(self, subcircuit_filename, min_tran_width):
-        """ 
-        Generate switch block mux. 
-        Calculates implementation specific details and write the SPICE subcircuit. 
-        """
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         """ 
+#         Generate switch block mux. 
+#         Calculates implementation specific details and write the SPICE subcircuit. 
+#         """
         
-        print("Generating switch block mux")
+#         print("Generating switch block mux")
         
-        # Calculate level sizes and number of SRAMs per mux
-        self.level2_size = int(math.sqrt(self.required_size))
-        self.level1_size = int(math.ceil(float(self.required_size)/self.level2_size))
-        self.implemented_size = self.level1_size*self.level2_size
-        self.num_unused_inputs = self.implemented_size - self.required_size
-        self.sram_per_mux = self.level1_size + self.level2_size
+#         # Calculate level sizes and number of SRAMs per mux
+#         self.level2_size = int(math.sqrt(self.required_size))
+#         self.level1_size = int(math.ceil(float(self.required_size)/self.level2_size))
+#         self.implemented_size = self.level1_size*self.level2_size
+#         self.num_unused_inputs = self.implemented_size - self.required_size
+#         self.sram_per_mux = self.level1_size + self.level2_size
         
-        # TODO: wouldn't be better for inv 1 to start with pmos = 8 and nmos = 4
-        # Call MUX generation function
-        if not self.use_tgate :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2lvl_mux(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["ptran_" + self.name + "_L1_nmos"] = 3
-            self.initial_transistor_sizes["ptran_" + self.name + "_L2_nmos"] = 4
-            self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 8
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 4
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 10
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 20
+#         # TODO: wouldn't be better for inv 1 to start with pmos = 8 and nmos = 4
+#         # Call MUX generation function
+#         if not self.use_tgate :
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2lvl_mux(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["ptran_" + self.name + "_L1_nmos"] = 3
+#             self.initial_transistor_sizes["ptran_" + self.name + "_L2_nmos"] = 4
+#             self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 8
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 4
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 10
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 20
 
-        else :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2lvl_mux(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["tgate_" + self.name + "_L1_nmos"] = 3
-            self.initial_transistor_sizes["tgate_" + self.name + "_L1_pmos"] = 3
-            self.initial_transistor_sizes["tgate_" + self.name + "_L2_nmos"] = 4
-            self.initial_transistor_sizes["tgate_" + self.name + "_L2_pmos"] = 4
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 8
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 4
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 10
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 20
+#         else :
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2lvl_mux(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L1_nmos"] = 3
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L1_pmos"] = 3
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L2_nmos"] = 4
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L2_pmos"] = 4
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 8
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 4
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 10
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 20
 
 
 
        
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
 
-    def generate_top(self):
-        """ Generate top level SPICE file """
+#     def generate_top(self):
+#         """ Generate top level SPICE file """
         
-        print("Generating top-level switch block mux")
-        self.top_spice_path = top_level.generate_switch_block_top(self.name, self.gen_r_wire)
+#         print("Generating top-level switch block mux")
+#         self.top_spice_path = top_level.generate_switch_block_top(self.name, self.gen_r_wire)
    
    
-    def update_area(self, area_dict, width_dict):
-        """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
-            the area of everything. It is expected that area_dict will have all the information we need to calculate area.
-            We update area_dict and width_dict with calculations performed in this function. """
+#     def update_area(self, area_dict, width_dict):
+#         """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
+#             the area of everything. It is expected that area_dict will have all the information we need to calculate area.
+#             We update area_dict and width_dict with calculations performed in this function. """
         
-        # MUX area
-        if not self.use_tgate :
-            area = ((self.level1_size*self.level2_size)*area_dict["ptran_" + self.name + "_L1"] +
-                    self.level2_size*area_dict["ptran_" + self.name + "_L2"] +
-                    area_dict["rest_" + self.name + ""] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
-        else :
-            area = ((self.level1_size*self.level2_size)*area_dict["tgate_" + self.name + "_L1"] +
-                    self.level2_size*area_dict["tgate_" + self.name + "_L2"] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
+#         # MUX area
+#         if not self.use_tgate :
+#             area = ((self.level1_size*self.level2_size)*area_dict["ptran_" + self.name + "_L1"] +
+#                     self.level2_size*area_dict["ptran_" + self.name + "_L2"] +
+#                     area_dict["rest_" + self.name + ""] +
+#                     area_dict["inv_" + self.name + "_1"] +
+#                     area_dict["inv_" + self.name + "_2"])
+#         else :
+#             area = ((self.level1_size*self.level2_size)*area_dict["tgate_" + self.name + "_L1"] +
+#                     self.level2_size*area_dict["tgate_" + self.name + "_L2"] +
+#                     area_dict["inv_" + self.name + "_1"] +
+#                     area_dict["inv_" + self.name + "_2"])
 
-        # MUX area including SRAM
-        area_with_sram = (area + (self.level1_size + self.level2_size)*area_dict["sram"])
+#         # MUX area including SRAM
+#         area_with_sram = (area + (self.level1_size + self.level2_size) * area_dict["sram"])
         
-        width = math.sqrt(area)
-        width_with_sram = math.sqrt(area_with_sram)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
-        area_dict[self.name + "_sram"] = area_with_sram
-        width_dict[self.name + "_sram"] = width_with_sram
+#         width = math.sqrt(area)
+#         width_with_sram = math.sqrt(area_with_sram)
+#         area_dict[self.name] = area
+#         width_dict[self.name] = width
+#         area_dict[self.name + "_sram"] = area_with_sram
+#         width_dict[self.name + "_sram"] = width_with_sram
         
-        # Update VPR areas
-        if not self.use_tgate :
-            area_dict["switch_mux_trans_size"] = area_dict["ptran_" + self.name + "_L1"]
-            area_dict["switch_buf_size"] = area_dict["rest_" + self.name + ""] + area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"]
-        else :
-            area_dict["switch_mux_trans_size"] = area_dict["tgate_" + self.name + "_L1"]
-            area_dict["switch_buf_size"] = area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"]
+#         # Update VPR areas
+#         if not self.use_tgate :
+#             area_dict["switch_mux_trans_size"] = area_dict["ptran_" + self.name + "_L1"]
+#             area_dict["switch_buf_size"] = area_dict["rest_" + self.name + ""] + area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"]
+#         else :
+#             area_dict["switch_mux_trans_size"] = area_dict["tgate_" + self.name + "_L1"]
+#             area_dict["switch_buf_size"] = area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"]
 
 
-    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], ratio: float):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], ratio: float):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
 
-        # Update wire lengths
-        # Divide both driver widths by 4 to get wire from pin -> driver input? Maybe just a back of envelope estimate 
-        wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_2"])/4
-        wire_lengths["wire_" + self.name + "_L1"] = width_dict[self.name] * ratio
-        wire_lengths["wire_" + self.name + "_L2"] = width_dict[self.name] * ratio
+#         # Update wire lengths
+#         # Divide both driver widths by 4 to get wire from pin -> driver input? Maybe just a back of envelope estimate 
+#         wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_2"])/4
+#         wire_lengths["wire_" + self.name + "_L1"] = width_dict[self.name] * ratio
+#         wire_lengths["wire_" + self.name + "_L2"] = width_dict[self.name] * ratio
         
-        # Update set wire layers
-        wire_layers["wire_" + self.name + "_driver"] = LOCAL_WIRE_LAYER
-        wire_layers["wire_" + self.name + "_L1"] = LOCAL_WIRE_LAYER
-        wire_layers["wire_" + self.name + "_L2"] = LOCAL_WIRE_LAYER
+#         # Update set wire layers
+#         wire_layers["wire_" + self.name + "_driver"] = LOCAL_WIRE_LAYER
+#         wire_layers["wire_" + self.name + "_L1"] = LOCAL_WIRE_LAYER
+#         wire_layers["wire_" + self.name + "_L2"] = LOCAL_WIRE_LAYER
     
     
-    def print_details(self, report_file):
-        """ Print switch block details """
+#     def print_details(self, report_file):
+#         """ Print switch block details """
 
-        utils.print_and_write(report_file, "  SWITCH BLOCK DETAILS:")
-        utils.print_and_write(report_file, "  Style: two-level MUX")
-        utils.print_and_write(report_file, "  Required MUX size: " + str(self.required_size) + ":1")
-        utils.print_and_write(report_file, "  Implemented MUX size: " + str(self.implemented_size) + ":1")
-        utils.print_and_write(report_file, "  Level 1 size = " + str(self.level1_size))
-        utils.print_and_write(report_file, "  Level 2 size = " + str(self.level2_size))
-        utils.print_and_write(report_file, "  Number of unused inputs = " + str(self.num_unused_inputs))
-        utils.print_and_write(report_file, "  Number of MUXes per tile: " + str(self.num_per_tile))
-        utils.print_and_write(report_file, "  Number of SRAM cells per MUX: " + str(self.sram_per_mux))
-        utils.print_and_write(report_file, "")
+#         utils.print_and_write(report_file, "  SWITCH BLOCK DETAILS:")
+#         utils.print_and_write(report_file, "  Style: two-level MUX")
+#         utils.print_and_write(report_file, "  Required MUX size: " + str(self.required_size) + ":1")
+#         utils.print_and_write(report_file, "  Implemented MUX size: " + str(self.implemented_size) + ":1")
+#         utils.print_and_write(report_file, "  Level 1 size = " + str(self.level1_size))
+#         utils.print_and_write(report_file, "  Level 2 size = " + str(self.level2_size))
+#         utils.print_and_write(report_file, "  Number of unused inputs = " + str(self.num_unused_inputs))
+#         utils.print_and_write(report_file, "  Number of MUXes per tile: " + str(self.num_per_tile))
+#         utils.print_and_write(report_file, "  Number of SRAM cells per MUX: " + str(self.sram_per_mux))
+#         utils.print_and_write(report_file, "")
 
 
-class _ConnectionBlockMUX(_SizableCircuit):
-    """ Connection Block MUX Class: Pass-transistor 2-level mux """
+# class _ConnectionBlockMUX(_SizableCircuit):
+#     """ Connection Block MUX Class: Pass-transistor 2-level mux """
     
-    def __init__(self, required_size, num_per_tile, use_tgate):
-        # Subcircuit name
-        self.name = "cb_mux"
-        # How big should this mux be (dictated by architecture specs)
-        self.required_size = required_size 
-        # How big did we make the mux (it is possible that we had to make the mux bigger for level sizes to work out, this is how big the mux turned out)
-        self.implemented_size = -1
-        # This is simply the implemented_size-required_size
-        self.num_unused_inputs = -1
-        # Number of connection block muxes in one FPGA tile
-        self.num_per_tile = num_per_tile
-        # Number of SRAM cells per mux
-        self.sram_per_mux = -1
-        # Size of the first level of muxing
-        self.level1_size = -1
-        # Size of the second level of muxing
-        self.level2_size = -1
-        # Delay weight in a representative critical path
-        self.delay_weight = DELAY_WEIGHT_CB_MUX
-        # use pass transistor or transmission gates
-        self.use_tgate = use_tgate
+#     def __init__(self, required_size, num_per_tile, use_tgate, gen_r_wire: dict):
+#         # Subcircuit name
+#         # self.name = f"cb_mux_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+#         self.name = "cb_mux"
+#         # Associated Gen Programmable Routing Wire
+#         self.gen_r_wire = gen_r_wire
+#         # How big should this mux be (dictated by architecture specs)
+#         self.required_size = required_size 
+#         # How big did we make the mux (it is possible that we had to make the mux bigger for level sizes to work out, this is how big the mux turned out)
+#         self.implemented_size = -1
+#         # This is simply the implemented_size-required_size
+#         self.num_unused_inputs = -1
+#         # Number of connection block muxes in one FPGA tile
+#         self.num_per_tile = num_per_tile
+#         # Number of SRAM cells per mux
+#         self.sram_per_mux = -1
+#         # Size of the first level of muxing
+#         self.level1_size = -1
+#         # Size of the second level of muxing
+#         self.level2_size = -1
+#         # Delay weight in a representative critical path
+#         self.delay_weight = DELAY_WEIGHT_CB_MUX
+#         # use pass transistor or transmission gates
+#         self.use_tgate = use_tgate
         
     
-    def generate(self, subcircuit_filename, min_tran_width):
-        print("Generating connection block mux")
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         print("Generating connection block mux")
         
-        # Calculate level sizes and number of SRAMs per mux
-        self.level2_size = int(math.sqrt(self.required_size))
-        self.level1_size = int(math.ceil(float(self.required_size)/self.level2_size))
-        self.implemented_size = self.level1_size*self.level2_size
-        self.num_unused_inputs = self.implemented_size - self.required_size
-        self.sram_per_mux = self.level1_size + self.level2_size
+#         # Calculate level sizes and number of SRAMs per mux
+#         self.level2_size = int(math.sqrt(self.required_size))
+#         self.level1_size = int(math.ceil(float(self.required_size)/self.level2_size))
+#         self.implemented_size = self.level1_size*self.level2_size
+#         self.num_unused_inputs = self.implemented_size - self.required_size
+#         self.sram_per_mux = self.level1_size + self.level2_size
         
-        # Call MUX generation function
-        if not self.use_tgate :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2lvl_mux(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["ptran_" + self.name + "_L1_nmos"] = 2
-            self.initial_transistor_sizes["ptran_" + self.name + "_L2_nmos"] = 2
-            self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 6
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 12
-        else :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2lvl_mux(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["tgate_" + self.name + "_L1_nmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_L1_pmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_L2_nmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_L2_pmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 6
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 12
+#         # Call MUX generation function
+#         if not self.use_tgate :
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2lvl_mux(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["ptran_" + self.name + "_L1_nmos"] = 2
+#             self.initial_transistor_sizes["ptran_" + self.name + "_L2_nmos"] = 2
+#             self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 6
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 12
+#         else :
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2lvl_mux(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L1_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L1_pmos"] = 2
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L2_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L2_pmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 6
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 12
        
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
 
-    def generate_top(self, min_len_wire: dict):
-        print("Generating top-level connection block mux")
-        self.top_spice_path = top_level.generate_connection_block_top(self.name, min_len_wire)
+#     def generate_top(self):
+#         print("Generating top-level connection block mux")
+#         self.top_spice_path = top_level.generate_connection_block_top(self.name, self.gen_r_wire)
         
    
-    def update_area(self, area_dict, width_dict):
-        """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
-            the area of everything. It is expected that area_dict will have all the information we need to calculate area.
-            We update area_dict and width_dict with calculations performed in this function. 
- 						The keys in these dictionaries are the names of the various components of the fpga like muxes, switches, etc.
-            For each component, generally there are two keys entries: one contains the area without the controlling sram bits
-            (this key is just the <component_name>) and the second contains the area with the controlling sram bits (this key 
-            is <component_name>_sram). The area associated with "component_name" generally does not include the controlling 
-            sram area (but includes everything else like buffers and pass transistors, while 
-            the area of "component_name_sram" is the sum of the area of this element including the controlling sram.
-        """
+#     def update_area(self, area_dict, width_dict):
+#         """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
+#             the area of everything. It is expected that area_dict will have all the information we need to calculate area.
+#             We update area_dict and width_dict with calculations performed in this function. 
+#  						The keys in these dictionaries are the names of the various components of the fpga like muxes, switches, etc.
+#             For each component, generally there are two keys entries: one contains the area without the controlling sram bits
+#             (this key is just the <component_name>) and the second contains the area with the controlling sram bits (this key 
+#             is <component_name>_sram). The area associated with "component_name" generally does not include the controlling 
+#             sram area (but includes everything else like buffers and pass transistors, while 
+#             the area of "component_name_sram" is the sum of the area of this element including the controlling sram.
+#         """
             
-        # MUX area
-        if not self.use_tgate :
-            area = ((self.level1_size*self.level2_size)*area_dict["ptran_" + self.name + "_L1"] +
-                    self.level2_size*area_dict["ptran_" + self.name + "_L2"] +
-                    area_dict["rest_" + self.name + ""] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
-        else :
-            area = ((self.level1_size*self.level2_size)*area_dict["tgate_" + self.name + "_L1"] +
-                    self.level2_size*area_dict["tgate_" + self.name + "_L2"] +
-                    # area_dict["rest_" + self.name + ""] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
+#         # MUX area
+#         if not self.use_tgate :
+#             area = ((self.level1_size*self.level2_size)*area_dict["ptran_" + self.name + "_L1"] +
+#                     self.level2_size*area_dict["ptran_" + self.name + "_L2"] +
+#                     area_dict["rest_" + self.name + ""] +
+#                     area_dict["inv_" + self.name + "_1"] +
+#                     area_dict["inv_" + self.name + "_2"])
+#         else :
+#             area = ((self.level1_size*self.level2_size)*area_dict["tgate_" + self.name + "_L1"] +
+#                     self.level2_size*area_dict["tgate_" + self.name + "_L2"] +
+#                     # area_dict["rest_" + self.name + ""] +
+#                     area_dict["inv_" + self.name + "_1"] +
+#                     area_dict["inv_" + self.name + "_2"])
         
-        # MUX area including SRAM
-        area_with_sram = (area + (self.level1_size + self.level2_size)*area_dict["sram"])
+#         # MUX area including SRAM
+#         area_with_sram = (area + (self.level1_size + self.level2_size)*area_dict["sram"])
         
-        width = math.sqrt(area)
-        width_with_sram = math.sqrt(area_with_sram)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
-        area_dict[self.name + "_sram"] = area_with_sram
-        width_dict[self.name + "_sram"] = width_with_sram
+#         width = math.sqrt(area)
+#         width_with_sram = math.sqrt(area_with_sram)
+#         area_dict[self.name] = area
+#         width_dict[self.name] = width
+#         area_dict[self.name + "_sram"] = area_with_sram
+#         width_dict[self.name + "_sram"] = width_with_sram
         
-        # Update VPR area numbers
-        if not self.use_tgate :
-            area_dict["ipin_mux_trans_size"] = area_dict["ptran_" + self.name + "_L1"]
-            area_dict["cb_buf_size"] = area_dict["rest_" + self.name + ""] + area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"]
-        else :
-            area_dict["ipin_mux_trans_size"] = area_dict["tgate_" + self.name + "_L1"]
-            area_dict["cb_buf_size"] = area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"]  
+#         # Update VPR area numbers
+#         if not self.use_tgate :
+#             area_dict["ipin_mux_trans_size"] = area_dict["ptran_" + self.name + "_L1"]
+#             area_dict["cb_buf_size"] = area_dict["rest_" + self.name + ""] + area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"]
+#         else :
+#             area_dict["ipin_mux_trans_size"] = area_dict["tgate_" + self.name + "_L1"]
+#             area_dict["cb_buf_size"] = area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"]  
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers, ratio):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers, ratio):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
 
-        # Update wire lengths
-        wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_2"])/4
-        wire_lengths["wire_" + self.name + "_L1"] = width_dict[self.name] * ratio
-        wire_lengths["wire_" + self.name + "_L2"] = width_dict[self.name] * ratio
+#         # Update wire lengths
+#         wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_2"])/4
+#         wire_lengths["wire_" + self.name + "_L1"] = width_dict[self.name] * ratio
+#         wire_lengths["wire_" + self.name + "_L2"] = width_dict[self.name] * ratio
         
-        # Update set wire layers
-        wire_layers["wire_" + self.name + "_driver"] = 0
-        wire_layers["wire_" + self.name + "_L1"] = 0
-        wire_layers["wire_" + self.name + "_L2"] = 0    
+#         # Update set wire layers
+#         wire_layers["wire_" + self.name + "_driver"] = 0
+#         wire_layers["wire_" + self.name + "_L1"] = 0
+#         wire_layers["wire_" + self.name + "_L2"] = 0    
         
    
-    def print_details(self, report_file):
-        """ Print connection block details """
+#     def print_details(self, report_file):
+#         """ Print connection block details """
 
-        utils.print_and_write(report_file, "  CONNECTION BLOCK DETAILS:")
-        utils.print_and_write(report_file, "  Style: two-level MUX")
-        utils.print_and_write(report_file, "  Required MUX size: " + str(self.required_size) + ":1")
-        utils.print_and_write(report_file, "  Implemented MUX size: " + str(self.implemented_size) + ":1")
-        utils.print_and_write(report_file, "  Level 1 size = " + str(self.level1_size))
-        utils.print_and_write(report_file, "  Level 2 size = " + str(self.level2_size))
-        utils.print_and_write(report_file, "  Number of unused inputs = " + str(self.num_unused_inputs))
-        utils.print_and_write(report_file, "  Number of MUXes per tile: " + str(self.num_per_tile))
-        utils.print_and_write(report_file, "  Number of SRAM cells per MUX: " + str(self.sram_per_mux))
-        utils.print_and_write(report_file, "")
+#         utils.print_and_write(report_file, "  CONNECTION BLOCK DETAILS:")
+#         utils.print_and_write(report_file, "  Style: two-level MUX")
+#         utils.print_and_write(report_file, "  Required MUX size: " + str(self.required_size) + ":1")
+#         utils.print_and_write(report_file, "  Implemented MUX size: " + str(self.implemented_size) + ":1")
+#         utils.print_and_write(report_file, "  Level 1 size = " + str(self.level1_size))
+#         utils.print_and_write(report_file, "  Level 2 size = " + str(self.level2_size))
+#         utils.print_and_write(report_file, "  Number of unused inputs = " + str(self.num_unused_inputs))
+#         utils.print_and_write(report_file, "  Number of MUXes per tile: " + str(self.num_per_tile))
+#         utils.print_and_write(report_file, "  Number of SRAM cells per MUX: " + str(self.sram_per_mux))
+#         utils.print_and_write(report_file, "")
         
         
-class _LocalMUX(_SizableCircuit):
-    """ Local Routing MUX Class: Pass-transistor 2-level mux with no driver """
+# class _LocalMUX(_SizableCircuit):
+#     """ Local Routing MUX Class: Pass-transistor 2-level mux with no driver """
     
-    def __init__(self, required_size, num_per_tile, use_tgate):
-        # Subcircuit name
-        self.name = "local_mux"
-        # How big should this mux be (dictated by architecture specs)
-        self.required_size = required_size 
-        # How big did we make the mux (it is possible that we had to make the mux bigger for level sizes to work out, this is how big the mux turned out)
-        self.implemented_size = -1
-        # This is simply the implemented_size-required_size
-        self.num_unused_inputs = -1
-        # Number of switch block muxes in one FPGA tile
-        self.num_per_tile = num_per_tile
-        # Number of SRAM cells per mux
-        self.sram_per_mux = -1
-        # Size of the first level of muxing
-        self.level1_size = -1
-        # Size of the second level of muxing
-        self.level2_size = -1
-        # Delay weight in a representative critical path
-        self.delay_weight = DELAY_WEIGHT_LOCAL_MUX
-        # use pass transistor or transmission gates
-        self.use_tgate = use_tgate
+#     def __init__(self, required_size, num_per_tile, use_tgate, gen_r_wire: dict):
+#         # Subcircuit name
+#         # self.name = f"local_mux_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+#         self.name = "local_mux"
+#         # Associated Gen Programmable Routing Wire
+#         self.gen_r_wire = gen_r_wire
+#         # How big should this mux be (dictated by architecture specs)
+#         self.required_size = required_size 
+#         # How big did we make the mux (it is possible that we had to make the mux bigger for level sizes to work out, this is how big the mux turned out)
+#         self.implemented_size = -1
+#         # This is simply the implemented_size-required_size
+#         self.num_unused_inputs = -1
+#         # Number of switch block muxes in one FPGA tile
+#         self.num_per_tile = num_per_tile
+#         # Number of SRAM cells per mux
+#         self.sram_per_mux = -1
+#         # Size of the first level of muxing
+#         self.level1_size = -1
+#         # Size of the second level of muxing
+#         self.level2_size = -1
+#         # Delay weight in a representative critical path
+#         self.delay_weight = DELAY_WEIGHT_LOCAL_MUX
+#         # use pass transistor or transmission gates
+#         self.use_tgate = use_tgate
     
     
-    def generate(self, subcircuit_filename, min_tran_width):
-        print("Generating local mux")
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         print("Generating local mux")
         
-        # Calculate level sizes and number of SRAMs per mux
-        self.level2_size = int(math.sqrt(self.required_size))
-        self.level1_size = int(math.ceil(float(self.required_size)/self.level2_size))
-        self.implemented_size = self.level1_size*self.level2_size
-        self.num_unused_inputs = self.implemented_size - self.required_size
-        self.sram_per_mux = self.level1_size + self.level2_size
+#         # Calculate level sizes and number of SRAMs per mux
+#         self.level2_size = int(math.sqrt(self.required_size))
+#         self.level1_size = int(math.ceil(float(self.required_size)/self.level2_size))
+#         self.implemented_size = self.level1_size*self.level2_size
+#         self.num_unused_inputs = self.implemented_size - self.required_size
+#         self.sram_per_mux = self.level1_size + self.level2_size
         
-        if not self.use_tgate :
-            # Call MUX generation function
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2lvl_mux_no_driver(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
+#         if not self.use_tgate :
+#             # Call MUX generation function
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2lvl_mux_no_driver(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
             
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["ptran_" + self.name + "_L1_nmos"] = 2
-            self.initial_transistor_sizes["ptran_" + self.name + "_L2_nmos"] = 2
-            self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 2
-        else :
-            # Call MUX generation function
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2lvl_mux_no_driver(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["ptran_" + self.name + "_L1_nmos"] = 2
+#             self.initial_transistor_sizes["ptran_" + self.name + "_L2_nmos"] = 2
+#             self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 2
+#         else :
+#             # Call MUX generation function
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2lvl_mux_no_driver(subcircuit_filename, self.name, self.implemented_size, self.level1_size, self.level2_size)
             
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["tgate_" + self.name + "_L1_nmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_L1_pmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_L2_nmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_L2_pmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 2
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L1_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L1_pmos"] = 2
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L2_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_" + self.name + "_L2_pmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 2
        
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
-    def generate_top(self, min_len_wire: dict):
-        print("Generating top-level local mux")
-        self.top_spice_path = top_level.generate_local_mux_top(self.name, min_len_wire)
+#     def generate_top(self):
+#         print("Generating top-level local mux")
+#         self.top_spice_path = top_level.generate_local_mux_top(self.name, self.gen_r_wire)
         
    
-    def update_area(self, area_dict, width_dict):
-        """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
-            the area of everything. It is expected that area_dict will have all the information we need to calculate area.
-            We update area_dict and width_dict with calculations performed in this function. """        
+#     def update_area(self, area_dict, width_dict):
+#         """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
+#             the area of everything. It is expected that area_dict will have all the information we need to calculate area.
+#             We update area_dict and width_dict with calculations performed in this function. """        
         
-        # MUX area
-        if not self.use_tgate :
-            area = ((self.level1_size*self.level2_size)*area_dict["ptran_" + self.name + "_L1"] +
-                    self.level2_size*area_dict["ptran_" + self.name + "_L2"] +
-                    area_dict["rest_" + self.name + ""] +
-                    area_dict["inv_" + self.name + "_1"])
-        else :
-            area = ((self.level1_size*self.level2_size)*area_dict["tgate_" + self.name + "_L1"] +
-                    self.level2_size*area_dict["tgate_" + self.name + "_L2"] +
-                    # area_dict["rest_" + self.name + ""] +
-                    area_dict["inv_" + self.name + "_1"])
+#         # MUX area
+#         if not self.use_tgate :
+#             area = ((self.level1_size*self.level2_size)*area_dict["ptran_" + self.name + "_L1"] +
+#                     self.level2_size*area_dict["ptran_" + self.name + "_L2"] +
+#                     area_dict["rest_" + self.name + ""] +
+#                     area_dict["inv_" + self.name + "_1"])
+#         else :
+#             area = ((self.level1_size*self.level2_size)*area_dict["tgate_" + self.name + "_L1"] +
+#                     self.level2_size*area_dict["tgate_" + self.name + "_L2"] +
+#                     # area_dict["rest_" + self.name + ""] +
+#                     area_dict["inv_" + self.name + "_1"])
           
-        # MUX area including SRAM
-        area_with_sram = (area + (self.level1_size + self.level2_size)*area_dict["sram"])
+#         # MUX area including SRAM
+#         area_with_sram = (area + (self.level1_size + self.level2_size)*area_dict["sram"])
           
-        width = math.sqrt(area)
-        width_with_sram = math.sqrt(area_with_sram)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
-        area_dict[self.name + "_sram"] = area_with_sram
-        width_dict[self.name + "_sram"] = width_with_sram
+#         width = math.sqrt(area)
+#         width_with_sram = math.sqrt(area_with_sram)
+#         area_dict[self.name] = area
+#         width_dict[self.name] = width
+#         area_dict[self.name + "_sram"] = area_with_sram
+#         width_dict[self.name + "_sram"] = width_with_sram
 
 
 
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers, ratio):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers, ratio):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
 
-        # Update wire lengths
-        wire_lengths["wire_" + self.name + "_L1"] = width_dict[self.name] * ratio
-        wire_lengths["wire_" + self.name + "_L2"] = width_dict[self.name] * ratio
-        # Update wire layers
-        wire_layers["wire_" + self.name + "_L1"] = 0
-        wire_layers["wire_" + self.name + "_L2"] = 0  
+#         # Update wire lengths
+#         wire_lengths["wire_" + self.name + "_L1"] = width_dict[self.name] * ratio
+#         wire_lengths["wire_" + self.name + "_L2"] = width_dict[self.name] * ratio
+#         # Update wire layers
+#         wire_layers["wire_" + self.name + "_L1"] = 0
+#         wire_layers["wire_" + self.name + "_L2"] = 0  
         
    
-    def print_details(self, report_file):
-        """ Print local mux details """
+#     def print_details(self, report_file):
+#         """ Print local mux details """
     
-        utils.print_and_write(report_file, "  LOCAL MUX DETAILS:")
-        utils.print_and_write(report_file, "  Style: two-level MUX")
-        utils.print_and_write(report_file, "  Required MUX size: " + str(self.required_size) + ":1")
-        utils.print_and_write(report_file, "  Implemented MUX size: " + str(self.implemented_size) + ":1")
-        utils.print_and_write(report_file, "  Level 1 size = " + str(self.level1_size))
-        utils.print_and_write(report_file, "  Level 2 size = " + str(self.level2_size))
-        utils.print_and_write(report_file, "  Number of unused inputs = " + str(self.num_unused_inputs))
-        utils.print_and_write(report_file, "  Number of MUXes per tile: " + str(self.num_per_tile))
-        utils.print_and_write(report_file, "  Number of SRAM cells per MUX: " + str(self.sram_per_mux))
-        utils.print_and_write(report_file, "")
+#         utils.print_and_write(report_file, "  LOCAL MUX DETAILS:")
+#         utils.print_and_write(report_file, "  Style: two-level MUX")
+#         utils.print_and_write(report_file, "  Required MUX size: " + str(self.required_size) + ":1")
+#         utils.print_and_write(report_file, "  Implemented MUX size: " + str(self.implemented_size) + ":1")
+#         utils.print_and_write(report_file, "  Level 1 size = " + str(self.level1_size))
+#         utils.print_and_write(report_file, "  Level 2 size = " + str(self.level2_size))
+#         utils.print_and_write(report_file, "  Number of unused inputs = " + str(self.num_unused_inputs))
+#         utils.print_and_write(report_file, "  Number of MUXes per tile: " + str(self.num_per_tile))
+#         utils.print_and_write(report_file, "  Number of SRAM cells per MUX: " + str(self.sram_per_mux))
+#         utils.print_and_write(report_file, "")
 
 
-class _LUTInputDriver(_SizableCircuit):
-    """ LUT input driver class. LUT input drivers can optionally support register feedback.
-        They can also be connected to FF register input select. 
-        Thus, there are 4  types of LUT input drivers: "default", "default_rsel", "reg_fb" and "reg_fb_rsel".
-        When a LUT input driver is created in the '__init__' function, it is given one of these types.
-        All subsequent processes (netlist generation, area calculations, etc.) will use this type attribute.
-        """
+# class _LUTInputDriver(_SizableCircuit):
+#     """ LUT input driver class. LUT input drivers can optionally support register feedback.
+#         They can also be connected to FF register input select. 
+#         Thus, there are 4  types of LUT input drivers: "default", "default_rsel", "reg_fb" and "reg_fb_rsel".
+#         When a LUT input driver is created in the '__init__' function, it is given one of these types.
+#         All subsequent processes (netlist generation, area calculations, etc.) will use this type attribute.
+#         """
 
-    def __init__(self, name, type, delay_weight, use_tgate, use_fluts):
-        self.name = "lut_" + name + "_driver"
-        # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
-        self.type = type
-        # Delay weight in a representative critical path
-        self.delay_weight = delay_weight
-        # use pass transistor or transmission gate
-        self.use_tgate = use_tgate
-        self.use_fluts = use_fluts
+#     def __init__(self, name, type, delay_weight, use_tgate, use_fluts):
+#         self.name = "lut_" + name + "_driver"
+#         # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
+#         self.type = type
+#         # Delay weight in a representative critical path
+#         self.delay_weight = delay_weight
+#         # use pass transistor or transmission gate
+#         self.use_tgate = use_tgate
+#         self.use_fluts = use_fluts
         
-    def generate(self, subcircuit_filename, min_tran_width):
-        """ Generate SPICE netlist based on type of LUT input driver. """
-        if not self.use_tgate :
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut_driver(subcircuit_filename, self.name, self.type)
-        else :
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut_driver(subcircuit_filename, self.name, self.type)
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         """ Generate SPICE netlist based on type of LUT input driver. """
+#         if not self.use_tgate :
+#             self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut_driver(subcircuit_filename, self.name, self.type)
+#         else :
+#             self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut_driver(subcircuit_filename, self.name, self.type)
         
-        # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-        if not self.use_tgate :
-            if self.type != "default":
-                self.initial_transistor_sizes["inv_" + self.name + "_0_nmos"] = 2
-                self.initial_transistor_sizes["inv_" + self.name + "_0_pmos"] = 2
-            if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                self.initial_transistor_sizes["ptran_" + self.name + "_0_nmos"] = 2
-                self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
-            if self.type != "default":
-                self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-                self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 2
-        else :
-            if self.type != "default":
-                self.initial_transistor_sizes["inv_" + self.name + "_0_nmos"] = 2
-                self.initial_transistor_sizes["inv_" + self.name + "_0_pmos"] = 2
-            if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                self.initial_transistor_sizes["tgate_" + self.name + "_0_nmos"] = 2
-                self.initial_transistor_sizes["tgate_" + self.name + "_0_pmos"] = 2
-            if self.type != "default":
-                self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-                self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 2
+#         # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#         if not self.use_tgate :
+#             if self.type != "default":
+#                 self.initial_transistor_sizes["inv_" + self.name + "_0_nmos"] = 2
+#                 self.initial_transistor_sizes["inv_" + self.name + "_0_pmos"] = 2
+#             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
+#                 self.initial_transistor_sizes["ptran_" + self.name + "_0_nmos"] = 2
+#                 self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
+#             if self.type != "default":
+#                 self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
+#                 self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 2
+#         else :
+#             if self.type != "default":
+#                 self.initial_transistor_sizes["inv_" + self.name + "_0_nmos"] = 2
+#                 self.initial_transistor_sizes["inv_" + self.name + "_0_pmos"] = 2
+#             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
+#                 self.initial_transistor_sizes["tgate_" + self.name + "_0_nmos"] = 2
+#                 self.initial_transistor_sizes["tgate_" + self.name + "_0_pmos"] = 2
+#             if self.type != "default":
+#                 self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
+#                 self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 2
                
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
 
-    def generate_top(self):
-        """ Generate top-level SPICE file based on type of LUT input driver. """
+#     def generate_top(self):
+#         """ Generate top-level SPICE file based on type of LUT input driver. """
         
-        # Generate top level files based on what type of driver this is.
-        self.top_spice_path = top_level.generate_lut_driver_top(self.name, self.type)
-        # And, generate the LUT driver + LUT path top level file. We use this file to measure total delay through the LUT.
-        top_level.generate_lut_and_driver_top(self.name, self.type, self.use_tgate, self.use_fluts)       
+#         # Generate top level files based on what type of driver this is.
+#         self.top_spice_path = top_level.generate_lut_driver_top(self.name, self.type)
+#         # And, generate the LUT driver + LUT path top level file. We use this file to measure total delay through the LUT.
+#         top_level.generate_lut_and_driver_top(self.name, self.type, self.use_tgate, self.use_fluts)       
      
      
-    def update_area(self, area_dict, width_dict):
-        """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
-            the area of everything. It is expected that area_dict will have all the information we need to calculate area.
-            We update area_dict and width_dict with calculations performed in this function. 
-            We also return the area of this driver, which is calculated based on driver type. """
+#     def update_area(self, area_dict, width_dict):
+#         """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
+#             the area of everything. It is expected that area_dict will have all the information we need to calculate area.
+#             We update area_dict and width_dict with calculations performed in this function. 
+#             We also return the area of this driver, which is calculated based on driver type. """
         
-        area = 0.0
+#         area = 0.0
         
-        if not self.use_tgate :  
-            # Calculate area based on input type
-            if self.type != "default":
-                area += area_dict["inv_" + self.name + "_0"]
-            if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                area += 2*area_dict["ptran_" + self.name + "_0"]
-                area += area_dict["rest_" + self.name]
-            if self.type != "default":
-                area += area_dict["inv_" + self.name + "_1"]
-            area += area_dict["inv_" + self.name + "_2"]
+#         if not self.use_tgate :  
+#             # Calculate area based on input type
+#             if self.type != "default":
+#                 area += area_dict["inv_" + self.name + "_0"]
+#             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
+#                 area += 2*area_dict["ptran_" + self.name + "_0"]
+#                 area += area_dict["rest_" + self.name]
+#             if self.type != "default":
+#                 area += area_dict["inv_" + self.name + "_1"]
+#             area += area_dict["inv_" + self.name + "_2"]
         
-        else :
-            # Calculate area based on input type
-            if self.type != "default":
-                area += area_dict["inv_" + self.name + "_0"]
-            if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                area += 2*area_dict["tgate_" + self.name + "_0"]
-            if self.type != "default":
-                area += area_dict["inv_" + self.name + "_1"]
-            area += area_dict["inv_" + self.name + "_2"]
+#         else :
+#             # Calculate area based on input type
+#             if self.type != "default":
+#                 area += area_dict["inv_" + self.name + "_0"]
+#             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
+#                 area += 2*area_dict["tgate_" + self.name + "_0"]
+#             if self.type != "default":
+#                 area += area_dict["inv_" + self.name + "_1"]
+#             area += area_dict["inv_" + self.name + "_2"]
 
-        # Add SRAM cell if this is a register feedback input
-        if self.type == "reg_fb" or self.type == "ref_fb_rsel":
-            area += area_dict["sram"]
+#         # Add SRAM cell if this is a register feedback input
+#         if self.type == "reg_fb" or self.type == "ref_fb_rsel":
+#             area += area_dict["sram"]
         
-        # Calculate layout width
-        width = math.sqrt(area)
+#         # Calculate layout width
+#         width = math.sqrt(area)
         
-        # Add to dictionaries
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+#         # Add to dictionaries
+#         area_dict[self.name] = area
+#         width_dict[self.name] = width
         
-        return area
+#         return area
         
 
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict.
-            Wires differ based on input type. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict.
+#             Wires differ based on input type. """
         
-        if not self.use_tgate :  
-            # Update wire lengths and wire layers
-            if self.type == "default_rsel" or self.type == "reg_fb_rsel":
-                wire_lengths["wire_" + self.name + "_0_rsel"] = width_dict[self.name]/4 + width_dict["lut"] + width_dict["ff"]/4 
-                wire_layers["wire_" + self.name + "_0_rsel"] = 0
-            if self.type == "default_rsel":
-                wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name + "_0_out"] = 0
-            if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["ptran_" + self.name + "_0"]/4
-                wire_layers["wire_" + self.name + "_0_out"] = 0
-                wire_lengths["wire_" + self.name + "_0"] = width_dict["ptran_" + self.name + "_0"]
-                wire_layers["wire_" + self.name + "_0"] = 0
-            if self.type == "default":
-                wire_lengths["wire_" + self.name] = width_dict["local_mux"]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name] = 0
-            else:
-                wire_lengths["wire_" + self.name] = width_dict["inv_" + self.name + "_1"]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name] = 0
+#         # getting name of min len wire local mux from global to just save myself the pain of changing all these variable names
+#         global min_len_wire
+#         local_mux_key = f"local_mux_L{min_len_wire['len']}_uid{min_len_wire['id']}"
+#         local_mux_key = "local_mux"
 
-        else :
-            # Update wire lengths and wire layers
-            if self.type == "default_rsel" or self.type == "reg_fb_rsel":
-                wire_lengths["wire_" + self.name + "_0_rsel"] = width_dict[self.name]/4 + width_dict["lut"] + width_dict["ff"]/4 
-                wire_layers["wire_" + self.name + "_0_rsel"] = 0
-            if self.type == "default_rsel":
-                wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name + "_0_out"] = 0
-            if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["tgate_" + self.name + "_0"]/4
-                wire_layers["wire_" + self.name + "_0_out"] = 0
-                wire_lengths["wire_" + self.name + "_0"] = width_dict["tgate_" + self.name + "_0"]
-                wire_layers["wire_" + self.name + "_0"] = 0
-            if self.type == "default":
-                wire_lengths["wire_" + self.name] = width_dict["local_mux"]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name] = 0
-            else:
-                wire_lengths["wire_" + self.name] = width_dict["inv_" + self.name + "_1"]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name] = 0
+#         if not self.use_tgate :  
+#             # Update wire lengths and wire layers
+#             if self.type == "default_rsel" or self.type == "reg_fb_rsel":
+#                 wire_lengths["wire_" + self.name + "_0_rsel"] = width_dict[self.name]/4 + width_dict["lut"] + width_dict["ff"]/4 
+#                 wire_layers["wire_" + self.name + "_0_rsel"] = 0
+#             if self.type == "default_rsel":
+#                 wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["inv_" + self.name + "_2"]/4
+#                 wire_layers["wire_" + self.name + "_0_out"] = 0
+#             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
+#                 wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["ptran_" + self.name + "_0"]/4
+#                 wire_layers["wire_" + self.name + "_0_out"] = 0
+#                 wire_lengths["wire_" + self.name + "_0"] = width_dict["ptran_" + self.name + "_0"]
+#                 wire_layers["wire_" + self.name + "_0"] = 0
+#             if self.type == "default":
+#                 wire_lengths["wire_" + self.name] = width_dict[local_mux_key]/4 + width_dict["inv_" + self.name + "_2"]/4
+#                 wire_layers["wire_" + self.name] = 0
+#             else:
+#                 wire_lengths["wire_" + self.name] = width_dict["inv_" + self.name + "_1"]/4 + width_dict["inv_" + self.name + "_2"]/4
+#                 wire_layers["wire_" + self.name] = 0
+
+#         else :
+#             # Update wire lengths and wire layers
+#             if self.type == "default_rsel" or self.type == "reg_fb_rsel":
+#                 wire_lengths["wire_" + self.name + "_0_rsel"] = width_dict[self.name]/4 + width_dict["lut"] + width_dict["ff"]/4 
+#                 wire_layers["wire_" + self.name + "_0_rsel"] = 0
+#             if self.type == "default_rsel":
+#                 wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["inv_" + self.name + "_2"]/4
+#                 wire_layers["wire_" + self.name + "_0_out"] = 0
+#             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
+#                 wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["tgate_" + self.name + "_0"]/4
+#                 wire_layers["wire_" + self.name + "_0_out"] = 0
+#                 wire_lengths["wire_" + self.name + "_0"] = width_dict["tgate_" + self.name + "_0"]
+#                 wire_layers["wire_" + self.name + "_0"] = 0
+#             if self.type == "default":
+#                 wire_lengths["wire_" + self.name] = width_dict[local_mux_key]/4 + width_dict["inv_" + self.name + "_2"]/4
+#                 wire_layers["wire_" + self.name] = 0
+#             else:
+#                 wire_lengths["wire_" + self.name] = width_dict["inv_" + self.name + "_1"]/4 + width_dict["inv_" + self.name + "_2"]/4
+#                 wire_layers["wire_" + self.name] = 0
             
 
-class _LUTInputNotDriver(_SizableCircuit):
-    """ LUT input not-driver. This is the complement driver. """
+# class _LUTInputNotDriver(_SizableCircuit):
+#     """ LUT input not-driver. This is the complement driver. """
 
-    def __init__(self, name, type, delay_weight, use_tgate):
-        self.name = "lut_" + name + "_driver_not"
-        # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
-        self.type = type
-        # Delay weight in a representative critical path
-        self.delay_weight = delay_weight
-        # use pass transistor or transmission gates
-        self.use_tgate = use_tgate
+#     def __init__(self, name, type, delay_weight, use_tgate):
+#         self.name = "lut_" + name + "_driver_not"
+#         # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
+#         self.type = type
+#         # Delay weight in a representative critical path
+#         self.delay_weight = delay_weight
+#         # use pass transistor or transmission gates
+#         self.use_tgate = use_tgate
    
     
-    def generate(self, subcircuit_filename, min_tran_width):
-        """ Generate not-driver SPICE netlist """
-        if not self.use_tgate :
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut_not_driver(subcircuit_filename, self.name)
-        else :
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut_not_driver(subcircuit_filename, self.name)
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         """ Generate not-driver SPICE netlist """
+#         if not self.use_tgate :
+#             self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut_not_driver(subcircuit_filename, self.name)
+#         else :
+#             self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut_not_driver(subcircuit_filename, self.name)
         
-        # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-        self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-        self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-        self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 2
-        self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 2
+#         # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#         self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
+#         self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
+#         self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 2
+#         self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 2
        
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
 
-    def generate_top(self):
-        """ Generate top-level SPICE file for LUT not driver """
+#     def generate_top(self):
+#         """ Generate top-level SPICE file for LUT not driver """
 
-        self.top_spice_path = top_level.generate_lut_driver_not_top(self.name, self.type)
+#         self.top_spice_path = top_level.generate_lut_driver_not_top(self.name, self.type)
         
     
-    def update_area(self, area_dict, width_dict):
-        """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
-            the area of everything. It is expected that area_dict will have all the information we need to calculate area.
-            We update area_dict and width_dict with calculations performed in this function. 
-            We also return the area of this not_driver."""
+#     def update_area(self, area_dict, width_dict):
+#         """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
+#             the area of everything. It is expected that area_dict will have all the information we need to calculate area.
+#             We update area_dict and width_dict with calculations performed in this function. 
+#             We also return the area of this not_driver."""
         
-        area = (area_dict["inv_" + self.name + "_1"] +
-                area_dict["inv_" + self.name + "_2"])
-        width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+#         area = (area_dict["inv_" + self.name + "_1"] +
+#                 area_dict["inv_" + self.name + "_2"])
+#         width = math.sqrt(area)
+#         area_dict[self.name] = area
+#         width_dict[self.name] = width
         
-        return area
+#         return area
     
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
-        # Update wire lengths
-        wire_lengths["wire_" + self.name] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_2"])/4
-        # Update wire layers
-        wire_layers["wire_" + self.name] = 0
+#         # Update wire lengths
+#         wire_lengths["wire_" + self.name] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_2"])/4
+#         # Update wire layers
+#         wire_layers["wire_" + self.name] = 0
     
 
-class _LUTInput(_CompoundCircuit):
-    """ LUT input. It contains a LUT input driver and a LUT input not driver (complement). 
-        The muxing on the LUT input is defined here """
+# class _LUTInput(_CompoundCircuit):
+#     """ LUT input. It contains a LUT input driver and a LUT input not driver (complement). 
+#         The muxing on the LUT input is defined here """
 
-    def __init__(self, name, Rsel, Rfb, delay_weight, use_tgate, use_fluts):
-        # Subcircuit name (should be driver letter like a, b, c...)
-        self.name = name
-        # The type is either 'default': a normal input or 'reg_fb': a register feedback input 
-        # In addition, the input can (optionally) drive the register input 'default_rsel' or do both 'reg_fb_rsel'
-        # Therefore, there are 4 different types, which are controlled by Rsel and Rfb
-        # The register select (Rsel) could only be one signal. While the feedback could be used with multiple signals
-        if name in Rfb:
-            if Rsel == name:
-                self.type = "reg_fb_rsel"
-            else:
-                self.type = "reg_fb"
-        else:
-            if Rsel == name:
-                self.type = "default_rsel"
-            else:
-                self.type = "default"
-        # Create LUT input driver
-        self.driver = _LUTInputDriver(name, self.type, delay_weight, use_tgate, use_fluts)
-        # Create LUT input not driver
-        self.not_driver = _LUTInputNotDriver(name, self.type, delay_weight, use_tgate)
+#     def __init__(self, name, Rsel, Rfb, delay_weight, use_tgate, use_fluts):
+#         # Subcircuit name (should be driver letter like a, b, c...)
+#         self.name = name
+#         # The type is either 'default': a normal input or 'reg_fb': a register feedback input 
+#         # In addition, the input can (optionally) drive the register input 'default_rsel' or do both 'reg_fb_rsel'
+#         # Therefore, there are 4 different types, which are controlled by Rsel and Rfb
+#         # The register select (Rsel) could only be one signal. While the feedback could be used with multiple signals
+#         if name in Rfb:
+#             if Rsel == name:
+#                 self.type = "reg_fb_rsel"
+#             else:
+#                 self.type = "reg_fb"
+#         else:
+#             if Rsel == name:
+#                 self.type = "default_rsel"
+#             else:
+#                 self.type = "default"
+#         # Create LUT input driver
+#         self.driver = _LUTInputDriver(name, self.type, delay_weight, use_tgate, use_fluts)
+#         # Create LUT input not driver
+#         self.not_driver = _LUTInputNotDriver(name, self.type, delay_weight, use_tgate)
         
-        # LUT input delays are the delays through the LUT for specific input (doesn't include input driver delay)
-        self.tfall = 1
-        self.trise = 1
-        self.delay = 1
-        self.delay_weight = delay_weight
+#         # LUT input delays are the delays through the LUT for specific input (doesn't include input driver delay)
+#         self.tfall = 1
+#         self.trise = 1
+#         self.delay = 1
+#         self.delay_weight = delay_weight
         
         
-    def generate(self, subcircuit_filename, min_tran_width):
-        """ Generate both driver and not-driver SPICE netlists. """
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         """ Generate both driver and not-driver SPICE netlists. """
         
-        print("Generating lut " + self.name + "-input driver (" + self.type + ")")
+#         print("Generating lut " + self.name + "-input driver (" + self.type + ")")
 
-        # Generate the driver
-        init_tran_sizes = self.driver.generate(subcircuit_filename, min_tran_width)
-        # Generate the not driver
-        init_tran_sizes.update(self.not_driver.generate(subcircuit_filename, min_tran_width))
+#         # Generate the driver
+#         init_tran_sizes = self.driver.generate(subcircuit_filename, min_tran_width)
+#         # Generate the not driver
+#         init_tran_sizes.update(self.not_driver.generate(subcircuit_filename, min_tran_width))
 
-        return init_tran_sizes
+#         return init_tran_sizes
   
             
-    def generate_top(self):
-        """ Generate top-level SPICE file for driver and not-driver. """
+#     def generate_top(self):
+#         """ Generate top-level SPICE file for driver and not-driver. """
         
-        print("Generating top-level lut " + self.name + "-input")
+#         print("Generating top-level lut " + self.name + "-input")
         
-        # Generate the driver top
-        self.driver.generate_top()
-        # Generate the not driver top
-        self.not_driver.generate_top()
+#         # Generate the driver top
+#         self.driver.generate_top()
+#         # Generate the not driver top
+#         self.not_driver.generate_top()
 
      
-    def update_area(self, area_dict, width_dict):
-        """ Update area. We update the area of the the driver and the not driver by calling area update functions
-            inside these objects. We also return the total area of this input driver."""        
+#     def update_area(self, area_dict, width_dict):
+#         """ Update area. We update the area of the the driver and the not driver by calling area update functions
+#             inside these objects. We also return the total area of this input driver."""        
         
-        # Calculate area of driver
-        driver_area = self.driver.update_area(area_dict, width_dict)
-        # Calculate area of not driver
-        not_driver_area = self.not_driver.update_area(area_dict, width_dict)
-        # Return the sum
-        return driver_area + not_driver_area
+#         # Calculate area of driver
+#         driver_area = self.driver.update_area(area_dict, width_dict)
+#         # Calculate area of not driver
+#         not_driver_area = self.not_driver.update_area(area_dict, width_dict)
+#         # Return the sum
+#         return driver_area + not_driver_area
     
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
-        """ Update wire lengths and wire layers for input driver and not_driver """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers):
+#         """ Update wire lengths and wire layers for input driver and not_driver """
         
-        # Update driver wires
-        self.driver.update_wires(width_dict, wire_lengths, wire_layers)
-        # Update not driver wires
-        self.not_driver.update_wires(width_dict, wire_lengths, wire_layers)
+#         # Update driver wires
+#         self.driver.update_wires(width_dict, wire_lengths, wire_layers)
+#         # Update not driver wires
+#         self.not_driver.update_wires(width_dict, wire_lengths, wire_layers)
         
         
-    def print_details(self, report_file):
-        """ Print LUT input driver details """
+#     def print_details(self, report_file):
+#         """ Print LUT input driver details """
         
-        utils.print_and_write(report_file, "  LUT input " + self.name + " type: " + self.type)
+#         utils.print_and_write(report_file, "  LUT input " + self.name + " type: " + self.type)
 
 
 
-class _LUTInputDriverLoad:
-    """ LUT input driver load. This load consists of a wire as well as the gates
-        of a particular level in the LUT. """
+# class _LUTInputDriverLoad:
+#     """ LUT input driver load. This load consists of a wire as well as the gates
+#         of a particular level in the LUT. """
 
-    def __init__(self, name, use_tgate, use_fluts):
-        self.name = name
-        self.use_tgate = use_tgate
-        self.use_fluts = use_fluts
+#     def __init__(self, name, use_tgate, use_fluts):
+#         self.name = name
+#         self.use_tgate = use_tgate
+#         self.use_fluts = use_fluts
     
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers, ratio):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers, ratio):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
 
-        # Update wire lengths
-        wire_lengths["wire_lut_" + self.name + "_driver_load"] = width_dict["lut"] * ratio
+#         # Update wire lengths
+#         wire_lengths["wire_lut_" + self.name + "_driver_load"] = width_dict["lut"] * ratio
         
-        # Update set wire layers
-        wire_layers["wire_lut_" + self.name + "_driver_load"] = 0
-        
-        
-    def generate(self, subcircuit_filename, K):
-        
-        print("Generating LUT " + self.name + "-input driver load")
-        
-        if not self.use_tgate :
-            # Call generation function based on input
-            if self.name == "a":
-                self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-            elif self.name == "b":
-                self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-            elif self.name == "c":
-                self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-            elif self.name == "d":
-                self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-            elif self.name == "e":
-                self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-            elif self.name == "f":
-                self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-        else :
-            # Call generation function based on input
-            if self.name == "a":
-                self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-            elif self.name == "b":
-                self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-            elif self.name == "c":
-                self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-            elif self.name == "d":
-                self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-            elif self.name == "e":
-                self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
-            elif self.name == "f":
-                self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#         # Update set wire layers
+#         wire_layers["wire_lut_" + self.name + "_driver_load"] = 0
         
         
-    def print_details(self):
-        print("LUT input driver load details.")
+#     def generate(self, subcircuit_filename, K):
+        
+#         print("Generating LUT " + self.name + "-input driver load")
+        
+#         if not self.use_tgate :
+#             # Call generation function based on input
+#             if self.name == "a":
+#                 self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#             elif self.name == "b":
+#                 self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#             elif self.name == "c":
+#                 self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#             elif self.name == "d":
+#                 self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#             elif self.name == "e":
+#                 self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#             elif self.name == "f":
+#                 self.wire_names = lut_subcircuits.generate_ptran_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#         else :
+#             # Call generation function based on input
+#             if self.name == "a":
+#                 self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#             elif self.name == "b":
+#                 self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#             elif self.name == "c":
+#                 self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#             elif self.name == "d":
+#                 self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#             elif self.name == "e":
+#                 self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+#             elif self.name == "f":
+#                 self.wire_names = lut_subcircuits.generate_tgate_lut_driver_load(subcircuit_filename, self.name, K, self.use_fluts)
+        
+        
+#     def print_details(self):
+#         print("LUT input driver load details.")
 
 
 
         
         
-class _LUT(_SizableCircuit):
-    """ Lookup table. """
+# class _LUT(_SizableCircuit):
+#     """ Lookup table. """
 
-    def __init__(self, K, Rsel, Rfb, use_tgate, use_finfet, use_fluts):
-        # Name of LUT 
-        self.name = "lut"
-        self.use_fluts = use_fluts
-        # Size of LUT
-        self.K = K
-        # Register feedback parameter
-        self.Rfb = Rfb
-        # Dictionary of input drivers (keys: "a", "b", etc...)
-        self.input_drivers = {}
-        # Dictionary of input driver loads
-        self.input_driver_loads = {}
-        # Delay weight in a representative critical path
-        self.delay_weight = DELAY_WEIGHT_LUT_A + DELAY_WEIGHT_LUT_B + DELAY_WEIGHT_LUT_C + DELAY_WEIGHT_LUT_D
-        if K >= 5:
-            self.delay_weight += DELAY_WEIGHT_LUT_E
-        if K >= 6:
-            self.delay_weight += DELAY_WEIGHT_LUT_F
+#     def __init__(self, K, Rsel, Rfb, use_tgate, use_finfet, use_fluts):
+#         # Name of LUT 
+#         self.name = "lut"
+#         self.use_fluts = use_fluts
+#         # Size of LUT
+#         self.K = K
+#         # Register feedback parameter
+#         self.Rfb = Rfb
+#         # Dictionary of input drivers (keys: "a", "b", etc...)
+#         self.input_drivers = {}
+#         # Dictionary of input driver loads
+#         self.input_driver_loads = {}
+#         # Delay weight in a representative critical path
+#         self.delay_weight = DELAY_WEIGHT_LUT_A + DELAY_WEIGHT_LUT_B + DELAY_WEIGHT_LUT_C + DELAY_WEIGHT_LUT_D
+#         if K >= 5:
+#             self.delay_weight += DELAY_WEIGHT_LUT_E
+#         if K >= 6:
+#             self.delay_weight += DELAY_WEIGHT_LUT_F
         
-        # Boolean to use transmission gates 
-        self.use_tgate = use_tgate
+#         # Boolean to use transmission gates 
+#         self.use_tgate = use_tgate
 
-        # Create a LUT input driver and load for each LUT input
+#         # Create a LUT input driver and load for each LUT input
 
-        tempK = self.K
-        if self.use_fluts:
-            tempK = self.K - 1
+#         tempK = self.K
+#         if self.use_fluts:
+#             tempK = self.K - 1
 
-        for i in range(tempK):
-            name = chr(i+97)
-            if name == "a":
-                delay_weight = DELAY_WEIGHT_LUT_A
-            elif name == "b":
-                delay_weight = DELAY_WEIGHT_LUT_B
-            elif name == "c":
-                delay_weight = DELAY_WEIGHT_LUT_C
-            elif name == "d":
-                delay_weight = DELAY_WEIGHT_LUT_D
-            elif name == "e":
-                delay_weight = DELAY_WEIGHT_LUT_E
-            elif name == "f":
-                delay_weight = DELAY_WEIGHT_LUT_F
-            else:
-                raise Exception("No delay weight definition for LUT input " + name)
-            self.input_drivers[name] = _LUTInput(name, Rsel, Rfb, delay_weight, use_tgate, use_fluts)
-            self.input_driver_loads[name] = _LUTInputDriverLoad(name, use_tgate, use_fluts)
+#         for i in range(tempK):
+#             name = chr(i+97)
+#             if name == "a":
+#                 delay_weight = DELAY_WEIGHT_LUT_A
+#             elif name == "b":
+#                 delay_weight = DELAY_WEIGHT_LUT_B
+#             elif name == "c":
+#                 delay_weight = DELAY_WEIGHT_LUT_C
+#             elif name == "d":
+#                 delay_weight = DELAY_WEIGHT_LUT_D
+#             elif name == "e":
+#                 delay_weight = DELAY_WEIGHT_LUT_E
+#             elif name == "f":
+#                 delay_weight = DELAY_WEIGHT_LUT_F
+#             else:
+#                 raise Exception("No delay weight definition for LUT input " + name)
+#             self.input_drivers[name] = _LUTInput(name, Rsel, Rfb, delay_weight, use_tgate, use_fluts)
+#             self.input_driver_loads[name] = _LUTInputDriverLoad(name, use_tgate, use_fluts)
 
-        if use_fluts:
-            if K == 5:
-                name = "e"
-                delay_weight = DELAY_WEIGHT_LUT_E
-            else:
-                name = "f"
-                delay_weight = DELAY_WEIGHT_LUT_F
-            self.input_drivers[name] = _LUTInput(name, Rsel, Rfb, delay_weight, use_tgate, use_fluts)
-            self.input_driver_loads[name] = _LUTInputDriverLoad(name, use_tgate, use_fluts)            
+#         if use_fluts:
+#             if K == 5:
+#                 name = "e"
+#                 delay_weight = DELAY_WEIGHT_LUT_E
+#             else:
+#                 name = "f"
+#                 delay_weight = DELAY_WEIGHT_LUT_F
+#             self.input_drivers[name] = _LUTInput(name, Rsel, Rfb, delay_weight, use_tgate, use_fluts)
+#             self.input_driver_loads[name] = _LUTInputDriverLoad(name, use_tgate, use_fluts)            
     
-        self.use_finfet = use_finfet
+#         self.use_finfet = use_finfet
         
     
-    def generate(self, subcircuit_filename, min_tran_width):
-        """ Generate LUT SPICE netlist based on LUT size. """
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         """ Generate LUT SPICE netlist based on LUT size. """
         
-        # Generate LUT differently based on K
-        tempK = self.K
+#         # Generate LUT differently based on K
+#         tempK = self.K
 
-        # *TODO: this - 1 should depend on the level of fracturability
-        #        if the level is one a 6 lut will be two 5 luts if its
-        #        a 6 lut will be four 4 input luts
-        if self.use_fluts:
-            tempK = self.K - 1
+#         # *TODO: this - 1 should depend on the level of fracturability
+#         #        if the level is one a 6 lut will be two 5 luts if its
+#         #        a 6 lut will be four 4 input luts
+#         if self.use_fluts:
+#             tempK = self.K - 1
 
-        if tempK == 6:
-            init_tran_sizes = self._generate_6lut(subcircuit_filename, min_tran_width, self.use_tgate, self.use_finfet, self.use_fluts)
-        elif tempK == 5:
-            init_tran_sizes = self._generate_5lut(subcircuit_filename, min_tran_width, self.use_tgate, self.use_finfet, self.use_fluts)
-        elif tempK == 4:
-            init_tran_sizes = self._generate_4lut(subcircuit_filename, min_tran_width, self.use_tgate, self.use_finfet, self.use_fluts)
+#         if tempK == 6:
+#             init_tran_sizes = self._generate_6lut(subcircuit_filename, min_tran_width, self.use_tgate, self.use_finfet, self.use_fluts)
+#         elif tempK == 5:
+#             init_tran_sizes = self._generate_5lut(subcircuit_filename, min_tran_width, self.use_tgate, self.use_finfet, self.use_fluts)
+#         elif tempK == 4:
+#             init_tran_sizes = self._generate_4lut(subcircuit_filename, min_tran_width, self.use_tgate, self.use_finfet, self.use_fluts)
 
   
-        return init_tran_sizes
+#         return init_tran_sizes
 
 
-    def generate_top(self):
-        print("Generating top-level lut")
-        tempK = self.K
-        if self.use_fluts:
-            tempK = self.K - 1
+#     def generate_top(self):
+#         print("Generating top-level lut")
+#         tempK = self.K
+#         if self.use_fluts:
+#             tempK = self.K - 1
 
-        if tempK == 6:
-            self.top_spice_path = top_level.generate_lut6_top(self.name, self.use_tgate)
-        elif tempK == 5:
-            self.top_spice_path = top_level.generate_lut5_top(self.name, self.use_tgate)
-        elif tempK == 4:
-            self.top_spice_path = top_level.generate_lut4_top(self.name, self.use_tgate)
+#         if tempK == 6:
+#             self.top_spice_path = top_level.generate_lut6_top(self.name, self.use_tgate)
+#         elif tempK == 5:
+#             self.top_spice_path = top_level.generate_lut5_top(self.name, self.use_tgate)
+#         elif tempK == 4:
+#             self.top_spice_path = top_level.generate_lut4_top(self.name, self.use_tgate)
             
-        # Generate top-level driver files
-        for input_driver_name, input_driver in self.input_drivers.items():
-            input_driver.generate_top()
+#         # Generate top-level driver files
+#         for input_driver_name, input_driver in self.input_drivers.items():
+#             input_driver.generate_top()
    
    
-    def update_area(self, area_dict, width_dict):
-        """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
-            the area of everything. It is expected that area_dict will have all the information we need to calculate area.
-            We update area_dict and width_dict with calculations performed in this function. 
-            We update the area of the LUT as well as the area of the LUT input drivers. """        
+#     def update_area(self, area_dict, width_dict):
+#         """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
+#             the area of everything. It is expected that area_dict will have all the information we need to calculate area.
+#             We update area_dict and width_dict with calculations performed in this function. 
+#             We update the area of the LUT as well as the area of the LUT input drivers. """        
 
-        tempK = self.K
-        if self.use_fluts:
-            tempK = self.K - 1
+#         tempK = self.K
+#         if self.use_fluts:
+#             tempK = self.K - 1
 
-        area = 0.0
+#         area = 0.0
         
-        if not self.use_tgate :
-            # Calculate area (differs with different values of K)
-            if tempK == 6:    
-                area += (64*area_dict["inv_lut_0sram_driver_2"] + 
-                        64*area_dict["ptran_lut_L1"] + 
-                        32*area_dict["ptran_lut_L2"] + 
-                        16*area_dict["ptran_lut_L3"] +      
-                        8*area_dict["rest_lut_int_buffer"] + 
-                        8*area_dict["inv_lut_int_buffer_1"] + 
-                        8*area_dict["inv_lut_int_buffer_2"] + 
-                        8*area_dict["ptran_lut_L4"] + 
-                        4*area_dict["ptran_lut_L5"] + 
-                        2*area_dict["ptran_lut_L6"] + 
-                        area_dict["rest_lut_out_buffer"] + 
-                        area_dict["inv_lut_out_buffer_1"] + 
-                        area_dict["inv_lut_out_buffer_2"] +
-                        64*area_dict["sram"])
-            elif tempK == 5:
-                area += (32*area_dict["inv_lut_0sram_driver_2"] + 
-                        32*area_dict["ptran_lut_L1"] + 
-                        16*area_dict["ptran_lut_L2"] + 
-                        8*area_dict["ptran_lut_L3"] + 
-                        4*area_dict["rest_lut_int_buffer"] + 
-                        4*area_dict["inv_lut_int_buffer_1"] + 
-                        4*area_dict["inv_lut_int_buffer_2"] + 
-                        4*area_dict["ptran_lut_L4"] + 
-                        2*area_dict["ptran_lut_L5"] +  
-                        area_dict["rest_lut_out_buffer"] + 
-                        area_dict["inv_lut_out_buffer_1"] + 
-                        area_dict["inv_lut_out_buffer_2"] +
-                        32*area_dict["sram"])
-            elif tempK == 4:
-                area += (16*area_dict["inv_lut_0sram_driver_2"] + 
-                        16*area_dict["ptran_lut_L1"] + 
-                        8*area_dict["ptran_lut_L2"] + 
-                        4*area_dict["rest_lut_int_buffer"] + 
-                        4*area_dict["inv_lut_int_buffer_1"] + 
-                        4*area_dict["inv_lut_int_buffer_2"] +
-                        4*area_dict["ptran_lut_L3"] + 
-                        2*area_dict["ptran_lut_L4"] +   
-                        area_dict["rest_lut_out_buffer"] + 
-                        area_dict["inv_lut_out_buffer_1"] + 
-                        area_dict["inv_lut_out_buffer_2"] +
-                        16*area_dict["sram"])
-        else :
-            # Calculate area (differs with different values of K)
-            if tempK == 6:    
-                area += (64*area_dict["inv_lut_0sram_driver_2"] + 
-                        64*area_dict["tgate_lut_L1"] + 
-                        32*area_dict["tgate_lut_L2"] + 
-                        16*area_dict["tgate_lut_L3"] + 
-                        8*area_dict["inv_lut_int_buffer_1"] + 
-                        8*area_dict["inv_lut_int_buffer_2"] + 
-                        8*area_dict["tgate_lut_L4"] + 
-                        4*area_dict["tgate_lut_L5"] + 
-                        2*area_dict["tgate_lut_L6"] + 
-                        area_dict["inv_lut_out_buffer_1"] + 
-                        area_dict["inv_lut_out_buffer_2"] +
-                        64*area_dict["sram"])
-            elif tempK == 5:
-                area += (32*area_dict["inv_lut_0sram_driver_2"] + 
-                        32*area_dict["tgate_lut_L1"] + 
-                        16*area_dict["tgate_lut_L2"] + 
-                        8*area_dict["tgate_lut_L3"] + 
-                        4*area_dict["inv_lut_int_buffer_1"] + 
-                        4*area_dict["inv_lut_int_buffer_2"] + 
-                        4*area_dict["tgate_lut_L4"] + 
-                        2*area_dict["tgate_lut_L5"] +  
-                        area_dict["inv_lut_out_buffer_1"] + 
-                        area_dict["inv_lut_out_buffer_2"] +
-                        32*area_dict["sram"])
-            elif tempK == 4:
-                area += (16*area_dict["inv_lut_0sram_driver_2"] + 
-                        16*area_dict["tgate_lut_L1"] + 
-                        8*area_dict["tgate_lut_L2"] + 
-                        4*area_dict["inv_lut_int_buffer_1"] + 
-                        4*area_dict["inv_lut_int_buffer_2"] +
-                        4*area_dict["tgate_lut_L3"] + 
-                        2*area_dict["tgate_lut_L4"] +   
-                        area_dict["inv_lut_out_buffer_1"] + 
-                        area_dict["inv_lut_out_buffer_2"] +
-                        16*area_dict["sram"])
+#         if not self.use_tgate :
+#             # Calculate area (differs with different values of K)
+#             if tempK == 6:    
+#                 area += (64*area_dict["inv_lut_0sram_driver_2"] + 
+#                         64*area_dict["ptran_lut_L1"] + 
+#                         32*area_dict["ptran_lut_L2"] + 
+#                         16*area_dict["ptran_lut_L3"] +      
+#                         8*area_dict["rest_lut_int_buffer"] + 
+#                         8*area_dict["inv_lut_int_buffer_1"] + 
+#                         8*area_dict["inv_lut_int_buffer_2"] + 
+#                         8*area_dict["ptran_lut_L4"] + 
+#                         4*area_dict["ptran_lut_L5"] + 
+#                         2*area_dict["ptran_lut_L6"] + 
+#                         area_dict["rest_lut_out_buffer"] + 
+#                         area_dict["inv_lut_out_buffer_1"] + 
+#                         area_dict["inv_lut_out_buffer_2"] +
+#                         64*area_dict["sram"])
+#             elif tempK == 5:
+#                 area += (32*area_dict["inv_lut_0sram_driver_2"] + 
+#                         32*area_dict["ptran_lut_L1"] + 
+#                         16*area_dict["ptran_lut_L2"] + 
+#                         8*area_dict["ptran_lut_L3"] + 
+#                         4*area_dict["rest_lut_int_buffer"] + 
+#                         4*area_dict["inv_lut_int_buffer_1"] + 
+#                         4*area_dict["inv_lut_int_buffer_2"] + 
+#                         4*area_dict["ptran_lut_L4"] + 
+#                         2*area_dict["ptran_lut_L5"] +  
+#                         area_dict["rest_lut_out_buffer"] + 
+#                         area_dict["inv_lut_out_buffer_1"] + 
+#                         area_dict["inv_lut_out_buffer_2"] +
+#                         32*area_dict["sram"])
+#             elif tempK == 4:
+#                 area += (16*area_dict["inv_lut_0sram_driver_2"] + 
+#                         16*area_dict["ptran_lut_L1"] + 
+#                         8*area_dict["ptran_lut_L2"] + 
+#                         4*area_dict["rest_lut_int_buffer"] + 
+#                         4*area_dict["inv_lut_int_buffer_1"] + 
+#                         4*area_dict["inv_lut_int_buffer_2"] +
+#                         4*area_dict["ptran_lut_L3"] + 
+#                         2*area_dict["ptran_lut_L4"] +   
+#                         area_dict["rest_lut_out_buffer"] + 
+#                         area_dict["inv_lut_out_buffer_1"] + 
+#                         area_dict["inv_lut_out_buffer_2"] +
+#                         16*area_dict["sram"])
+#         else :
+#             # Calculate area (differs with different values of K)
+#             if tempK == 6:    
+#                 area += (64*area_dict["inv_lut_0sram_driver_2"] + 
+#                         64*area_dict["tgate_lut_L1"] + 
+#                         32*area_dict["tgate_lut_L2"] + 
+#                         16*area_dict["tgate_lut_L3"] + 
+#                         8*area_dict["inv_lut_int_buffer_1"] + 
+#                         8*area_dict["inv_lut_int_buffer_2"] + 
+#                         8*area_dict["tgate_lut_L4"] + 
+#                         4*area_dict["tgate_lut_L5"] + 
+#                         2*area_dict["tgate_lut_L6"] + 
+#                         area_dict["inv_lut_out_buffer_1"] + 
+#                         area_dict["inv_lut_out_buffer_2"] +
+#                         64*area_dict["sram"])
+#             elif tempK == 5:
+#                 area += (32*area_dict["inv_lut_0sram_driver_2"] + 
+#                         32*area_dict["tgate_lut_L1"] + 
+#                         16*area_dict["tgate_lut_L2"] + 
+#                         8*area_dict["tgate_lut_L3"] + 
+#                         4*area_dict["inv_lut_int_buffer_1"] + 
+#                         4*area_dict["inv_lut_int_buffer_2"] + 
+#                         4*area_dict["tgate_lut_L4"] + 
+#                         2*area_dict["tgate_lut_L5"] +  
+#                         area_dict["inv_lut_out_buffer_1"] + 
+#                         area_dict["inv_lut_out_buffer_2"] +
+#                         32*area_dict["sram"])
+#             elif tempK == 4:
+#                 area += (16*area_dict["inv_lut_0sram_driver_2"] + 
+#                         16*area_dict["tgate_lut_L1"] + 
+#                         8*area_dict["tgate_lut_L2"] + 
+#                         4*area_dict["inv_lut_int_buffer_1"] + 
+#                         4*area_dict["inv_lut_int_buffer_2"] +
+#                         4*area_dict["tgate_lut_L3"] + 
+#                         2*area_dict["tgate_lut_L4"] +   
+#                         area_dict["inv_lut_out_buffer_1"] + 
+#                         area_dict["inv_lut_out_buffer_2"] +
+#                         16*area_dict["sram"])
         
 
-        #TODO: level of fracturablility will affect this
-        if self.use_fluts:
-            area = 2*area
-            area = area + area_dict["flut_mux"]
+#         #TODO: level of fracturablility will affect this
+#         if self.use_fluts:
+#             area = 2*area
+#             area = area + area_dict["flut_mux"]
 
-        width = math.sqrt(area)
-        area_dict["lut"] = area
-        width_dict["lut"] = width
+#         width = math.sqrt(area)
+#         area_dict["lut"] = area
+#         width_dict["lut"] = width
         
-        # Calculate LUT driver areas
-        total_lut_area = 0.0
-        for driver_name, input_driver in self.input_drivers.items():
-            driver_area = input_driver.update_area(area_dict, width_dict)
-            total_lut_area = total_lut_area + driver_area
+#         # Calculate LUT driver areas
+#         total_lut_area = 0.0
+#         for driver_name, input_driver in self.input_drivers.items():
+#             driver_area = input_driver.update_area(area_dict, width_dict)
+#             total_lut_area = total_lut_area + driver_area
        
-        # Now we calculate total LUT area
-        total_lut_area = total_lut_area + area_dict["lut"]
+#         # Now we calculate total LUT area
+#         total_lut_area = total_lut_area + area_dict["lut"]
 
-        area_dict["lut_and_drivers"] = total_lut_area
-        width_dict["lut_and_drivers"] = math.sqrt(total_lut_area)
+#         area_dict["lut_and_drivers"] = total_lut_area
+#         width_dict["lut_and_drivers"] = math.sqrt(total_lut_area)
         
-        return total_lut_area
+#         return total_lut_area
     
 
-    def update_wires(self, width_dict, wire_lengths, wire_layers, lut_ratio):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers, lut_ratio):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
 
-        if not self.use_tgate :
-            if self.K == 6:        
-                # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["ptran_lut_L1"])/4
-                wire_lengths["wire_lut_L1"] = width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_L2"] = 2*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_L3"] = 4*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
-                wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["ptran_lut_L4"])/4
-                wire_lengths["wire_lut_L4"] = 8*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_L5"] = 16*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_L6"] = 32*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
+#         if not self.use_tgate :
+#             if self.K == 6:        
+#                 # Update wire lengths
+#                 wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
+#                 wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["ptran_lut_L1"])/4
+#                 wire_lengths["wire_lut_L1"] = width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_L2"] = 2*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_L3"] = 4*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
+#                 wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["ptran_lut_L4"])/4
+#                 wire_lengths["wire_lut_L4"] = 8*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_L5"] = 16*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_L6"] = 32*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
-                # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_L5"] = 0
-                wire_layers["wire_lut_L6"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+#                 # Update wire layers
+#                 wire_layers["wire_lut_sram_driver"] = 0
+#                 wire_layers["wire_lut_sram_driver_out"] = 0
+#                 wire_layers["wire_lut_L1"] = 0
+#                 wire_layers["wire_lut_L2"] = 0
+#                 wire_layers["wire_lut_L3"] = 0
+#                 wire_layers["wire_lut_int_buffer"] = 0
+#                 wire_layers["wire_lut_int_buffer_out"] = 0
+#                 wire_layers["wire_lut_L4"] = 0
+#                 wire_layers["wire_lut_L5"] = 0
+#                 wire_layers["wire_lut_L6"] = 0
+#                 wire_layers["wire_lut_out_buffer"] = 0
               
-            elif self.K == 5:
-                # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["ptran_lut_L1"])/4
-                wire_lengths["wire_lut_L1"] = width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_L2"] = 2*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_L3"] = 4*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
-                wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["ptran_lut_L4"])/4
-                wire_lengths["wire_lut_L4"] = 8*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_L5"] = 16*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
+#             elif self.K == 5:
+#                 # Update wire lengths
+#                 wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
+#                 wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["ptran_lut_L1"])/4
+#                 wire_lengths["wire_lut_L1"] = width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_L2"] = 2*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_L3"] = 4*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
+#                 wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["ptran_lut_L4"])/4
+#                 wire_lengths["wire_lut_L4"] = 8*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_L5"] = 16*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
-                # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_L5"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+#                 # Update wire layers
+#                 wire_layers["wire_lut_sram_driver"] = 0
+#                 wire_layers["wire_lut_sram_driver_out"] = 0
+#                 wire_layers["wire_lut_L1"] = 0
+#                 wire_layers["wire_lut_L2"] = 0
+#                 wire_layers["wire_lut_L3"] = 0
+#                 wire_layers["wire_lut_int_buffer"] = 0
+#                 wire_layers["wire_lut_int_buffer_out"] = 0
+#                 wire_layers["wire_lut_L4"] = 0
+#                 wire_layers["wire_lut_L5"] = 0
+#                 wire_layers["wire_lut_out_buffer"] = 0
                 
-            elif self.K == 4:
-                # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["ptran_lut_L1"])/4
-                wire_lengths["wire_lut_L1"] = width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_L2"] = 2*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
-                wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["ptran_lut_L4"])/4
-                wire_lengths["wire_lut_L3"] = 4*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_L4"] = 8*width_dict["ptran_lut_L1"]
-                wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
+#             elif self.K == 4:
+#                 # Update wire lengths
+#                 wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
+#                 wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["ptran_lut_L1"])/4
+#                 wire_lengths["wire_lut_L1"] = width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_L2"] = 2*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
+#                 wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["ptran_lut_L4"])/4
+#                 wire_lengths["wire_lut_L3"] = 4*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_L4"] = 8*width_dict["ptran_lut_L1"]
+#                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
-                # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+#                 # Update wire layers
+#                 wire_layers["wire_lut_sram_driver"] = 0
+#                 wire_layers["wire_lut_sram_driver_out"] = 0
+#                 wire_layers["wire_lut_L1"] = 0
+#                 wire_layers["wire_lut_L2"] = 0
+#                 wire_layers["wire_lut_int_buffer"] = 0
+#                 wire_layers["wire_lut_int_buffer_out"] = 0
+#                 wire_layers["wire_lut_L3"] = 0
+#                 wire_layers["wire_lut_L4"] = 0
+#                 wire_layers["wire_lut_out_buffer"] = 0
 
-        else :
-            if self.K == 6:        
-                # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["tgate_lut_L1"])/4
-                wire_lengths["wire_lut_L1"] = width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_L2"] = 2*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_L3"] = 4*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
-                wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["tgate_lut_L4"])/4
-                wire_lengths["wire_lut_L4"] = 8*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_L5"] = 16*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_L6"] = 32*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
+#         else :
+#             if self.K == 6:        
+#                 # Update wire lengths
+#                 wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
+#                 wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["tgate_lut_L1"])/4
+#                 wire_lengths["wire_lut_L1"] = width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_L2"] = 2*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_L3"] = 4*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
+#                 wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["tgate_lut_L4"])/4
+#                 wire_lengths["wire_lut_L4"] = 8*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_L5"] = 16*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_L6"] = 32*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
-                # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_L5"] = 0
-                wire_layers["wire_lut_L6"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+#                 # Update wire layers
+#                 wire_layers["wire_lut_sram_driver"] = 0
+#                 wire_layers["wire_lut_sram_driver_out"] = 0
+#                 wire_layers["wire_lut_L1"] = 0
+#                 wire_layers["wire_lut_L2"] = 0
+#                 wire_layers["wire_lut_L3"] = 0
+#                 wire_layers["wire_lut_int_buffer"] = 0
+#                 wire_layers["wire_lut_int_buffer_out"] = 0
+#                 wire_layers["wire_lut_L4"] = 0
+#                 wire_layers["wire_lut_L5"] = 0
+#                 wire_layers["wire_lut_L6"] = 0
+#                 wire_layers["wire_lut_out_buffer"] = 0
               
-            elif self.K == 5:
-                # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["tgate_lut_L1"])/4
-                wire_lengths["wire_lut_L1"] = width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_L2"] = 2*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_L3"] = 4*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
-                wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["tgate_lut_L4"])/4
-                wire_lengths["wire_lut_L4"] = 8*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_L5"] = 16*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
+#             elif self.K == 5:
+#                 # Update wire lengths
+#                 wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
+#                 wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["tgate_lut_L1"])/4
+#                 wire_lengths["wire_lut_L1"] = width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_L2"] = 2*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_L3"] = 4*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
+#                 wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["tgate_lut_L4"])/4
+#                 wire_lengths["wire_lut_L4"] = 8*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_L5"] = 16*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
-                # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_L5"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+#                 # Update wire layers
+#                 wire_layers["wire_lut_sram_driver"] = 0
+#                 wire_layers["wire_lut_sram_driver_out"] = 0
+#                 wire_layers["wire_lut_L1"] = 0
+#                 wire_layers["wire_lut_L2"] = 0
+#                 wire_layers["wire_lut_L3"] = 0
+#                 wire_layers["wire_lut_int_buffer"] = 0
+#                 wire_layers["wire_lut_int_buffer_out"] = 0
+#                 wire_layers["wire_lut_L4"] = 0
+#                 wire_layers["wire_lut_L5"] = 0
+#                 wire_layers["wire_lut_out_buffer"] = 0
                 
-            elif self.K == 4:
-                # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["tgate_lut_L1"])/4
-                wire_lengths["wire_lut_L1"] = width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_L2"] = 2*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
-                wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["tgate_lut_L4"])/4
-                wire_lengths["wire_lut_L3"] = 4*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_L4"] = 8*width_dict["tgate_lut_L1"]
-                wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
+#             elif self.K == 4:
+#                 # Update wire lengths
+#                 wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
+#                 wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["tgate_lut_L1"])/4
+#                 wire_lengths["wire_lut_L1"] = width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_L2"] = 2*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
+#                 wire_lengths["wire_lut_int_buffer_out"] = (width_dict["inv_lut_int_buffer_2"] + width_dict["tgate_lut_L4"])/4
+#                 wire_lengths["wire_lut_L3"] = 4*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_L4"] = 8*width_dict["tgate_lut_L1"]
+#                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
-                # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+#                 # Update wire layers
+#                 wire_layers["wire_lut_sram_driver"] = 0
+#                 wire_layers["wire_lut_sram_driver_out"] = 0
+#                 wire_layers["wire_lut_L1"] = 0
+#                 wire_layers["wire_lut_L2"] = 0
+#                 wire_layers["wire_lut_int_buffer"] = 0
+#                 wire_layers["wire_lut_int_buffer_out"] = 0
+#                 wire_layers["wire_lut_L3"] = 0
+#                 wire_layers["wire_lut_L4"] = 0
+#                 wire_layers["wire_lut_out_buffer"] = 0
           
-        # Update input driver wires
-        for driver_name, input_driver in self.input_drivers.items():
-            input_driver.update_wires(width_dict, wire_lengths, wire_layers) 
+#         # Update input driver wires
+#         for driver_name, input_driver in self.input_drivers.items():
+#             input_driver.update_wires(width_dict, wire_lengths, wire_layers) 
             
-        # Update input driver load wires
-        for driver_load_name, input_driver_load in self.input_driver_loads.items():
-            input_driver_load.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
+#         # Update input driver load wires
+#         for driver_load_name, input_driver_load in self.input_driver_loads.items():
+#             input_driver_load.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
     
         
-    def print_details(self, report_file):
-        """ Print LUT details """
+#     def print_details(self, report_file):
+#         """ Print LUT details """
     
-        utils.print_and_write(report_file, "  LUT DETAILS:")
-        utils.print_and_write(report_file, "  Style: Fully encoded MUX tree")
-        utils.print_and_write(report_file, "  Size: " + str(self.K) + "-LUT")
-        utils.print_and_write(report_file, "  Internal buffering: 2-stage buffer betweens levels 3 and 4")
-        utils.print_and_write(report_file, "  Isolation inverters between SRAM and LUT inputs")
-        utils.print_and_write(report_file, "")
-        utils.print_and_write(report_file, "  LUT INPUT DRIVER DETAILS:")
-        for driver_name, input_driver in self.input_drivers.items():
-            input_driver.print_details(report_file)
-        utils.print_and_write(report_file,"")
+#         utils.print_and_write(report_file, "  LUT DETAILS:")
+#         utils.print_and_write(report_file, "  Style: Fully encoded MUX tree")
+#         utils.print_and_write(report_file, "  Size: " + str(self.K) + "-LUT")
+#         utils.print_and_write(report_file, "  Internal buffering: 2-stage buffer betweens levels 3 and 4")
+#         utils.print_and_write(report_file, "  Isolation inverters between SRAM and LUT inputs")
+#         utils.print_and_write(report_file, "")
+#         utils.print_and_write(report_file, "  LUT INPUT DRIVER DETAILS:")
+#         for driver_name, input_driver in self.input_drivers.items():
+#             input_driver.print_details(report_file)
+#         utils.print_and_write(report_file,"")
         
     
-    def _generate_6lut(self, subcircuit_filename, min_tran_width, use_tgate, use_finfet, use_fluts):
-        """ This function created the lut subcircuit and all the drivers and driver not subcircuits """
-        print("Generating 6-LUT")
+#     def _generate_6lut(self, subcircuit_filename, min_tran_width, use_tgate, use_finfet, use_fluts):
+#         """ This function created the lut subcircuit and all the drivers and driver not subcircuits """
+#         print("Generating 6-LUT")
 
-        # COFFE doesn't support 7-input LUTs check_arch_params in utils.py will handle this
-        # we currently don't support 7-input LUTs that are fracturable, that would require more code changes but can be done with reasonable effort.
-        # assert use_fluts == False
+#         # COFFE doesn't support 7-input LUTs check_arch_params in utils.py will handle this
+#         # we currently don't support 7-input LUTs that are fracturable, that would require more code changes but can be done with reasonable effort.
+#         # assert use_fluts == False
         
-        # Call the generation function
-        if not use_tgate :
-            # use pass transistors
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut6(subcircuit_filename, min_tran_width, use_finfet)
+#         # Call the generation function
+#         if not use_tgate :
+#             # use pass transistors
+#             self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut6(subcircuit_filename, min_tran_width, use_finfet)
 
-            # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
-            self.initial_transistor_sizes["ptran_lut_L1_nmos"] = 2
-            self.initial_transistor_sizes["ptran_lut_L2_nmos"] = 2
-            self.initial_transistor_sizes["ptran_lut_L3_nmos"] = 2
-            self.initial_transistor_sizes["rest_lut_int_buffer_pmos"] = 1
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
-            self.initial_transistor_sizes["ptran_lut_L4_nmos"] = 3
-            self.initial_transistor_sizes["ptran_lut_L5_nmos"] = 3
-            self.initial_transistor_sizes["ptran_lut_L6_nmos"] = 3
-            self.initial_transistor_sizes["rest_lut_out_buffer_pmos"] = 1
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
+#             # Give initial transistor sizes
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+#             self.initial_transistor_sizes["ptran_lut_L1_nmos"] = 2
+#             self.initial_transistor_sizes["ptran_lut_L2_nmos"] = 2
+#             self.initial_transistor_sizes["ptran_lut_L3_nmos"] = 2
+#             self.initial_transistor_sizes["rest_lut_int_buffer_pmos"] = 1
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
+#             self.initial_transistor_sizes["ptran_lut_L4_nmos"] = 3
+#             self.initial_transistor_sizes["ptran_lut_L5_nmos"] = 3
+#             self.initial_transistor_sizes["ptran_lut_L6_nmos"] = 3
+#             self.initial_transistor_sizes["rest_lut_out_buffer_pmos"] = 1
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
 
-        else :
-            # use transmission gates
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut6(subcircuit_filename, min_tran_width, use_finfet)
+#         else :
+#             # use transmission gates
+#             self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut6(subcircuit_filename, min_tran_width, use_finfet)
 
-            # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
-            self.initial_transistor_sizes["tgate_lut_L1_nmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L1_pmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L2_nmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L2_pmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L3_nmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L3_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
-            self.initial_transistor_sizes["tgate_lut_L4_nmos"] = 3
-            self.initial_transistor_sizes["tgate_lut_L4_pmos"] = 3
-            self.initial_transistor_sizes["tgate_lut_L5_nmos"] = 3
-            self.initial_transistor_sizes["tgate_lut_L5_pmos"] = 3
-            self.initial_transistor_sizes["tgate_lut_L6_nmos"] = 3
-            self.initial_transistor_sizes["tgate_lut_L6_pmos"] = 3
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
+#             # Give initial transistor sizes
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+#             self.initial_transistor_sizes["tgate_lut_L1_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L1_pmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L2_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L2_pmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L3_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L3_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
+#             self.initial_transistor_sizes["tgate_lut_L4_nmos"] = 3
+#             self.initial_transistor_sizes["tgate_lut_L4_pmos"] = 3
+#             self.initial_transistor_sizes["tgate_lut_L5_nmos"] = 3
+#             self.initial_transistor_sizes["tgate_lut_L5_pmos"] = 3
+#             self.initial_transistor_sizes["tgate_lut_L6_nmos"] = 3
+#             self.initial_transistor_sizes["tgate_lut_L6_pmos"] = 3
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
         
         
-        # Generate input drivers (with register feedback if input is in Rfb)
-        self.input_drivers["a"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["b"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["c"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["d"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["e"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["f"].generate(subcircuit_filename, min_tran_width)
+#         # Generate input drivers (with register feedback if input is in Rfb)
+#         self.input_drivers["a"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["b"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["c"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["d"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["e"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["f"].generate(subcircuit_filename, min_tran_width)
         
-        # Generate input driver loads
-        self.input_driver_loads["a"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["b"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["c"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["d"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["e"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["f"].generate(subcircuit_filename, self.K)
+#         # Generate input driver loads
+#         self.input_driver_loads["a"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["b"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["c"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["d"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["e"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["f"].generate(subcircuit_filename, self.K)
        
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
         
-    def _generate_5lut(self, subcircuit_filename, min_tran_width, use_tgate, use_finfet, use_fluts):
-        """ This function created the lut subcircuit and all the drivers and driver not subcircuits """
-        print("Generating 5-LUT")
+#     def _generate_5lut(self, subcircuit_filename, min_tran_width, use_tgate, use_finfet, use_fluts):
+#         """ This function created the lut subcircuit and all the drivers and driver not subcircuits """
+#         print("Generating 5-LUT")
         
-        # Call the generation function
-        if not use_tgate :
-            # use pass transistor
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut5(subcircuit_filename, min_tran_width, use_finfet)
-            # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
-            self.initial_transistor_sizes["ptran_lut_L1_nmos"] = 2
-            self.initial_transistor_sizes["ptran_lut_L2_nmos"] = 2
-            self.initial_transistor_sizes["ptran_lut_L3_nmos"] = 2
-            self.initial_transistor_sizes["rest_lut_int_buffer_pmos"] = 1
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
-            self.initial_transistor_sizes["ptran_lut_L4_nmos"] = 3
-            self.initial_transistor_sizes["ptran_lut_L5_nmos"] = 3
-            self.initial_transistor_sizes["rest_lut_out_buffer_pmos"] = 1
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
-        else :
-            # use transmission gates
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut5(subcircuit_filename, min_tran_width, use_finfet)
-            # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
-            self.initial_transistor_sizes["tgate_lut_L1_nmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L1_pmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L2_nmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L2_pmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L3_nmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L3_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
-            self.initial_transistor_sizes["tgate_lut_L4_nmos"] = 3
-            self.initial_transistor_sizes["tgate_lut_L4_pmos"] = 3
-            self.initial_transistor_sizes["tgate_lut_L5_nmos"] = 3
-            self.initial_transistor_sizes["tgate_lut_L5_pmos"] = 3
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
+#         # Call the generation function
+#         if not use_tgate :
+#             # use pass transistor
+#             self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut5(subcircuit_filename, min_tran_width, use_finfet)
+#             # Give initial transistor sizes
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+#             self.initial_transistor_sizes["ptran_lut_L1_nmos"] = 2
+#             self.initial_transistor_sizes["ptran_lut_L2_nmos"] = 2
+#             self.initial_transistor_sizes["ptran_lut_L3_nmos"] = 2
+#             self.initial_transistor_sizes["rest_lut_int_buffer_pmos"] = 1
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
+#             self.initial_transistor_sizes["ptran_lut_L4_nmos"] = 3
+#             self.initial_transistor_sizes["ptran_lut_L5_nmos"] = 3
+#             self.initial_transistor_sizes["rest_lut_out_buffer_pmos"] = 1
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
+#         else :
+#             # use transmission gates
+#             self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut5(subcircuit_filename, min_tran_width, use_finfet)
+#             # Give initial transistor sizes
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+#             self.initial_transistor_sizes["tgate_lut_L1_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L1_pmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L2_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L2_pmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L3_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L3_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
+#             self.initial_transistor_sizes["tgate_lut_L4_nmos"] = 3
+#             self.initial_transistor_sizes["tgate_lut_L4_pmos"] = 3
+#             self.initial_transistor_sizes["tgate_lut_L5_nmos"] = 3
+#             self.initial_transistor_sizes["tgate_lut_L5_pmos"] = 3
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
 
        
-        # Generate input drivers (with register feedback if input is in Rfb)
-        self.input_drivers["a"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["b"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["c"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["d"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["e"].generate(subcircuit_filename, min_tran_width)
+#         # Generate input drivers (with register feedback if input is in Rfb)
+#         self.input_drivers["a"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["b"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["c"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["d"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["e"].generate(subcircuit_filename, min_tran_width)
 
-        if use_fluts:
-            self.input_drivers["f"].generate(subcircuit_filename, min_tran_width)
+#         if use_fluts:
+#             self.input_drivers["f"].generate(subcircuit_filename, min_tran_width)
         
-        # Generate input driver loads
-        self.input_driver_loads["a"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["b"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["c"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["d"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["e"].generate(subcircuit_filename, self.K)
+#         # Generate input driver loads
+#         self.input_driver_loads["a"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["b"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["c"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["d"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["e"].generate(subcircuit_filename, self.K)
 
-        if use_fluts:
-            self.input_driver_loads["f"].generate(subcircuit_filename, self.K)
+#         if use_fluts:
+#             self.input_driver_loads["f"].generate(subcircuit_filename, self.K)
         
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
   
-    def _generate_4lut(self, subcircuit_filename, min_tran_width, use_tgate, use_finfet, use_fluts):
-        """ This function created the lut subcircuit and all the drivers and driver not subcircuits """
-        print("Generating 4-LUT")
+#     def _generate_4lut(self, subcircuit_filename, min_tran_width, use_tgate, use_finfet, use_fluts):
+#         """ This function created the lut subcircuit and all the drivers and driver not subcircuits """
+#         print("Generating 4-LUT")
         
-        # Call the generation function
-        if not use_tgate :
-            # use pass transistor
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut4(subcircuit_filename, min_tran_width, use_finfet)
-            # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
-            self.initial_transistor_sizes["ptran_lut_L1_nmos"] = 2
-            self.initial_transistor_sizes["ptran_lut_L2_nmos"] = 2
-            self.initial_transistor_sizes["rest_lut_int_buffer_pmos"] = 1
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
-            self.initial_transistor_sizes["ptran_lut_L3_nmos"] = 2
-            self.initial_transistor_sizes["ptran_lut_L4_nmos"] = 3
-            self.initial_transistor_sizes["rest_lut_out_buffer_pmos"] = 1
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
-        else :
-            # use transmission gates
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut4(subcircuit_filename, min_tran_width, use_finfet)
-            # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
-            self.initial_transistor_sizes["tgate_lut_L1_nmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L1_pmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L2_nmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L2_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
-            self.initial_transistor_sizes["tgate_lut_L3_nmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L3_pmos"] = 2
-            self.initial_transistor_sizes["tgate_lut_L4_nmos"] = 3
-            self.initial_transistor_sizes["tgate_lut_L4_pmos"] = 3
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
+#         # Call the generation function
+#         if not use_tgate :
+#             # use pass transistor
+#             self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut4(subcircuit_filename, min_tran_width, use_finfet)
+#             # Give initial transistor sizes
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+#             self.initial_transistor_sizes["ptran_lut_L1_nmos"] = 2
+#             self.initial_transistor_sizes["ptran_lut_L2_nmos"] = 2
+#             self.initial_transistor_sizes["rest_lut_int_buffer_pmos"] = 1
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
+#             self.initial_transistor_sizes["ptran_lut_L3_nmos"] = 2
+#             self.initial_transistor_sizes["ptran_lut_L4_nmos"] = 3
+#             self.initial_transistor_sizes["rest_lut_out_buffer_pmos"] = 1
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
+#         else :
+#             # use transmission gates
+#             self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut4(subcircuit_filename, min_tran_width, use_finfet)
+#             # Give initial transistor sizes
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+#             self.initial_transistor_sizes["tgate_lut_L1_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L1_pmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L2_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L2_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_int_buffer_2_pmos"] = 6
+#             self.initial_transistor_sizes["tgate_lut_L3_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L3_pmos"] = 2
+#             self.initial_transistor_sizes["tgate_lut_L4_nmos"] = 3
+#             self.initial_transistor_sizes["tgate_lut_L4_pmos"] = 3
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_nmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
        
-        # Generate input drivers (with register feedback if input is in Rfb)
-        self.input_drivers["a"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["b"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["c"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["d"].generate(subcircuit_filename, min_tran_width)
+#         # Generate input drivers (with register feedback if input is in Rfb)
+#         self.input_drivers["a"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["b"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["c"].generate(subcircuit_filename, min_tran_width)
+#         self.input_drivers["d"].generate(subcircuit_filename, min_tran_width)
         
-        # Generate input driver loads
-        self.input_driver_loads["a"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["b"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["c"].generate(subcircuit_filename, self.K)
-        self.input_driver_loads["d"].generate(subcircuit_filename, self.K)
+#         # Generate input driver loads
+#         self.input_driver_loads["a"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["b"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["c"].generate(subcircuit_filename, self.K)
+#         self.input_driver_loads["d"].generate(subcircuit_filename, self.K)
 
-        # *TODO: Add the second level of fracturability where the input f also will be used
-        # If this is one level fracutrable LUT then the e input will still be used
-        if use_fluts:
-            self.input_drivers["e"].generate(subcircuit_filename, min_tran_width)
-            self.input_driver_loads["e"].generate(subcircuit_filename, self.K)
+#         # *TODO: Add the second level of fracturability where the input f also will be used
+#         # If this is one level fracutrable LUT then the e input will still be used
+#         if use_fluts:
+#             self.input_drivers["e"].generate(subcircuit_filename, min_tran_width)
+#             self.input_driver_loads["e"].generate(subcircuit_filename, self.K)
         
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
 
 
@@ -1709,10 +1731,10 @@ class _CarryChainMux(_SizableCircuit):
        
         return self.initial_transistor_sizes
 
-    def generate_top(self):       
+    def generate_top(self, gen_r_wire):       
 
         print("Generating top-level " + self.name)
-        self.top_spice_path = top_level.generate_cc_mux_top(self.name, self.use_tgate)
+        self.top_spice_path = top_level.generate_cc_mux_top(self.name, self.use_tgate, gen_r_wire)
 
     def update_area(self, area_dict, width_dict):
 
@@ -2071,1160 +2093,1172 @@ class _CarryChainSkipMux(_SizableCircuit):
         wire_layers["wire_lut_to_flut_mux"] = 0
         wire_layers["wire_" + self.name + "_driver"] = 0     
 
-class _FlipFlop:
-    """ FlipFlop class.
-        COFFE does not do transistor sizing for the flip flop. Therefore, the FF is not a SizableCircuit.
-        Regardless of that, COFFE has a FlipFlop object that is used to obtain FF area and delay.
-        COFFE creates a SPICE netlist for the FF. The 'initial_transistor_sizes', defined below, are
-        used when COFFE measures T_setup and T_clock_to_Q. Those transistor sizes were obtained
-        through manual design for PTM 22nm process technology. If you use a different process technology,
-        you may need to re-size the FF transistors. """
+# class _FlipFlop:
+#     """ FlipFlop class.
+#         COFFE does not do transistor sizing for the flip flop. Therefore, the FF is not a SizableCircuit.
+#         Regardless of that, COFFE has a FlipFlop object that is used to obtain FF area and delay.
+#         COFFE creates a SPICE netlist for the FF. The 'initial_transistor_sizes', defined below, are
+#         used when COFFE measures T_setup and T_clock_to_Q. Those transistor sizes were obtained
+#         through manual design for PTM 22nm process technology. If you use a different process technology,
+#         you may need to re-size the FF transistors. """
     
-    def __init__(self, Rsel, use_tgate, use_finfet):
-        # Flip-Flop name
-        self.name = "ff"
-        # Register select mux, Rsel = LUT input (e.g. 'a', 'b', etc.) or 'z' if no register select 
-        self.register_select = Rsel
-        # A list of the names of transistors in this subcircuit.
-        self.transistor_names = []
-        # A list of the names of wires in this subcircuit
-        self.wire_names = []
-        # A dictionary of the initial transistor sizes
-        self.initial_transistor_sizes = {}
-        # Path to the top level spice file
-        self.top_spice_path = ""    
-        # 
-        self.t_setup = 1
-        # 
-        self.t_clk_to_q = 1
-        # Delay weight used to calculate delay of representative critical path
-        self.delay_weight = 1
-        self.use_finfet = use_finfet
-        self.use_tgate = use_tgate
+#     def __init__(self, Rsel, use_tgate, use_finfet):
+#         # Flip-Flop name
+#         self.name = "ff"
+#         # Register select mux, Rsel = LUT input (e.g. 'a', 'b', etc.) or 'z' if no register select 
+#         self.register_select = Rsel
+#         # A list of the names of transistors in this subcircuit.
+#         self.transistor_names = []
+#         # A list of the names of wires in this subcircuit
+#         self.wire_names = []
+#         # A dictionary of the initial transistor sizes
+#         self.initial_transistor_sizes = {}
+#         # Path to the top level spice file
+#         self.top_spice_path = ""    
+#         # 
+#         self.t_setup = 1
+#         # 
+#         self.t_clk_to_q = 1
+#         # Delay weight used to calculate delay of representative critical path
+#         self.delay_weight = 1
+#         self.use_finfet = use_finfet
+#         self.use_tgate = use_tgate
         
          
-    def generate(self, subcircuit_filename, min_tran_width):
-        """ Generate FF SPICE netlists. Optionally includes register select. """
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         """ Generate FF SPICE netlists. Optionally includes register select. """
         
-        # Generate FF with optional register select
-        if self.register_select == 'z':
-            print("Generating FF")
-            if not self.use_tgate :
-                self.transistor_names, self.wire_names = ff_subcircuits.generate_ptran_d_ff(subcircuit_filename, self.use_finfet)
-            else :
-                self.transistor_names, self.wire_names = ff_subcircuits.generate_tgate_d_ff(subcircuit_filename, self.use_finfet)
+#         # Generate FF with optional register select
+#         if self.register_select == 'z':
+#             print("Generating FF")
+#             if not self.use_tgate :
+#                 self.transistor_names, self.wire_names = ff_subcircuits.generate_ptran_d_ff(subcircuit_filename, self.use_finfet)
+#             else :
+#                 self.transistor_names, self.wire_names = ff_subcircuits.generate_tgate_d_ff(subcircuit_filename, self.use_finfet)
 
-        else:
-            print("Generating FF with register select on BLE input " + self.register_select)
-            if not self.use_tgate :
-                self.transistor_names, self.wire_names = ff_subcircuits.generate_ptran_2_input_select_d_ff(subcircuit_filename, self.use_finfet)
-            else :
-                self.transistor_names, self.wire_names = ff_subcircuits.generate_tgate_2_input_select_d_ff(subcircuit_filename, self.use_finfet)
+#         else:
+#             print("Generating FF with register select on BLE input " + self.register_select)
+#             if not self.use_tgate :
+#                 self.transistor_names, self.wire_names = ff_subcircuits.generate_ptran_2_input_select_d_ff(subcircuit_filename, self.use_finfet)
+#             else :
+#                 self.transistor_names, self.wire_names = ff_subcircuits.generate_tgate_2_input_select_d_ff(subcircuit_filename, self.use_finfet)
         
-        # Give initial transistor sizes
-        if self.register_select:
-            # These only exist if there is a register select MUX
-            if not self.use_tgate :
-                self.initial_transistor_sizes["ptran_ff_input_select_nmos"] = 4
-                self.initial_transistor_sizes["rest_ff_input_select_pmos"] = 1
-            else :
-                self.initial_transistor_sizes["tgate_ff_input_select_nmos"] = 4
-                self.initial_transistor_sizes["tgate_ff_input_select_pmos"] = 4
+#         # Give initial transistor sizes
+#         if self.register_select:
+#             # These only exist if there is a register select MUX
+#             if not self.use_tgate :
+#                 self.initial_transistor_sizes["ptran_ff_input_select_nmos"] = 4
+#                 self.initial_transistor_sizes["rest_ff_input_select_pmos"] = 1
+#             else :
+#                 self.initial_transistor_sizes["tgate_ff_input_select_nmos"] = 4
+#                 self.initial_transistor_sizes["tgate_ff_input_select_pmos"] = 4
         
-        # These transistors always exists regardless of register select
-        if not self.use_finfet :
-            self.initial_transistor_sizes["inv_ff_input_1_nmos"] = 3
-            self.initial_transistor_sizes["inv_ff_input_1_pmos"] = 8.2
-            self.initial_transistor_sizes["tgate_ff_1_nmos"] = 1
-            self.initial_transistor_sizes["tgate_ff_1_pmos"] = 1
-            self.initial_transistor_sizes["tran_ff_set_n_pmos"] = 1
-            self.initial_transistor_sizes["tran_ff_reset_nmos"] = 1
-            self.initial_transistor_sizes["inv_ff_cc1_1_nmos"] = 3
-            self.initial_transistor_sizes["inv_ff_cc1_1_pmos"] = 4
-            self.initial_transistor_sizes["inv_ff_cc1_2_nmos"] = 1
-            self.initial_transistor_sizes["inv_ff_cc1_2_pmos"] = 1.3
-            self.initial_transistor_sizes["tgate_ff_2_nmos"] = 1
-            self.initial_transistor_sizes["tgate_ff_2_pmos"] = 1
-            self.initial_transistor_sizes["tran_ff_reset_n_pmos"] = 1
-            self.initial_transistor_sizes["tran_ff_set_nmos"] = 1
-            self.initial_transistor_sizes["inv_ff_cc2_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_ff_cc2_1_pmos"] = 1.3
-            self.initial_transistor_sizes["inv_ff_cc2_2_nmos"] = 1
-            self.initial_transistor_sizes["inv_ff_cc2_2_pmos"] = 1.3
-            self.initial_transistor_sizes["inv_ff_output_driver_nmos"] = 4
-            self.initial_transistor_sizes["inv_ff_output_driver_pmos"] = 9.7
-        else :
-            self.initial_transistor_sizes["inv_ff_input_1_nmos"] = 3
-            self.initial_transistor_sizes["inv_ff_input_1_pmos"] = 9
-            self.initial_transistor_sizes["tgate_ff_1_nmos"] = 1
-            self.initial_transistor_sizes["tgate_ff_1_pmos"] = 1
-            self.initial_transistor_sizes["tran_ff_set_n_pmos"] = 1
-            self.initial_transistor_sizes["tran_ff_reset_nmos"] = 1
-            self.initial_transistor_sizes["inv_ff_cc1_1_nmos"] = 3
-            self.initial_transistor_sizes["inv_ff_cc1_1_pmos"] = 4
-            self.initial_transistor_sizes["inv_ff_cc1_2_nmos"] = 1
-            self.initial_transistor_sizes["inv_ff_cc1_2_pmos"] = 2
-            self.initial_transistor_sizes["tgate_ff_2_nmos"] = 1
-            self.initial_transistor_sizes["tgate_ff_2_pmos"] = 1
-            self.initial_transistor_sizes["tran_ff_reset_n_pmos"] = 1
-            self.initial_transistor_sizes["tran_ff_set_nmos"] = 1
-            self.initial_transistor_sizes["inv_ff_cc2_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_ff_cc2_1_pmos"] = 2
-            self.initial_transistor_sizes["inv_ff_cc2_2_nmos"] = 1
-            self.initial_transistor_sizes["inv_ff_cc2_2_pmos"] = 2
-            self.initial_transistor_sizes["inv_ff_output_driver_nmos"] = 4
-            self.initial_transistor_sizes["inv_ff_output_driver_pmos"] = 10
+#         # These transistors always exists regardless of register select
+#         if not self.use_finfet :
+#             self.initial_transistor_sizes["inv_ff_input_1_nmos"] = 3
+#             self.initial_transistor_sizes["inv_ff_input_1_pmos"] = 8.2
+#             self.initial_transistor_sizes["tgate_ff_1_nmos"] = 1
+#             self.initial_transistor_sizes["tgate_ff_1_pmos"] = 1
+#             self.initial_transistor_sizes["tran_ff_set_n_pmos"] = 1
+#             self.initial_transistor_sizes["tran_ff_reset_nmos"] = 1
+#             self.initial_transistor_sizes["inv_ff_cc1_1_nmos"] = 3
+#             self.initial_transistor_sizes["inv_ff_cc1_1_pmos"] = 4
+#             self.initial_transistor_sizes["inv_ff_cc1_2_nmos"] = 1
+#             self.initial_transistor_sizes["inv_ff_cc1_2_pmos"] = 1.3
+#             self.initial_transistor_sizes["tgate_ff_2_nmos"] = 1
+#             self.initial_transistor_sizes["tgate_ff_2_pmos"] = 1
+#             self.initial_transistor_sizes["tran_ff_reset_n_pmos"] = 1
+#             self.initial_transistor_sizes["tran_ff_set_nmos"] = 1
+#             self.initial_transistor_sizes["inv_ff_cc2_1_nmos"] = 1
+#             self.initial_transistor_sizes["inv_ff_cc2_1_pmos"] = 1.3
+#             self.initial_transistor_sizes["inv_ff_cc2_2_nmos"] = 1
+#             self.initial_transistor_sizes["inv_ff_cc2_2_pmos"] = 1.3
+#             self.initial_transistor_sizes["inv_ff_output_driver_nmos"] = 4
+#             self.initial_transistor_sizes["inv_ff_output_driver_pmos"] = 9.7
+#         else :
+#             self.initial_transistor_sizes["inv_ff_input_1_nmos"] = 3
+#             self.initial_transistor_sizes["inv_ff_input_1_pmos"] = 9
+#             self.initial_transistor_sizes["tgate_ff_1_nmos"] = 1
+#             self.initial_transistor_sizes["tgate_ff_1_pmos"] = 1
+#             self.initial_transistor_sizes["tran_ff_set_n_pmos"] = 1
+#             self.initial_transistor_sizes["tran_ff_reset_nmos"] = 1
+#             self.initial_transistor_sizes["inv_ff_cc1_1_nmos"] = 3
+#             self.initial_transistor_sizes["inv_ff_cc1_1_pmos"] = 4
+#             self.initial_transistor_sizes["inv_ff_cc1_2_nmos"] = 1
+#             self.initial_transistor_sizes["inv_ff_cc1_2_pmos"] = 2
+#             self.initial_transistor_sizes["tgate_ff_2_nmos"] = 1
+#             self.initial_transistor_sizes["tgate_ff_2_pmos"] = 1
+#             self.initial_transistor_sizes["tran_ff_reset_n_pmos"] = 1
+#             self.initial_transistor_sizes["tran_ff_set_nmos"] = 1
+#             self.initial_transistor_sizes["inv_ff_cc2_1_nmos"] = 1
+#             self.initial_transistor_sizes["inv_ff_cc2_1_pmos"] = 2
+#             self.initial_transistor_sizes["inv_ff_cc2_2_nmos"] = 1
+#             self.initial_transistor_sizes["inv_ff_cc2_2_pmos"] = 2
+#             self.initial_transistor_sizes["inv_ff_output_driver_nmos"] = 4
+#             self.initial_transistor_sizes["inv_ff_output_driver_pmos"] = 10
 
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
 
-    def generate_top(self):
-        """ """
-        # TODO for T_setup and T_clock_to_Q
-        pass
+#     def generate_top(self):
+#         """ """
+#         # TODO for T_setup and T_clock_to_Q
+#         pass
         
 
-    def update_area(self, area_dict, width_dict):
-        """ Calculate FF area and update dictionaries. """
+#     def update_area(self, area_dict, width_dict):
+#         """ Calculate FF area and update dictionaries. """
         
-        area = 0.0
+#         area = 0.0
         
-        # Calculates area of the FF input select if applicable (we add the SRAM bit later)
-        # If there is no input select, we just add the area of the input inverter
-        if self.register_select != 'z':
-            if not self.use_tgate :
-                area += (2*area_dict["ptran_ff_input_select"] +
-                        area_dict["rest_ff_input_select"] +
-                        area_dict["inv_ff_input_1"])
-            else :
-                area += (2*area_dict["tgate_ff_input_select"] +
-                        area_dict["inv_ff_input_1"])
-        else:
-            area += area_dict["inv_ff_input_1"]
+#         # Calculates area of the FF input select if applicable (we add the SRAM bit later)
+#         # If there is no input select, we just add the area of the input inverter
+#         if self.register_select != 'z':
+#             if not self.use_tgate :
+#                 area += (2*area_dict["ptran_ff_input_select"] +
+#                         area_dict["rest_ff_input_select"] +
+#                         area_dict["inv_ff_input_1"])
+#             else :
+#                 area += (2*area_dict["tgate_ff_input_select"] +
+#                         area_dict["inv_ff_input_1"])
+#         else:
+#             area += area_dict["inv_ff_input_1"]
 
-        # Add area of FF circuitry
-        area += (area_dict["tgate_ff_1"] +
-                area_dict["tran_ff_set_n"] +
-                area_dict["tran_ff_reset"] +
-                area_dict["inv_ff_cc1_1"] +
-                area_dict["inv_ff_cc1_2"] +
-                area_dict["tgate_ff_2"] +
-                area_dict["tran_ff_reset_n"] +
-                area_dict["tran_ff_set"] +
-                area_dict["inv_ff_cc2_1"] +
-                area_dict["inv_ff_cc2_2"]+
-                area_dict["inv_ff_output_driver"])        
+#         # Add area of FF circuitry
+#         area += (area_dict["tgate_ff_1"] +
+#                 area_dict["tran_ff_set_n"] +
+#                 area_dict["tran_ff_reset"] +
+#                 area_dict["inv_ff_cc1_1"] +
+#                 area_dict["inv_ff_cc1_2"] +
+#                 area_dict["tgate_ff_2"] +
+#                 area_dict["tran_ff_reset_n"] +
+#                 area_dict["tran_ff_set"] +
+#                 area_dict["inv_ff_cc2_1"] +
+#                 area_dict["inv_ff_cc2_2"]+
+#                 area_dict["inv_ff_output_driver"])        
 
-        # Add the SRAM bit if FF input select is on
-        if self.register_select != 'z':
-            area += area_dict["sram"]
+#         # Add the SRAM bit if FF input select is on
+#         if self.register_select != 'z':
+#             area += area_dict["sram"]
         
-        # Calculate width and add to dictionaries
-        width = math.sqrt(area)
-        area_dict["ff"] = area
-        width_dict["ff"] = width
+#         # Calculate width and add to dictionaries
+#         width = math.sqrt(area)
+#         area_dict["ff"] = area
+#         width_dict["ff"] = width
         
-        return area
+#         return area
         
         
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
-        # Update wire lengths
-        if self.register_select != 'z':
-            if not self.use_tgate :
-                wire_lengths["wire_ff_input_select"] = width_dict["ptran_ff_input_select"]
-            else :
-                wire_lengths["wire_ff_input_select"] = width_dict["tgate_ff_input_select"]
+#         # Update wire lengths
+#         if self.register_select != 'z':
+#             if not self.use_tgate :
+#                 wire_lengths["wire_ff_input_select"] = width_dict["ptran_ff_input_select"]
+#             else :
+#                 wire_lengths["wire_ff_input_select"] = width_dict["tgate_ff_input_select"]
             
-        wire_lengths["wire_ff_input_out"] = (width_dict["inv_ff_input_1"] + width_dict["tgate_ff_1"])/4
-        wire_lengths["wire_ff_tgate_1_out"] = (width_dict["tgate_ff_1"] + width_dict["inv_ff_cc1_1"])/4
-        wire_lengths["wire_ff_cc1_out"] = (width_dict["inv_ff_cc1_1"] + width_dict["tgate_ff_2"])/4
-        wire_lengths["wire_ff_tgate_2_out"] = (width_dict["tgate_ff_2"] + width_dict["inv_ff_cc1_2"])/4
-        wire_lengths["wire_ff_cc2_out"] = (width_dict["inv_ff_cc1_2"] + width_dict["inv_ff_output_driver"])/4
+#         wire_lengths["wire_ff_input_out"] = (width_dict["inv_ff_input_1"] + width_dict["tgate_ff_1"])/4
+#         wire_lengths["wire_ff_tgate_1_out"] = (width_dict["tgate_ff_1"] + width_dict["inv_ff_cc1_1"])/4
+#         wire_lengths["wire_ff_cc1_out"] = (width_dict["inv_ff_cc1_1"] + width_dict["tgate_ff_2"])/4
+#         wire_lengths["wire_ff_tgate_2_out"] = (width_dict["tgate_ff_2"] + width_dict["inv_ff_cc1_2"])/4
+#         wire_lengths["wire_ff_cc2_out"] = (width_dict["inv_ff_cc1_2"] + width_dict["inv_ff_output_driver"])/4
     
-        # Update wire layers
-        if self.register_select != 'z':
-            wire_layers["wire_ff_input_select"] = 0
+#         # Update wire layers
+#         if self.register_select != 'z':
+#             wire_layers["wire_ff_input_select"] = 0
             
-        wire_layers["wire_ff_input_out"] = 0
-        wire_layers["wire_ff_tgate_1_out"] = 0
-        wire_layers["wire_ff_cc1_out"] = 0
-        wire_layers["wire_ff_tgate_2_out"] = 0
-        wire_layers["wire_ff_cc2_out"] = 0
+#         wire_layers["wire_ff_input_out"] = 0
+#         wire_layers["wire_ff_tgate_1_out"] = 0
+#         wire_layers["wire_ff_cc1_out"] = 0
+#         wire_layers["wire_ff_tgate_2_out"] = 0
+#         wire_layers["wire_ff_cc2_out"] = 0
         
         
-    def print_details(self):
-        print("  FF DETAILS:")
-        if self.register_select == 'z':
-            print("  Register select: None")
-        else:
-            print("  Register select: BLE input " + self.register_select)
+#     def print_details(self):
+#         print("  FF DETAILS:")
+#         if self.register_select == 'z':
+#             print("  Register select: None")
+#         else:
+#             print("  Register select: BLE input " + self.register_select)
 
         
-class _LocalBLEOutput(_SizableCircuit):
-    """ Local BLE Output class """
+# class _LocalBLEOutput(_SizableCircuit):
+#     """ Local BLE Output class """
     
-    def __init__(self, use_tgate):
-        self.name = "local_ble_output"
-        # Delay weight in a representative critical path
-        self.delay_weight = DELAY_WEIGHT_LOCAL_BLE_OUTPUT
-        # use pass transistor or transmission gates
-        self.use_tgate = use_tgate
+#     def __init__(self, use_tgate, gen_r_wire: dict):
+#         self.name = f"local_ble_output_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+#         self.gen_r_wire = gen_r_wire
+#         # Delay weight in a representative critical path
+#         self.delay_weight = DELAY_WEIGHT_LOCAL_BLE_OUTPUT
+#         # use pass transistor or transmission gates
+#         self.use_tgate = use_tgate
         
         
-    def generate(self, subcircuit_filename, min_tran_width):
-        print("Generating local BLE output")
-        if not self.use_tgate :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2_to_1_mux(subcircuit_filename, self.name)
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["ptran_" + self.name + "_nmos"] = 2
-            self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 4
-        else :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2_to_1_mux(subcircuit_filename, self.name)
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["tgate_" + self.name + "_nmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_pmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 4
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         print("Generating local BLE output")
+#         if not self.use_tgate :
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2_to_1_mux(subcircuit_filename, self.name)
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["ptran_" + self.name + "_nmos"] = 2
+#             self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 4
+#         else :
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2_to_1_mux(subcircuit_filename, self.name)
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["tgate_" + self.name + "_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_" + self.name + "_pmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 4
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 4
       
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
 
-    def generate_top(self):
-        print("Generating top-level " + self.name)
-        self.top_spice_path = top_level.generate_local_ble_output_top(self.name, self.use_tgate)
+#     def generate_top(self):
+#         print("Generating top-level " + self.name)
+#         self.top_spice_path = top_level.generate_local_ble_output_top(self.name, self.use_tgate, self.gen_r_wire)
         
         
-    def update_area(self, area_dict, width_dict):
-        if not self.use_tgate :
-            area = (2*area_dict["ptran_" + self.name] +
-                    area_dict["rest_" + self.name] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
-        else :
-            area = (2*area_dict["tgate_" + self.name] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
+#     def update_area(self, area_dict, width_dict):
+#         if not self.use_tgate :
+#             area = (2*area_dict["ptran_" + self.name] +
+#                     area_dict["rest_" + self.name] +
+#                     area_dict["inv_" + self.name + "_1"] +
+#                     area_dict["inv_" + self.name + "_2"])
+#         else :
+#             area = (2*area_dict["tgate_" + self.name] +
+#                     area_dict["inv_" + self.name + "_1"] +
+#                     area_dict["inv_" + self.name + "_2"])
 
-        area = area + area_dict["sram"]
-        width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+#         area = area + area_dict["sram"]
+#         width = math.sqrt(area)
+#         area_dict[self.name] = area
+#         width_dict[self.name] = width
 
-        return area
+#         return area
         
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
     
-        # Update wire lengths
-        if not self.use_tgate :
-            wire_lengths["wire_" + self.name] = width_dict["ptran_" + self.name]
-        else :
-            wire_lengths["wire_" + self.name] = width_dict["tgate_" + self.name]
+#         # Update wire lengths
+#         if not self.use_tgate :
+#             wire_lengths["wire_" + self.name] = width_dict["ptran_" + self.name]
+#         else :
+#             wire_lengths["wire_" + self.name] = width_dict["tgate_" + self.name]
 
-        wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_1"])/4
+#         wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_1"])/4
         
-        # Update wire layers
-        wire_layers["wire_" + self.name] = 0
-        wire_layers["wire_" + self.name + "_driver"] = 0
+#         # Update wire layers
+#         wire_layers["wire_" + self.name] = 0
+#         wire_layers["wire_" + self.name + "_driver"] = 0
         
         
-    def print_details(self):
-        print("Local BLE output details.")
+#     def print_details(self):
+#         print("Local BLE output details.")
 
       
-class _GeneralBLEOutput(_SizableCircuit):
-    """ General BLE Output """
+# class _GeneralBLEOutput(_SizableCircuit):
+#     """ General BLE Output """
     
-    def __init__(self, use_tgate, gen_r_wire: dict):
-        self.gen_r_wire = gen_r_wire
-        # default name format for general BLE output
-        name = f"general_ble_output_L{gen_r_wire['L']}_uid{gen_r_wire['id']}"
-        self.name = name
-        self.delay_weight = DELAY_WEIGHT_GENERAL_BLE_OUTPUT
-        self.use_tgate = use_tgate
+#     def __init__(self, use_tgate, gen_r_wire: dict):
+#         self.gen_r_wire = gen_r_wire
+#         # default name format for general BLE output
+#         self.name = f"general_ble_output_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+#         # self.name = "general_ble_output"
+#         self.delay_weight = DELAY_WEIGHT_GENERAL_BLE_OUTPUT
+#         self.use_tgate = use_tgate
         
         
-    def generate(self, subcircuit_filename, min_tran_width):
-        print("Generating general BLE output")
-        if not self.use_tgate :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2_to_1_mux(subcircuit_filename, self.name)
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["ptran_" + self.name + "_nmos"] = 2
-            self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
-        else :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2_to_1_mux(subcircuit_filename, self.name)      
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["tgate_" + self.name + "_nmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_pmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         print("Generating general BLE output")
+#         if not self.use_tgate :
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2_to_1_mux(subcircuit_filename, self.name)
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["ptran_" + self.name + "_nmos"] = 2
+#             self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
+#         else :
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2_to_1_mux(subcircuit_filename, self.name)      
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["tgate_" + self.name + "_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_" + self.name + "_pmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
        
-        return self.initial_transistor_sizes
+#         return self.initial_transistor_sizes
 
 
-    def generate_top(self):
-        print("Generating top-level " + self.name)
-        self.top_spice_path = top_level.generate_general_ble_output_top(self.name, self.use_tgate)
+#     def generate_top(self):
+#         print("Generating top-level " + self.name)
+#         self.top_spice_path = top_level.generate_general_ble_output_top(self.name, self.use_tgate, self.gen_r_wire)
         
      
-    def update_area(self, area_dict, width_dict):
-        if not self.use_tgate :
-            area = (2*area_dict["ptran_" + self.name] +
-                    area_dict["rest_" + self.name] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
-        else :
-            area = (2*area_dict["tgate_" + self.name] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
+#     def update_area(self, area_dict, width_dict):
+#         if not self.use_tgate :
+#             area = (2*area_dict["ptran_" + self.name] +
+#                     area_dict["rest_" + self.name] +
+#                     area_dict["inv_" + self.name + "_1"] +
+#                     area_dict["inv_" + self.name + "_2"])
+#         else :
+#             area = (2*area_dict["tgate_" + self.name] +
+#                     area_dict["inv_" + self.name + "_1"] +
+#                     area_dict["inv_" + self.name + "_2"])
 
-        area = area + area_dict["sram"]
-        width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+#         area = area + area_dict["sram"]
+#         width = math.sqrt(area)
+#         area_dict[self.name] = area
+#         width_dict[self.name] = width
 
-        return area
+#         return area
         
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
     
-        # Update wire lengths
-        if not self.use_tgate :
-            wire_lengths["wire_" + self.name] = width_dict["ptran_" + self.name]
-        else :
-            wire_lengths["wire_" + self.name] = width_dict["tgate_" + self.name]
+#         # Update wire lengths
+#         if not self.use_tgate :
+#             wire_lengths["wire_" + self.name] = width_dict["ptran_" + self.name]
+#         else :
+#             wire_lengths["wire_" + self.name] = width_dict["tgate_" + self.name]
 
-        wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_1"])/4
+#         wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_1"])/4
         
-        # Update wire layers
-        wire_layers["wire_" + self.name] = 0
-        wire_layers["wire_" + self.name + "_driver"] = 0
+#         # Update wire layers
+#         wire_layers["wire_" + self.name] = 0
+#         wire_layers["wire_" + self.name + "_driver"] = 0
         
    
-    def print_details(self):
-        print("General BLE output details.")
+#     def print_details(self):
+#         print("General BLE output details.")
 
         
-class _LUTOutputLoad:
-    """ LUT output load is the load seen by the output of the LUT in the basic case if Or = 1 and Ofb = 1 (see [1])
-        then the output load will be the regster select mux of the flip-flop, the mux connecting the output signal
-        to the output routing and the mux connecting the output signal to the feedback mux """
+# class _LUTOutputLoad:
+#     """ LUT output load is the load seen by the output of the LUT in the basic case if Or = 1 and Ofb = 1 (see [1])
+#         then the output load will be the regster select mux of the flip-flop, the mux connecting the output signal
+#         to the output routing and the mux connecting the output signal to the feedback mux """
 
-    def __init__(self, num_local_outputs, num_general_outputs):
-        self.name = "lut_output_load"
-        self.num_local_outputs = num_local_outputs
-        self.num_general_outputs = num_general_outputs
-        self.wire_names = []
+#     def __init__(self, num_local_outputs, num_general_outputs):
+#         self.name = "lut_output_load"
+#         self.num_local_outputs = num_local_outputs
+#         self.num_general_outputs = num_general_outputs
+#         self.wire_names = []
         
         
-    def generate(self, subcircuit_filename, min_tran_width):
-        print("Generating LUT output load")
-        self.wire_names = load_subcircuits.generate_lut_output_load(subcircuit_filename, self.num_local_outputs, self.num_general_outputs)
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         print("Generating LUT output load")
+#         self.wire_names = load_subcircuits.generate_lut_output_load(subcircuit_filename, self.num_local_outputs, self.num_general_outputs)
         
      
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
-        # Update wire lengths
-        wire_lengths["wire_lut_output_load_1"] = (width_dict["ff"] + width_dict["lut_and_drivers"])/8
-        wire_lengths["wire_lut_output_load_2"] = width_dict["ff"]
+#         # Update wire lengths
+#         wire_lengths["wire_lut_output_load_1"] = (width_dict["ff"] + width_dict["lut_and_drivers"])/8
+#         wire_lengths["wire_lut_output_load_2"] = width_dict["ff"]
         
-        # Update wire layers
-        wire_layers["wire_lut_output_load_1"] = 0
-        wire_layers["wire_lut_output_load_2"] = 0
+#         # Update wire layers
+#         wire_layers["wire_lut_output_load_1"] = 0
+#         wire_layers["wire_lut_output_load_2"] = 0
 
 
-class _flut_mux(_CompoundCircuit):
+# class _flut_mux(_CompoundCircuit):
     
-    def __init__(self, use_tgate, use_finfet, enable_carry_chain):
-        # name
-        self.name = "flut_mux"
-        # use tgate
-        self.use_tgate = use_tgate
-        # A dictionary of the initial transistor sizes
-        self.initial_transistor_sizes = {}
-        # todo: change to enable finfet support, should be rather straightforward as it's just a mux
-        # use finfet
-        self.use_finfet = use_finfet 
-        self.enable_carry_chain = enable_carry_chain
+#     def __init__(self, use_tgate, use_finfet, enable_carry_chain, gen_r_wire: dict):
+#         # name
+#         self.name = "flut_mux"
+#         # self.name = f"flut_mux_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+#         self.gen_r_wire = gen_r_wire
+#         # use tgate
+#         self.use_tgate = use_tgate
+#         # A dictionary of the initial transistor sizes
+#         self.initial_transistor_sizes = {}
+#         # todo: change to enable finfet support, should be rather straightforward as it's just a mux
+#         # use finfet
+#         self.use_finfet = use_finfet 
+#         self.enable_carry_chain = enable_carry_chain
         
-        # this condition was added to the check_arch_params in utils.py
-        # assert use_finfet == False
+#         # this condition was added to the check_arch_params in utils.py
+#         # assert use_finfet == False
 
 
-    def generate(self, subcircuit_filename, min_tran_width):
-        print("Generating flut added mux")   
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         print("Generating flut added mux")   
 
-        if not self.use_tgate :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2_to_1_mux(subcircuit_filename, self.name)
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["ptran_" + self.name + "_nmos"] = 2
-            self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
-        else :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2_to_1_mux(subcircuit_filename, self.name)      
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["tgate_" + self.name + "_nmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_pmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
+#         if not self.use_tgate :
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2_to_1_mux(subcircuit_filename, self.name)
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["ptran_" + self.name + "_nmos"] = 2
+#             self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
+#         else :
+#             self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2_to_1_mux(subcircuit_filename, self.name)      
+#             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
+#             self.initial_transistor_sizes["tgate_" + self.name + "_nmos"] = 2
+#             self.initial_transistor_sizes["tgate_" + self.name + "_pmos"] = 2
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
+#             self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
        
-        self.wire_names.append("wire_lut_to_flut_mux")
-        return self.initial_transistor_sizes
+#         self.wire_names.append("wire_lut_to_flut_mux")
+#         return self.initial_transistor_sizes
 
-    def generate_top(self):       
+#     def generate_top(self):       
 
-        print("Generating top-level " + self.name)
-        self.top_spice_path = top_level.generate_flut_mux_top(self.name, self.use_tgate, self.enable_carry_chain)
+#         print("Generating top-level " + self.name)
+#         self.top_spice_path = top_level.generate_flut_mux_top(self.name, self.use_tgate, self.enable_carry_chain, self.gen_r_wire)
 
-    def update_area(self, area_dict, width_dict):
+#     def update_area(self, area_dict, width_dict):
 
-        if not self.use_tgate :
-            area = (2*area_dict["ptran_" + self.name] +
-                    area_dict["rest_" + self.name] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
-        else :
-            area = (2*area_dict["tgate_" + self.name] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
+#         if not self.use_tgate :
+#             area = (2*area_dict["ptran_" + self.name] +
+#                     area_dict["rest_" + self.name] +
+#                     area_dict["inv_" + self.name + "_1"] +
+#                     area_dict["inv_" + self.name + "_2"])
+#         else :
+#             area = (2*area_dict["tgate_" + self.name] +
+#                     area_dict["inv_" + self.name + "_1"] +
+#                     area_dict["inv_" + self.name + "_2"])
 
-        area = area #+ area_dict["sram"]
-        width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+#         area = area #+ area_dict["sram"]
+#         width = math.sqrt(area)
+#         area_dict[self.name] = area
+#         width_dict[self.name] = width
 
-        return area
+#         return area
                 
 
-    def update_wires(self, width_dict, wire_lengths, wire_layers, lut_ratio):
-        """ Update wire of member objects. """
-        # Update wire lengths
-        if not self.use_tgate :
-            wire_lengths["wire_" + self.name] = width_dict["ptran_" + self.name]
-            wire_lengths["wire_lut_to_flut_mux"] = width_dict["lut"]/2 * lut_ratio
-        else :
-            wire_lengths["wire_" + self.name] = width_dict["tgate_" + self.name]
-            wire_lengths["wire_lut_to_flut_mux"] = width_dict["lut"]/2 * lut_ratio
+#     def update_wires(self, width_dict, wire_lengths, wire_layers, lut_ratio):
+#         """ Update wire of member objects. """
+#         # Update wire lengths
+#         if not self.use_tgate :
+#             wire_lengths["wire_" + self.name] = width_dict["ptran_" + self.name]
+#             wire_lengths["wire_lut_to_flut_mux"] = width_dict["lut"]/2 * lut_ratio
+#         else :
+#             wire_lengths["wire_" + self.name] = width_dict["tgate_" + self.name]
+#             wire_lengths["wire_lut_to_flut_mux"] = width_dict["lut"]/2 * lut_ratio
 
-        wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_1"])/4
+#         wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_1"])/4
         
-        # Update wire layers
-        wire_layers["wire_" + self.name] = 0
-        wire_layers["wire_lut_to_flut_mux"] = 0
-        wire_layers["wire_" + self.name + "_driver"] = 0
+#         # Update wire layers
+#         wire_layers["wire_" + self.name] = 0
+#         wire_layers["wire_lut_to_flut_mux"] = 0
+#         wire_layers["wire_" + self.name + "_driver"] = 0
 
-class _BLE(_CompoundCircuit):
+# class _BLE(_CompoundCircuit):
 
-    def __init__(self, K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, N, wire_types):
-        # BLE name
-        self.name = "ble"
-        # number of bles in a cluster
-        self.N = N
-        # Size of LUT
-        self.K = K
-        # Number of inputs to the BLE
-        self.num_inputs = K
-        # Number of local outputs
-        self.num_local_outputs = Ofb
-        # Number of general outputs
-        self.num_general_outputs = Or
-        # Create BLE local output object
-        self.local_output = _LocalBLEOutput(use_tgate)
-        # Create BLE general output object
-        # self.general_output = _GeneralBLEOutput(use_tgate)
-        # Creating a BLE general output object for each type of wire we have
-        self.general_outputs = [_GeneralBLEOutput(use_tgate, wire) for wire in wire_types]
-        # Create LUT object
-        self.lut = _LUT(K, Rsel, Rfb, use_tgate, use_finfet, use_fluts)
-        # Create FF object
-        self.ff = _FlipFlop(Rsel, use_tgate, use_finfet)
-        # Create LUT output load object
-        self.lut_output_load = _LUTOutputLoad(self.num_local_outputs, self.num_general_outputs)
-        # Are the LUTs fracturable?
-        self.use_fluts = use_fluts
-        # The extra mux for the fracturable luts
-        if use_fluts:
-            self.fmux = _flut_mux(use_tgate, use_finfet, enable_carry_chain)
+#     def __init__(self, K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, N, gen_r_wire: dict):
+#         # BLE name
+#         self.name = "ble"
+#         # General routing wire associated
+#         self.gen_r_wire = gen_r_wire
+#         # number of bles in a cluster
+#         self.N = N
+#         # Size of LUT
+#         self.K = K
+#         # Number of inputs to the BLE
+#         self.num_inputs = K
+#         # Number of local outputs
+#         self.num_local_outputs = Ofb
+#         # Number of general outputs
+#         self.num_general_outputs = Or
+#         # Create BLE local output object
+#         self.local_output = _LocalBLEOutput(use_tgate, gen_r_wire)
+#         # Create BLE general output object
+#         self.general_output = _GeneralBLEOutput(use_tgate, gen_r_wire)
+#         # Creating a BLE general output object for each type of wire we have
+#         # self.general_outputs = [_GeneralBLEOutput(use_tgate, wire) for wire in wire_types]
+#         # Create LUT object
+#         self.lut = _LUT(K, Rsel, Rfb, use_tgate, use_finfet, use_fluts)
+#         # Create FF object
+#         self.ff = _FlipFlop(Rsel, use_tgate, use_finfet)
+#         # Create LUT output load object
+#         self.lut_output_load = _LUTOutputLoad(self.num_local_outputs, self.num_general_outputs)
+#         # Are the LUTs fracturable?
+#         self.use_fluts = use_fluts
+#         # The extra mux for the fracturable luts
+#         if use_fluts:
+#             self.fmux = _flut_mux(use_tgate, use_finfet, enable_carry_chain, gen_r_wire)
 
-        # TODO: why is the carry chain object not defined here?
-        self.enable_carry_chain = enable_carry_chain
-        self.FAs_per_flut = FAs_per_flut
-        self.carry_skip_periphery_count = carry_skip_periphery_count
+#         # TODO: why is the carry chain object not defined here?
+#         self.enable_carry_chain = enable_carry_chain
+#         self.FAs_per_flut = FAs_per_flut
+#         self.carry_skip_periphery_count = carry_skip_periphery_count
 
         
         
-    def generate(self, subcircuit_filename, min_tran_width):
-        print("Generating BLE")
+#     def generate(self, subcircuit_filename, min_tran_width):
+#         print("Generating BLE")
         
-        # Generate LUT and FF
-        init_tran_sizes = {}
-        init_tran_sizes.update(self.lut.generate(subcircuit_filename, min_tran_width))
-        init_tran_sizes.update(self.ff.generate(subcircuit_filename, min_tran_width))
+#         # Generate LUT and FF
+#         init_tran_sizes = {}
+#         init_tran_sizes.update(self.lut.generate(subcircuit_filename, min_tran_width))
+#         init_tran_sizes.update(self.ff.generate(subcircuit_filename, min_tran_width))
 
-        # Generate BLE outputs
-        init_tran_sizes.update(self.local_output.generate(subcircuit_filename, 
-                                                          min_tran_width))
-        init_tran_sizes.update(self.general_output.generate(subcircuit_filename, 
-                                                            min_tran_width))
-        for gen_output in self.general_outputs:
-            init_tran_sizes.update(gen_output.generate(subcircuit_filename, 
-                                                        min_tran_width))
-        load_subcircuits.generate_ble_outputs(subcircuit_filename, self.num_local_outputs, self.num_general_outputs)
+#         # Generate BLE outputs
+#         init_tran_sizes.update(self.local_output.generate(subcircuit_filename, 
+#                                                           min_tran_width))
+#         init_tran_sizes.update(self.general_output.generate(subcircuit_filename, 
+#                                                             min_tran_width))
+#         # for gen_output in self.general_outputs:
+#         #     init_tran_sizes.update(gen_output.generate(subcircuit_filename, 
+#         #                                                 min_tran_width))
+#         load_subcircuits.generate_ble_outputs(subcircuit_filename, self.num_local_outputs, self.num_general_outputs, self.gen_r_wire)
  
-        #flut mux
-        if self.use_fluts:
-            init_tran_sizes.update(self.fmux.generate(subcircuit_filename, min_tran_width))           
-        # Generate LUT load
-        self.lut_output_load.generate(subcircuit_filename, min_tran_width)
+#         #flut mux
+#         if self.use_fluts:
+#             init_tran_sizes.update(self.fmux.generate(subcircuit_filename, min_tran_width))           
+#         # Generate LUT load
+#         self.lut_output_load.generate(subcircuit_filename, min_tran_width)
        
-        return init_tran_sizes
+#         return init_tran_sizes
 
      
-    def generate_top(self):
-        self.lut.generate_top()
-        self.local_output.generate_top()
-        self.general_output.generate_top()
+#     def generate_top(self):
+#         self.lut.generate_top()
+#         self.local_output.generate_top()
+#         self.general_output.generate_top()
 
-        if self.use_fluts:
-            self.fmux.generate_top()   
+#         if self.use_fluts:
+#             self.fmux.generate_top()   
     
-    def update_area(self, area_dict, width_dict):
+#     def update_area(self, area_dict, width_dict):
     
 
 
-        ff_area = self.ff.update_area(area_dict, width_dict)
+#         ff_area = self.ff.update_area(area_dict, width_dict)
 
-        if self.use_fluts:
-            fmux_area = self.fmux.update_area(area_dict, width_dict) 
-            fmux_width = math.sqrt(fmux_area)
-            area_dict["flut_mux"] = fmux_area
-            width_dict["flut_mux"] = fmux_width    
+#         if self.use_fluts:
+#             fmux_area = self.fmux.update_area(area_dict, width_dict) 
+#             fmux_width = math.sqrt(fmux_area)
+#             area_dict["flut_mux"] = fmux_area
+#             width_dict["flut_mux"] = fmux_width    
 
-        lut_area = self.lut.update_area(area_dict, width_dict)
-
-
+#         lut_area = self.lut.update_area(area_dict, width_dict)
 
 
-        # Calculate area of BLE outputs
-        local_ble_output_area = self.num_local_outputs*self.local_output.update_area(area_dict, width_dict)
-        general_ble_output_area = self.num_general_outputs*self.general_output.update_area(area_dict, width_dict)
+
+
+#         # Calculate area of BLE outputs
+#         local_ble_output_area = self.num_local_outputs*self.local_output.update_area(area_dict, width_dict)
+#         general_ble_output_area = self.num_general_outputs*self.general_output.update_area(area_dict, width_dict)
         
-        ble_output_area = local_ble_output_area + general_ble_output_area
-        ble_output_width = math.sqrt(ble_output_area)
-        area_dict["ble_output"] = ble_output_area
-        width_dict["ble_output"] = ble_output_width
+#         ble_output_area = local_ble_output_area + general_ble_output_area
+#         ble_output_width = math.sqrt(ble_output_area)
+#         area_dict["ble_output"] = ble_output_area
+#         width_dict["ble_output"] = ble_output_width
 
-        if self.use_fluts:
-            ble_area = lut_area + 2*ff_area + ble_output_area# + fmux_area
-        else:
-            ble_area = lut_area + ff_area + ble_output_area
+#         if self.use_fluts:
+#             ble_area = lut_area + 2*ff_area + ble_output_area# + fmux_area
+#         else:
+#             ble_area = lut_area + ff_area + ble_output_area
 
-        if self.enable_carry_chain == 1:
-            if self.carry_skip_periphery_count ==0:
-                ble_area = ble_area + area_dict["carry_chain"] * self.FAs_per_flut + (self.FAs_per_flut) * area_dict["carry_chain_mux"]
-            else:
-                ble_area = ble_area + area_dict["carry_chain"] * self.FAs_per_flut + (self.FAs_per_flut) * area_dict["carry_chain_mux"]
-                ble_area = ble_area + ((area_dict["xcarry_chain_and"] + area_dict["xcarry_chain_mux"]) * self.carry_skip_periphery_count)/self.N
+#         if self.enable_carry_chain == 1:
+#             if self.carry_skip_periphery_count ==0:
+#                 ble_area = ble_area + area_dict["carry_chain"] * self.FAs_per_flut + (self.FAs_per_flut) * area_dict["carry_chain_mux"]
+#             else:
+#                 ble_area = ble_area + area_dict["carry_chain"] * self.FAs_per_flut + (self.FAs_per_flut) * area_dict["carry_chain_mux"]
+#                 ble_area = ble_area + ((area_dict["xcarry_chain_and"] + area_dict["xcarry_chain_mux"]) * self.carry_skip_periphery_count)/self.N
 
-        ble_width = math.sqrt(ble_area)
-        area_dict["ble"] = ble_area
-        width_dict["ble"] = ble_width
+#         ble_width = math.sqrt(ble_area)
+#         area_dict["ble"] = ble_area
+#         width_dict["ble"] = ble_width
 
 
-        
-        
-    def update_wires(self, width_dict, wire_lengths, wire_layers, lut_ratio):
-        """ Update wire of member objects. """
-        
-        # Update lut and ff wires.
-        self.lut.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
-        self.ff.update_wires(width_dict, wire_lengths, wire_layers)
-        
-        # Update BLE output wires
-        self.local_output.update_wires(width_dict, wire_lengths, wire_layers)
-        self.general_output.update_wires(width_dict, wire_lengths, wire_layers)
-        
-        # Wire connecting all BLE output mux-inputs together
-        wire_lengths["wire_ble_outputs"] = self.num_local_outputs*width_dict["local_ble_output"] + self.num_general_outputs*width_dict["general_ble_output"]
-        wire_layers["wire_ble_outputs"] = 0
-
-        # Update LUT load wires
-        self.lut_output_load.update_wires(width_dict, wire_lengths, wire_layers)
-
-        # Fracturable luts:
-        if self.use_fluts:
-            self.fmux.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
         
         
-    def print_details(self, report_file):
+#     def update_wires(self, width_dict, wire_lengths, wire_layers, lut_ratio):
+#         """ Update wire of member objects. """
+        
+        
+
+#         # Update lut and ff wires.
+#         self.lut.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
+#         self.ff.update_wires(width_dict, wire_lengths, wire_layers)
+        
+#         # Update BLE output wires
+#         self.local_output.update_wires(width_dict, wire_lengths, wire_layers)
+#         self.general_output.update_wires(width_dict, wire_lengths, wire_layers)
+        
+#         # Wire connecting all BLE output mux-inputs together
+#         wire_lengths["wire_ble_outputs"] = self.num_local_outputs*width_dict[self.local_output.name] + self.num_general_outputs*width_dict[self.general_output.name]
+#         wire_layers["wire_ble_outputs"] = LOCAL_WIRE_LAYER
+
+#         # Update LUT load wires
+#         self.lut_output_load.update_wires(width_dict, wire_lengths, wire_layers)
+
+#         # Fracturable luts:
+#         if self.use_fluts:
+#             self.fmux.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
+        
+        
+#     def print_details(self, report_file):
     
-        self.lut.print_details(report_file)
+#         self.lut.print_details(report_file)
         
         
-class _LocalBLEOutputLoad:
+# class _LocalBLEOutputLoad:
 
-    def __init__(self):
-        self.name = "local_ble_output_load"
+#     def __init__(self):
+#         self.name = "local_ble_output_load"
         
         
-    def generate(self, subcircuit_filename):
-        load_subcircuits.generate_local_ble_output_load(subcircuit_filename)
+#     def generate(self, subcircuit_filename):
+#         load_subcircuits.generate_local_ble_output_load(subcircuit_filename)
      
      
-    def update_wires(self, width_dict, wire_lengths, wire_layers, ble_ic_dis):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers, ble_ic_dis):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
-        # Update wire lengths
-        wire_lengths["wire_local_ble_output_feedback"] = width_dict["logic_cluster"]
-        if ble_ic_dis !=0:
-            wire_lengths["wire_local_ble_output_feedback"] = ble_ic_dis
-        # Update wire layers
-        wire_layers["wire_local_ble_output_feedback"] = 0
+#         # Update wire lengths
+#         wire_lengths["wire_local_ble_output_feedback"] = width_dict["logic_cluster"]
+#         if ble_ic_dis !=0:
+#             wire_lengths["wire_local_ble_output_feedback"] = ble_ic_dis
+#         # Update wire layers
+#         wire_layers["wire_local_ble_output_feedback"] = 0
 
 
         
 
-class _GeneralBLEOutputLoad:
-    """ Logic cluster output load (i.e. general BLE output load). 
-        Made up of a wire loaded by SB muxes. """
+# class _GeneralBLEOutputLoad:
+#     """ Logic cluster output load (i.e. general BLE output load). 
+#         Made up of a wire loaded by SB muxes. """
 
-    def __init__(self, gen_r_wire: dict):
-        # Subcircuit name
-        self.name = "general_ble_output_load"
-        # Assumed routing channel usage, we need this for load calculation 
-        self.channel_usage_assumption = 0.5
-        # Assumed number of 'on' SB muxes on cluster output, needed for load calculation
-        self.num_sb_mux_on_assumption = 1
-        # Number of 'partially on' SB muxes on cluster output (calculated in compute_load)
-        self.num_sb_mux_partial = -1
-        # Number of 'off' SB muxes on cluster output (calculated in compute_load)
-        self.num_sb_mux_off = -1
-        # List of wires in this subcircuit
-        self.wire_names = []
-        # The general routing wire length associated with this output load
-        self.gen_r_wire : dict = gen_r_wire 
+#     def __init__(self, gen_r_wire: dict, sb_mux: _SwitchBlockMUX):
+#         # Subcircuit name
+#         self.name = "general_ble_output_load"
+#         # Assumed routing channel usage, we need this for load calculation 
+#         self.channel_usage_assumption = 0.5
+#         # Assumed number of 'on' SB muxes on cluster output, needed for load calculation
+#         self.num_sb_mux_on_assumption = 1
+#         # Number of 'partially on' SB muxes on cluster output (calculated in compute_load)
+#         self.num_sb_mux_partial = -1
+#         # Number of 'off' SB muxes on cluster output (calculated in compute_load)
+#         self.num_sb_mux_off = -1
+#         # List of wires in this subcircuit
+#         self.wire_names = []
+#         # The general routing wire length associated with this output load
+#         self.gen_r_wire : dict = gen_r_wire 
         
         
-    def generate(self, subcircuit_filename, specs, sb_mux):
-        """ Compute cluster output load load and generate SPICE netlist. """
+#     def generate(self, subcircuit_filename, specs, sb_mux, total_num_sb_muxes: int):
+#         """ Compute cluster output load load and generate SPICE netlist. """
         
-        self._compute_load(specs, sb_mux, self.channel_usage_assumption, self.num_sb_mux_on_assumption, self.gen_r_wire)
-        self.wire_names = load_subcircuits.generate_general_ble_output_load(subcircuit_filename, self.num_sb_mux_off, self.num_sb_mux_partial, self.num_sb_mux_on_assumption, self.gen_r_wire)
+#         self._compute_load(specs, sb_mux, self.channel_usage_assumption, self.num_sb_mux_on_assumption, total_num_sb_muxes)
+#         self.wire_names = load_subcircuits.generate_general_ble_output_load(subcircuit_filename, self.num_sb_mux_off, self.num_sb_mux_partial, self.num_sb_mux_on_assumption, self.gen_r_wire)
         
         
-    def update_wires(self, width_dict: dict, wire_lengths: dict, wire_layers: dict, h_dist: float, height: float):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict: dict, wire_lengths: dict, wire_layers: dict, h_dist: float, height: float):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
-        # The BLE output wire is the wire that allows a BLE output to reach routing wires in
-        # the routing channels. This wire spans some fraction of a tile. We can set what that
-        # fraction is with the output track-access span (track-access locality).
+#         # The BLE output wire is the wire that allows a BLE output to reach routing wires in
+#         # the routing channels. This wire spans some fraction of a tile. We can set what that
+#         # fraction is with the output track-access span (track-access locality).
 
-        gen_ble_out_wire_key = f"wire_general_ble_output_L{self.gen_r_wire['len']}_uid{self.gen_r_wire['id']}"
-        # height is the lb_height, I wonder why once we have initialized the lb_height we no longer use the output track locality
-        wire_lengths[gen_ble_out_wire_key] = width_dict["tile"]*OUTPUT_TRACK_ACCESS_SPAN
-        if height != 0.0:
-            wire_lengths[gen_ble_out_wire_key] = (h_dist)
+#         gen_ble_out_wire_key = f"wire_general_ble_output_L{self.gen_r_wire['len']}_uid{self.gen_r_wire['id']}"
+#         # height is the lb_height, I wonder why once we have initialized the lb_height we no longer use the output track locality
+#         wire_lengths[gen_ble_out_wire_key] = width_dict["tile"] * OUTPUT_TRACK_ACCESS_SPAN
+#         if height != 0.0:
+#             wire_lengths[gen_ble_out_wire_key] = (h_dist)
 
-        # Update wire layers
-        wire_layers[gen_ble_out_wire_key] = LOCAL_WIRE_LAYER
+#         # Update wire layers
+#         wire_layers[gen_ble_out_wire_key] = LOCAL_WIRE_LAYER
       
 
-    def print_details(self, report_file):
-        """ Print cluster output load details """
+#     def print_details(self, report_file):
+#         """ Print cluster output load details """
         
-        utils.print_and_write(report_file, "  CLUSTER OUTPUT LOAD DETAILS:")
-        utils.print_and_write(report_file, "  Total number of SB inputs connected to cluster output: " + str(self.num_sb_mux_off + self.num_sb_mux_partial + self.num_sb_mux_on_assumption))
-        utils.print_and_write(report_file, "  Number of 'on' SB MUXes (assumed): " + str(self.num_sb_mux_on_assumption))
-        utils.print_and_write(report_file, "  Number of 'partial' SB MUXes: " + str(self.num_sb_mux_partial))
-        utils.print_and_write(report_file, "  Number of 'off' SB MUXes: " + str(self.num_sb_mux_off))
-        utils.print_and_write(report_file, "")
+#         utils.print_and_write(report_file, "  CLUSTER OUTPUT LOAD DETAILS:")
+#         utils.print_and_write(report_file, "  Total number of SB inputs connected to cluster output: " + str(self.num_sb_mux_off + self.num_sb_mux_partial + self.num_sb_mux_on_assumption))
+#         utils.print_and_write(report_file, "  Number of 'on' SB MUXes (assumed): " + str(self.num_sb_mux_on_assumption))
+#         utils.print_and_write(report_file, "  Number of 'partial' SB MUXes: " + str(self.num_sb_mux_partial))
+#         utils.print_and_write(report_file, "  Number of 'off' SB MUXes: " + str(self.num_sb_mux_off))
+#         utils.print_and_write(report_file, "")
         
       
-    def _compute_load(self, specs, sb_mux, channel_usage, sb_mux_on, gen_r_wire: dict):
-        """ Calculate how many on/partial/off switch block multiplexers are connected to each cluster output.
-            Inputs are FPGA specs object, switch block mux object, assumed channel usage and assumed number of on muxes.
-            The function will update the object's off & partial attributes."""
+#     def _compute_load(self, specs, sb_mux, channel_usage, sb_mux_on, total_num_sb_muxes: int):
+#         """ Calculate how many on/partial/off switch block multiplexers are connected to each cluster output.
+#             Inputs are FPGA specs object, switch block mux object, assumed channel usage and assumed number of on muxes.
+#             The function will update the object's off & partial attributes."""
         
-        num_tracks = gen_r_wire["num_tracks"]
+#         # Number of tracks in the channel connected to LB opins
+#         num_tracks = specs.W
 
-        # Size of second level of switch block mux, need this to figure out how many partially on muxes are connected
-        sb_level2_size = sb_mux.level2_size
+#         # Size of second level of switch block mux, need this to figure out how many partially on muxes are connected
+#         sb_level2_size = sb_mux.level2_size
         
-        # Total number of switch block multiplexers connected to cluster output
-        total_load = int(specs.Fcout * num_tracks)
+#         # Total number of switch block multiplexers connected to cluster output
+#         total_load = int(specs.Fcout * num_tracks)
         
-        # Let's calculate how many partially on muxes are connected to each output
-        # Based on our channel usage assumption, we can determine how many muxes are in use in a tile.
-        # The number of used SB muxes equals the number of SB muxes per tile multiplied by the channel usage.
-        used_sb_muxes_per_tile = int(channel_usage*sb_mux.num_per_tile)
+#         # Let's calculate how many partially on muxes are connected to each output
+#         # Based on our channel usage assumption, we can determine how many muxes are in use in a tile.
+#         # The number of used SB muxes equals the number of SB muxes per tile multiplied by the channel usage.
+#         used_sb_muxes_per_tile = int(channel_usage * total_num_sb_muxes)
         
-        # Each one of these used muxes comes with a certain amount of partially on paths.
-        # We calculate this based on the size of the 2nd muxing level of the switch block muxes
-        total_partial_paths = used_sb_muxes_per_tile*(sb_level2_size-1)
+#         # Each one of these used muxes comes with a certain amount of partially on paths.
+#         # We calculate this based on the size of the 2nd muxing level of the switch block muxes
+#         total_partial_paths = used_sb_muxes_per_tile*(sb_level2_size-1)
         
-        # The partially on paths are connected to both routing wires and cluster outputs
-        # We assume that they are distributed evenly across both, which means we need to use the
-        # ratio of sb_mux inputs coming from routing wires and coming from cluster outputs to determine
-        # how many partially on paths would be connected to cluster outputs
-        sb_inputs_from_cluster_outputs = total_load*specs.num_cluster_outputs
-        # We use the required size here because we assume that extra inputs that may be present in the "implemented" mux
-        # might be connected to GND or VDD and not to routing wires
-        sb_inputs_from_routing = sb_mux.required_size*sb_mux.num_per_tile - sb_inputs_from_cluster_outputs
-        # Percentage of sb inputs which are used for cluster outputs
-        frac_partial_paths_on_cluster_out = float(sb_inputs_from_cluster_outputs)/(sb_inputs_from_cluster_outputs+sb_inputs_from_routing)
-        # The total number of partial paths on the cluster outputs is calculated using that fraction
-        total_cluster_output_partial_paths = int(frac_partial_paths_on_cluster_out*total_partial_paths)
-        # And we divide by the number of cluster outputs to get partial paths per output
-        # Assuming that ceil is done to do the worst case, depending on the numbers ceil could be too pessimistic?
-        cluster_output_partial_paths = int(math.ceil(float(total_cluster_output_partial_paths)/specs.num_cluster_outputs))
+#         # The partially on paths are connected to both routing wires and cluster outputs
+#         # We assume that they are distributed evenly across both, which means we need to use the
+#         # ratio of sb_mux inputs coming from routing wires and coming from cluster outputs to determine
+#         # how many partially on paths would be connected to cluster outputs
+#         sb_inputs_from_cluster_outputs = total_load*specs.num_cluster_outputs
+#         # We use the required size here because we assume that extra inputs that may be present in the "implemented" mux
+#         # might be connected to GND or VDD and not to routing wires
+#         sb_inputs_from_routing = sb_mux.required_size * total_num_sb_muxes - sb_inputs_from_cluster_outputs
+#         # Percentage of sb inputs which are used for cluster outputs
+#         frac_partial_paths_on_cluster_out = float(sb_inputs_from_cluster_outputs)/(sb_inputs_from_cluster_outputs+sb_inputs_from_routing)
+#         # The total number of partial paths on the cluster outputs is calculated using that fraction
+#         total_cluster_output_partial_paths = int(frac_partial_paths_on_cluster_out*total_partial_paths)
+#         # And we divide by the number of cluster outputs to get partial paths per output
+#         # Assuming that ceil is done to do the worst case, depending on the numbers ceil could be too pessimistic?
+#         cluster_output_partial_paths = int(math.ceil(float(total_cluster_output_partial_paths)/specs.num_cluster_outputs))
         
-        # Now assign these numbers to the object
-        self.num_sb_mux_partial = cluster_output_partial_paths
-        self.num_sb_mux_off = total_load - self.num_sb_mux_partial - sb_mux_on
-    
-
-class _LocalRoutingWireLoad:
-    """ Local routing wire load """
-    
-    def __init__(self):
-        # Name of this wire
-        self.name = "local_routing_wire_load"
-        # How many LUT inputs are we assuming are used in this logic cluster? (%)
-        self.lut_input_usage_assumption = 0.85
-        # Total number of local mux inputs per wire
-        self.mux_inputs_per_wire = -1
-        # Number of on inputs connected to each wire 
-        self.on_inputs_per_wire = -1
-        # Number of partially on inputs connected to each wire
-        self.partial_inputs_per_wire = -1
-        #Number of off inputs connected to each wire
-        self.off_inputs_per_wire = -1
-        # List of wire names in the SPICE circuit
-        self.wire_names = []
+#         # Now assign these numbers to the object
+#         self.num_sb_mux_partial = cluster_output_partial_paths
+#         self.num_sb_mux_off = total_load - self.num_sb_mux_partial - sb_mux_on
     
 
-    def generate(self, subcircuit_filename, specs, local_mux):
-        print("Generating local routing wire load")
-        # Compute load (number of on/partial/off per wire)
-        self._compute_load(specs, local_mux)
-        #print(self.off_inputs_per_wire)
-        # Generate SPICE deck
-        self.wire_names = load_subcircuits.local_routing_load_generate(subcircuit_filename, self.on_inputs_per_wire, self.partial_inputs_per_wire, self.off_inputs_per_wire)
+# class _LocalRoutingWireLoad:
+#     """ Local routing wire load """
+    
+#     def __init__(self):
+#         # Name of this wire
+#         self.name = "local_routing_wire_load"
+#         # How many LUT inputs are we assuming are used in this logic cluster? (%)
+#         self.lut_input_usage_assumption = 0.85
+#         # Total number of local mux inputs per wire
+#         self.mux_inputs_per_wire = -1
+#         # Number of on inputs connected to each wire 
+#         self.on_inputs_per_wire = -1
+#         # Number of partially on inputs connected to each wire
+#         self.partial_inputs_per_wire = -1
+#         #Number of off inputs connected to each wire
+#         self.off_inputs_per_wire = -1
+#         # List of wire names in the SPICE circuit
+#         self.wire_names = []
+    
+
+#     def generate(self, subcircuit_filename, specs, local_mux):
+#         print("Generating local routing wire load")
+#         # Compute load (number of on/partial/off per wire)
+#         self._compute_load(specs, local_mux)
+#         #print(self.off_inputs_per_wire)
+#         # Generate SPICE deck
+#         self.wire_names = load_subcircuits.local_routing_load_generate(subcircuit_filename, self.on_inputs_per_wire, self.partial_inputs_per_wire, self.off_inputs_per_wire)
     
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers, local_routing_wire_load_length):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers, local_routing_wire_load_length):
+#         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
-        # Update wire lengths
-        wire_lengths["wire_local_routing"] = width_dict["logic_cluster"]
-        if local_routing_wire_load_length !=0:
-            wire_lengths["wire_local_routing"] = local_routing_wire_load_length
-        # Update wire layers
-        wire_layers["wire_local_routing"] = 0
+#         # Update wire lengths
+#         wire_lengths["wire_local_routing"] = width_dict["logic_cluster"]
+#         if local_routing_wire_load_length !=0:
+#             wire_lengths["wire_local_routing"] = local_routing_wire_load_length
+#         # Update wire layers
+#         wire_layers["wire_local_routing"] = 0
     
         
-    def print_details(self):
-        print("LOCAL ROUTING WIRE LOAD DETAILS")
-        print("")
+#     def print_details(self):
+#         print("LOCAL ROUTING WIRE LOAD DETAILS")
+#         print("")
         
         
-    def _compute_load(self, specs, local_mux):
-        """ Compute the load on a local routing wire (number of on/partial/off) """
+#     def _compute_load(self, specs, local_mux):
+#         """ Compute the load on a local routing wire (number of on/partial/off) """
         
-        # The first thing we are going to compute is how many local mux inputs are connected to a local routing wire
-        # This is a function of local_mux size, N, K, I and Ofb
-        num_local_routing_wires = specs.I+specs.N*specs.num_ble_local_outputs
-        self.mux_inputs_per_wire = local_mux.implemented_size*specs.N*specs.K/num_local_routing_wires
+#         # The first thing we are going to compute is how many local mux inputs are connected to a local routing wire
+#         # This is a function of local_mux size, N, K, I and Ofb
+#         num_local_routing_wires = specs.I+specs.N*specs.num_ble_local_outputs
+#         self.mux_inputs_per_wire = local_mux.implemented_size*specs.N*specs.K/num_local_routing_wires
         
-        # Now we compute how many "on" inputs are connected to each routing wire
-        # This is a funtion of lut input usage, number of lut inputs and number of local routing wires
-        num_local_muxes_used = self.lut_input_usage_assumption*specs.N*specs.K
-        self.on_inputs_per_wire = int(num_local_muxes_used/num_local_routing_wires)
-        # We want to model for the case where at least one "on" input is connected to the local wire, so make sure it's at least 1
-        if self.on_inputs_per_wire < 1:
-            self.on_inputs_per_wire = 1
+#         # Now we compute how many "on" inputs are connected to each routing wire
+#         # This is a funtion of lut input usage, number of lut inputs and number of local routing wires
+#         num_local_muxes_used = self.lut_input_usage_assumption*specs.N*specs.K
+#         self.on_inputs_per_wire = int(num_local_muxes_used/num_local_routing_wires)
+#         # We want to model for the case where at least one "on" input is connected to the local wire, so make sure it's at least 1
+#         if self.on_inputs_per_wire < 1:
+#             self.on_inputs_per_wire = 1
         
-        # Now we compute how many partially on muxes are connected to each wire
-        # The number of partially on muxes is equal to (level2_size - 1)*num_local_muxes_used/num_local_routing_wire
-        # We can figure out the number of muxes used by using the "on" assumption and the number of local routing wires.
-        self.partial_inputs_per_wire = int((local_mux.level2_size - 1.0)*num_local_muxes_used/num_local_routing_wires)
-        # Make it at least 1
-        if self.partial_inputs_per_wire < 1:
-            self.partial_inputs_per_wire = 1
+#         # Now we compute how many partially on muxes are connected to each wire
+#         # The number of partially on muxes is equal to (level2_size - 1)*num_local_muxes_used/num_local_routing_wire
+#         # We can figure out the number of muxes used by using the "on" assumption and the number of local routing wires.
+#         self.partial_inputs_per_wire = int((local_mux.level2_size - 1.0)*num_local_muxes_used/num_local_routing_wires)
+#         # Make it at least 1
+#         if self.partial_inputs_per_wire < 1:
+#             self.partial_inputs_per_wire = 1
         
-        # Number of off inputs is simply the difference
-        self.off_inputs_per_wire = self.mux_inputs_per_wire - self.on_inputs_per_wire - self.partial_inputs_per_wire
+#         # Number of off inputs is simply the difference
+#         self.off_inputs_per_wire = self.mux_inputs_per_wire - self.on_inputs_per_wire - self.partial_inputs_per_wire
         
 
-class _LogicCluster(_CompoundCircuit):
+# class _LogicCluster(_CompoundCircuit):
     
-    def __init__(self, N, K, Or, Ofb, Rsel, Rfb, local_mux_size_required, num_local_mux_per_tile, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, wire_types: List[dict]):
-        # Name of logic cluster
-        self.name = "logic_cluster"
-        # Cluster size
-        self.N = N
-        # Create BLE object
-        self.ble = _BLE(K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, N, wire_types)
-        # Create local mux object
-        self.local_mux = _LocalMUX(local_mux_size_required, num_local_mux_per_tile, use_tgate)
-        # Create local routing wire load object
-        self.local_routing_wire_load = _LocalRoutingWireLoad()
-        # Create local BLE output load object
-        self.local_ble_output_load = _LocalBLEOutputLoad()
-        self.use_fluts = use_fluts
-        self.enable_carry_chain = enable_carry_chain
+#     def __init__(self, N, K, Or, Ofb, Rsel, Rfb, local_mux_size_required, num_local_mux_per_tile, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, gen_r_wire: dict):
+#         # Name of logic cluster
+#         # self.name = f"logic_cluster_{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+#         self.name = "logic_cluster"
+#         # General routing wire associated with this logic cluster
+#         self.gen_r_wire = gen_r_wire
+#         # Cluster size
+#         self.N = N
+#         # Create BLE object
+#         self.ble = _BLE(K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, N, gen_r_wire)
+#         # Create local mux object
+#         self.local_mux = _LocalMUX(local_mux_size_required, num_local_mux_per_tile, use_tgate, gen_r_wire)
+#         # Create local routing wire load object
+#         self.local_routing_wire_load = _LocalRoutingWireLoad()
+#         # Create local BLE output load object
+#         self.local_ble_output_load = _LocalBLEOutputLoad()
+#         self.use_fluts = use_fluts
+#         self.enable_carry_chain = enable_carry_chain
 
         
-    def generate(self, subcircuits_filename, min_tran_width, specs):
-        print("Generating logic cluster")
-        init_tran_sizes = {}
-        init_tran_sizes.update(self.ble.generate(subcircuits_filename, min_tran_width))
-        init_tran_sizes.update(self.local_mux.generate(subcircuits_filename, min_tran_width))
-        self.local_routing_wire_load.generate(subcircuits_filename, specs, self.local_mux)
-        self.local_ble_output_load.generate(subcircuits_filename)
+#     def generate(self, subcircuits_filename, min_tran_width, specs):
+#         print("Generating logic cluster")
+#         init_tran_sizes = {}
+#         init_tran_sizes.update(self.ble.generate(subcircuits_filename, min_tran_width))
+#         init_tran_sizes.update(self.local_mux.generate(subcircuits_filename, min_tran_width))
+#         self.local_routing_wire_load.generate(subcircuits_filename, specs, self.local_mux)
+#         self.local_ble_output_load.generate(subcircuits_filename)
         
-        return init_tran_sizes
+#         return init_tran_sizes
 
 
-    def generate_top(self, min_len_wire: dict):
-        # pass min_len_wire to our local mux 
-        # gen programmable routing -> local mux -> ble 
-        # We assume that the shortest wire of our options is loading the input of our local muxes
-        self.local_mux.generate_top(min_len_wire)
-        self.ble.generate_top()
+#     def generate_top(self):
+#         # pass min_len_wire to our local mux 
+#         # gen programmable routing -> local mux -> ble 
+#         # We assume that the shortest wire of our options is loading the input of our local muxes
+#         self.local_mux.generate_top()
+#         self.ble.generate_top()
         
         
-    def update_area(self, area_dict, width_dict):
-        self.ble.update_area(area_dict, width_dict)
-        self.local_mux.update_area(area_dict, width_dict)       
+#     def update_area(self, area_dict, width_dict):
+#         self.ble.update_area(area_dict, width_dict)
+#         self.local_mux.update_area(area_dict, width_dict)       
         
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers, ic_ratio, lut_ratio, ble_ic_dis, local_routing_wire_load_length):
-        """ Update wires of things inside the logic cluster. """
+#     def update_wires(self, width_dict, wire_lengths, wire_layers, ic_ratio, lut_ratio, ble_ic_dis, local_routing_wire_load_length):
+#         """ Update wires of things inside the logic cluster. """
         
-        # Call wire update functions of member objects.
-        self.ble.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
-        self.local_mux.update_wires(width_dict, wire_lengths, wire_layers, ic_ratio)
-        self.local_routing_wire_load.update_wires(width_dict, wire_lengths, wire_layers, local_routing_wire_load_length)
-        self.local_ble_output_load.update_wires(width_dict, wire_lengths, wire_layers, ble_ic_dis)
+#         # Call wire update functions of member objects.
+#         self.ble.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
+#         self.local_mux.update_wires(width_dict, wire_lengths, wire_layers, ic_ratio)
+#         self.local_routing_wire_load.update_wires(width_dict, wire_lengths, wire_layers, local_routing_wire_load_length)
+#         self.local_ble_output_load.update_wires(width_dict, wire_lengths, wire_layers, ble_ic_dis)
         
         
-    def print_details(self, report_file):
-        self.local_mux.print_details(report_file)
-        self.ble.print_details(report_file)
+#     def print_details(self, report_file):
+#         self.local_mux.print_details(report_file)
+#         self.ble.print_details(report_file)
     
        
-class _RoutingWireLoad:
-    """ This is the routing wire load for an architecture with direct drive and only one segment length.
-        Two-level muxes are assumed and we model for partially on paths. """
+# class _RoutingWireLoad:
+#     """ This is the routing wire load for an architecture with direct drive and only one segment length.
+#         Two-level muxes are assumed and we model for partially on paths. """
         
-    def __init__(self, gen_r_wire: dict):
-        # Name of this wire
-        self.name = "routing_wire_load"
-        # General routing wire information
-        self.gen_r_wire = gen_r_wire
-        # We assume that half of the wires in a routing channel are used (limited by routability)
-        self.channel_usage_assumption = 0.5
-        # We assume that half of the cluster inputs are used
-        self.cluster_input_usage_assumption = 0.5
-        # Switch block load per wire
-        self.sb_load_on = -1
-        self.sb_load_partial = -1
-        self.sb_load_off = -1
-        # Connection block load per wire
-        self.cb_load_on = -1
-        self.cb_load_partial = -1
-        self.cb_load_off = -1
-        # Switch block per tile
-        self.tile_sb_on = []
-        self.tile_sb_partial = []
-        self.tile_sb_off = []
-        # Connection block per tile
-        self.tile_cb_on = []
-        self.tile_cb_partial = []
-        self.tile_cb_off = []
-        # List of wire names in the SPICE circuit
-        self.wire_names = []
+#     def __init__(self, gen_r_wire: dict):
+#         # Name of this wire
+#         self.name = "routing_wire_load"
+#         # General routing wire information
+#         self.gen_r_wire = gen_r_wire
+#         # We assume that half of the wires in a routing channel are used (limited by routability)
+#         self.channel_usage_assumption = 0.5
+#         # We assume that half of the cluster inputs are used
+#         self.cluster_input_usage_assumption = 0.5
+#         # Switch block load per wire
+#         self.sb_load_on = -1
+#         self.sb_load_partial = -1
+#         self.sb_load_off = -1
+#         # Connection block load per wire
+#         self.cb_load_on = -1
+#         self.cb_load_partial = -1
+#         self.cb_load_off = -1
+#         # Switch block per tile
+#         self.tile_sb_on = []
+#         self.tile_sb_partial = []
+#         self.tile_sb_off = []
+#         # Connection block per tile
+#         self.tile_cb_on = []
+#         self.tile_cb_partial = []
+#         self.tile_cb_off = []
+#         # List of wire names in the SPICE circuit
+#         self.wire_names = []
         
         
-    def generate(self, subcircuit_filename: str, specs: _Specs, sb_mux: _SwitchBlockMUX, cb_mux: _ConnectionBlockMUX):
-        """ Generate the SPICE circuit for general routing wire load
-            Need specs object, switch block object and connection block object """
-        print("Generating routing wire load")
-        # Calculate wire load based on architecture parameters
-        self._compute_load(specs, sb_mux, cb_mux, self.channel_usage_assumption, self.cluster_input_usage_assumption)
-        # Generate SPICE deck
-        self.wire_names = load_subcircuits.general_routing_load_generate(subcircuit_filename, self.tile_sb_on, self.tile_sb_partial, self.tile_sb_off, self.tile_cb_on, self.tile_cb_partial, self.tile_cb_off, self.gen_r_wire, sb_mux)
+#     def generate(self, subcircuit_filename: str, specs: _Specs, sb_mux: _SwitchBlockMUX, cb_mux: _ConnectionBlockMUX):
+#         """ Generate the SPICE circuit for general routing wire load
+#             Need specs object, switch block object and connection block object """
+#         print("Generating routing wire load")
+#         # Calculate wire load based on architecture parameters
+#         self._compute_load(specs, sb_mux, cb_mux, self.channel_usage_assumption, self.cluster_input_usage_assumption)
+#         # Generate SPICE deck
+#         self.wire_names = load_subcircuits.general_routing_load_generate(subcircuit_filename, self.tile_sb_on, self.tile_sb_partial, self.tile_sb_off, self.tile_cb_on, self.tile_cb_partial, self.tile_cb_off, self.gen_r_wire, sb_mux)
     
     
-    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], height: float, num_sb_stripes: int, num_cb_stripes: int):
-        """ Calculate wire lengths and wire layers. """
+#     def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], height: float, num_sb_stripes: int, num_cb_stripes: int):
+#         """ Calculate wire lengths and wire layers. """
 
-        # Get information from the general routing wire
-        wire_length = self.gen_r_wire["len"]
-        wire_id = self.gen_r_wire["id"]
-        wire_layer = self.gen_r_wire["metal"]
+#         # Get information from the general routing wire
+#         wire_length = self.gen_r_wire["len"]
+#         wire_id = self.gen_r_wire["id"]
+#         wire_layer = self.gen_r_wire["metal"]
 
-        key_str_suffix = f"_L{wire_length}_uid{wire_id}"
-        # Get get keys for wires
-        # TODO remove duplication figure out somewhere to define and save these keys
-        wire_gen_routing_load_key = f"wire_gen_routing{key_str_suffix}"
-        wire_sb_load_on_key = f"wire_sb_load_on{key_str_suffix}"
-        wire_sb_load_partial_key = f"wire_sb_load_partial{key_str_suffix}"
-        wire_sb_load_off_key = f"wire_sb_load_off{key_str_suffix}"
+#         key_str_suffix = f"_L{wire_length}_uid{wire_id}"
+#         # Get get keys for wires
+#         # TODO remove duplication figure out somewhere to define and save these keys
+#         wire_gen_routing_load_key = f"wire_gen_routing{key_str_suffix}"
+#         wire_sb_load_on_key = f"wire_sb_load_on{key_str_suffix}"
+#         wire_sb_load_partial_key = f"wire_sb_load_partial{key_str_suffix}"
+#         wire_sb_load_off_key = f"wire_sb_load_off{key_str_suffix}"
 
-        wire_cb_load_on_key = f"wire_cb_load_on{key_str_suffix}"
-        wire_cb_load_partial_key = f"wire_cb_load_partial{key_str_suffix}"
-        wire_cb_load_off_key = f"wire_cb_load_off{key_str_suffix}"
+#         wire_cb_load_on_key = f"wire_cb_load_on{key_str_suffix}"
+#         wire_cb_load_partial_key = f"wire_cb_load_partial{key_str_suffix}"
+#         wire_cb_load_off_key = f"wire_cb_load_off{key_str_suffix}"
 
 
 
-        # This is the general routing wire that spans L tiles
-        wire_lengths[wire_gen_routing_load_key] = wire_length*width_dict["tile"]
-        # if lb_height has been initialized
-        if height != 0.0:
-            # If the height is greater than the width of the tile, then the wire length is the height, else width
-            # This takes the larger of the two values to get wirelength, worst case?
-            if height > ((width_dict["tile"]*width_dict["tile"])/height):
-                wire_lengths[wire_gen_routing_load_key] = wire_length*(height)
-            else:
-                wire_lengths[wire_gen_routing_load_key] = wire_length*((width_dict["tile"]*width_dict["tile"])/height)
+#         # This is the general routing wire that spans L tiles
+#         wire_lengths[wire_gen_routing_load_key] = wire_length*width_dict["tile"]
+#         # if lb_height has been initialized
+#         if height != 0.0:
+#             # If the height is greater than the width of the tile, then the wire length is the height, else width
+#             # This takes the larger of the two values to get wirelength, worst case?
+#             if height > ((width_dict["tile"]*width_dict["tile"])/height):
+#                 wire_lengths[wire_gen_routing_load_key] = wire_length*(height)
+#             else:
+#                 wire_lengths[wire_gen_routing_load_key] = wire_length*((width_dict["tile"]*width_dict["tile"])/height)
 
-        # These are the pieces of wire that are required to connect routing wires to switch 
-        # block inputs. We assume that on average, they span half a tile.
-        wire_lengths[wire_sb_load_on_key] = width_dict["tile"]/2
-        wire_lengths[wire_sb_load_partial_key] = width_dict["tile"]/2
-        wire_lengths[wire_sb_load_off_key] = width_dict["tile"]/2 
-        if height != 0.0:
-            # This is saying that if we have a single stripe we have to travel the entire width of the LB to get from the routing wire to the SB input
-            if num_sb_stripes == 1:
-                wire_lengths[wire_sb_load_on_key] = wire_lengths[wire_gen_routing_load_key]/wire_length
-                wire_lengths[wire_sb_load_partial_key] = wire_lengths[wire_gen_routing_load_key]/wire_length
-                wire_lengths[wire_sb_load_off_key] = wire_lengths[wire_gen_routing_load_key]/wire_length
-            # I guess this says if there are more than 1 then just estimate by traveling half of the width of the LB
-            else:
-                wire_lengths[wire_sb_load_on_key] = wire_lengths[wire_gen_routing_load_key]/(2*wire_length)
-                wire_lengths[wire_sb_load_partial_key] = wire_lengths[wire_gen_routing_load_key]/(2*wire_length)
-                wire_lengths[wire_sb_load_off_key] = wire_lengths[wire_gen_routing_load_key]/(2*wire_length)			
+#         # These are the pieces of wire that are required to connect routing wires to switch 
+#         # block inputs. We assume that on average, they span half a tile.
+#         wire_lengths[wire_sb_load_on_key] = width_dict["tile"]/2
+#         wire_lengths[wire_sb_load_partial_key] = width_dict["tile"]/2
+#         wire_lengths[wire_sb_load_off_key] = width_dict["tile"]/2 
+#         if height != 0.0:
+#             # This is saying that if we have a single stripe we have to travel the entire width of the LB to get from the routing wire to the SB input
+#             if num_sb_stripes == 1:
+#                 wire_lengths[wire_sb_load_on_key] = wire_lengths[wire_gen_routing_load_key]/wire_length
+#                 wire_lengths[wire_sb_load_partial_key] = wire_lengths[wire_gen_routing_load_key]/wire_length
+#                 wire_lengths[wire_sb_load_off_key] = wire_lengths[wire_gen_routing_load_key]/wire_length
+#             # I guess this says if there are more than 1 then just estimate by traveling half of the width of the LB
+#             else:
+#                 wire_lengths[wire_sb_load_on_key] = wire_lengths[wire_gen_routing_load_key]/(2*wire_length)
+#                 wire_lengths[wire_sb_load_partial_key] = wire_lengths[wire_gen_routing_load_key]/(2*wire_length)
+#                 wire_lengths[wire_sb_load_off_key] = wire_lengths[wire_gen_routing_load_key]/(2*wire_length)			
         
-        # These are the pieces of wire that are required to connect routing wires to 
-        # connection block multiplexer inputs. They span some fraction of a tile that is 
-        # given my the input track-access span (track-access locality). 
-        wire_lengths[wire_cb_load_on_key] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
-        wire_lengths[wire_cb_load_partial_key] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
-        wire_lengths[wire_cb_load_off_key] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
-        # Doing something similar to switch blocks, if we have an initialized lb_height & single stripe then use full width of LB as base wire length being multiplied by input track access factor
-        if height != 0 and num_cb_stripes == 1:
-            wire_lengths[wire_cb_load_on_key] = (wire_lengths[wire_gen_routing_load_key]/wire_length) * INPUT_TRACK_ACCESS_SPAN
-            wire_lengths[wire_cb_load_partial_key] = (wire_lengths[wire_gen_routing_load_key]/wire_length) * INPUT_TRACK_ACCESS_SPAN
-            wire_lengths[wire_cb_load_off_key] = (wire_lengths[wire_gen_routing_load_key]/wire_length) * INPUT_TRACK_ACCESS_SPAN
-        elif height != 0 :
-            wire_lengths[wire_cb_load_on_key] = (wire_lengths[wire_gen_routing_load_key]/(2*wire_length)) * INPUT_TRACK_ACCESS_SPAN
-            wire_lengths[wire_cb_load_partial_key] = (wire_lengths[wire_gen_routing_load_key]/(2*wire_length)) * INPUT_TRACK_ACCESS_SPAN
-            wire_lengths[wire_cb_load_off_key] = (wire_lengths[wire_gen_routing_load_key]/(2*wire_length)) * INPUT_TRACK_ACCESS_SPAN
+#         # These are the pieces of wire that are required to connect routing wires to 
+#         # connection block multiplexer inputs. They span some fraction of a tile that is 
+#         # given my the input track-access span (track-access locality). 
+#         wire_lengths[wire_cb_load_on_key] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
+#         wire_lengths[wire_cb_load_partial_key] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
+#         wire_lengths[wire_cb_load_off_key] = width_dict["tile"]*INPUT_TRACK_ACCESS_SPAN
+#         # Doing something similar to switch blocks, if we have an initialized lb_height & single stripe then use full width of LB as base wire length being multiplied by input track access factor
+#         if height != 0 and num_cb_stripes == 1:
+#             wire_lengths[wire_cb_load_on_key] = (wire_lengths[wire_gen_routing_load_key]/wire_length) * INPUT_TRACK_ACCESS_SPAN
+#             wire_lengths[wire_cb_load_partial_key] = (wire_lengths[wire_gen_routing_load_key]/wire_length) * INPUT_TRACK_ACCESS_SPAN
+#             wire_lengths[wire_cb_load_off_key] = (wire_lengths[wire_gen_routing_load_key]/wire_length) * INPUT_TRACK_ACCESS_SPAN
+#         elif height != 0 :
+#             wire_lengths[wire_cb_load_on_key] = (wire_lengths[wire_gen_routing_load_key]/(2*wire_length)) * INPUT_TRACK_ACCESS_SPAN
+#             wire_lengths[wire_cb_load_partial_key] = (wire_lengths[wire_gen_routing_load_key]/(2*wire_length)) * INPUT_TRACK_ACCESS_SPAN
+#             wire_lengths[wire_cb_load_off_key] = (wire_lengths[wire_gen_routing_load_key]/(2*wire_length)) * INPUT_TRACK_ACCESS_SPAN
 			
-       # Update wire layers
-        wire_layers[wire_gen_routing_load_key] = wire_layer # used to be 1 -> the first metal layer above local
-        wire_layers[wire_sb_load_on_key] = LOCAL_WIRE_LAYER 
-        wire_layers[wire_sb_load_partial_key] = LOCAL_WIRE_LAYER
-        wire_layers[wire_sb_load_off_key] = LOCAL_WIRE_LAYER
-        wire_layers[wire_cb_load_on_key] = LOCAL_WIRE_LAYER
-        wire_layers[wire_cb_load_partial_key] = LOCAL_WIRE_LAYER
-        wire_layers[wire_cb_load_off_key] = LOCAL_WIRE_LAYER
+#        # Update wire layers
+#         wire_layers[wire_gen_routing_load_key] = wire_layer # used to be 1 -> the first metal layer above local
+#         wire_layers[wire_sb_load_on_key] = LOCAL_WIRE_LAYER 
+#         wire_layers[wire_sb_load_partial_key] = LOCAL_WIRE_LAYER
+#         wire_layers[wire_sb_load_off_key] = LOCAL_WIRE_LAYER
+#         wire_layers[wire_cb_load_on_key] = LOCAL_WIRE_LAYER
+#         wire_layers[wire_cb_load_partial_key] = LOCAL_WIRE_LAYER
+#         wire_layers[wire_cb_load_off_key] = LOCAL_WIRE_LAYER
     
     
-    def print_details(self, report_file):
+#     def print_details(self, report_file):
         
-        utils.print_and_write(report_file, "  ROUTING WIRE LOAD DETAILS:")
-        utils.print_and_write(report_file, "  Number of SB inputs connected to routing wire = " + str(self.sb_load_on + self.sb_load_partial + self.sb_load_off))
-        utils.print_and_write(report_file, "  Wire: SB (on = " + str(self.sb_load_on) + ", partial = " + str(self.sb_load_partial) + ", off = " + str(self.sb_load_off) + ")")
-        utils.print_and_write(report_file, "  Number of CB inputs connected to routing wire = " + str(self.cb_load_on + self.cb_load_partial + self.cb_load_off))
-        utils.print_and_write(report_file, "  Wire: CB (on = " + str(self.cb_load_on) + ", partial = " + str(self.cb_load_partial) + ", off = " + str(self.cb_load_off) + ")")
+#         utils.print_and_write(report_file, "  ROUTING WIRE LOAD DETAILS:")
+#         utils.print_and_write(report_file, "  Number of SB inputs connected to routing wire = " + str(self.sb_load_on + self.sb_load_partial + self.sb_load_off))
+#         utils.print_and_write(report_file, "  Wire: SB (on = " + str(self.sb_load_on) + ", partial = " + str(self.sb_load_partial) + ", off = " + str(self.sb_load_off) + ")")
+#         utils.print_and_write(report_file, "  Number of CB inputs connected to routing wire = " + str(self.cb_load_on + self.cb_load_partial + self.cb_load_off))
+#         utils.print_and_write(report_file, "  Wire: CB (on = " + str(self.cb_load_on) + ", partial = " + str(self.cb_load_partial) + ", off = " + str(self.cb_load_off) + ")")
 
-        for i in range(self.gen_r_wire["len"]):
-            utils.print_and_write(report_file, "  Tile " + str(i+1) + ": SB (on = " + str(self.tile_sb_on[i]) + ", partial = " + str(self.tile_sb_partial[i]) + 
-            ", off = " + str(self.tile_sb_off[i]) + "); CB (on = " + str(self.tile_cb_on[i]) + ", partial = " + str(self.tile_cb_partial[i]) + ", off = " + str(self.tile_cb_off[i]) + ")")
-        utils.print_and_write(report_file, "")
+#         for i in range(self.gen_r_wire["len"]):
+#             utils.print_and_write(report_file, "  Tile " + str(i+1) + ": SB (on = " + str(self.tile_sb_on[i]) + ", partial = " + str(self.tile_sb_partial[i]) + 
+#             ", off = " + str(self.tile_sb_off[i]) + "); CB (on = " + str(self.tile_cb_on[i]) + ", partial = " + str(self.tile_cb_partial[i]) + ", off = " + str(self.tile_cb_off[i]) + ")")
+#         utils.print_and_write(report_file, "")
         
        
-    def _compute_load(self, specs: _Specs, sb_mux: _SwitchBlockMUX, cb_mux: _ConnectionBlockMUX, channel_usage: float, cluster_input_usage: float):
-        """ Computes the load on a routing wire """
+#     def _compute_load(self, specs: _Specs, sb_mux: _SwitchBlockMUX, cb_mux: _ConnectionBlockMUX, channel_usage: float, cluster_input_usage: float):
+#         """ Computes the load on a routing wire """
         
-        # Local variables
-        W = self.gen_r_wire["num_tracks"]
-        L = self.gen_r_wire["len"]
-        I = specs.I
-        Fs = specs.Fs
-        sb_mux_size = sb_mux.implemented_size
-        cb_mux_size = cb_mux.implemented_size
-        sb_level1_size = sb_mux.level1_size
-        sb_level2_size = sb_mux.level2_size
-        cb_level1_size = cb_mux.level1_size
-        cb_level2_size = cb_mux.level2_size
+#         # Local variables
+#         # W = self.gen_r_wire["num_tracks"]
+#         W = specs.W
+#         L = self.gen_r_wire["len"]
+#         I = specs.I
+#         Fs = specs.Fs
+#         sb_mux_size = sb_mux.implemented_size
+#         cb_mux_size = cb_mux.implemented_size
+#         sb_level1_size = sb_mux.level1_size
+#         sb_level2_size = sb_mux.level2_size
+#         cb_level1_size = cb_mux.level1_size
+#         cb_level2_size = cb_mux.level2_size
         
-        # Calculate switch block load per tile
-        # Each tile has Fs-1 switch blocks hanging off of it exept the last one which has 3 (because the wire is ending)
-        sb_load_per_intermediate_tile = (Fs - 1)
-        # Calculate number of on/partial/off
-        # We assume that each routing wire is only driving one more routing wire (at the end)
-        self.sb_load_on = 1
-        # Each used routing multiplexer comes with (sb_level2_size - 1) partially on paths. 
-        # If all wires were used, we'd have (sb_level2_size - 1) partially on paths per wire, TODO: Is this accurate? See ble output load
-        # but since we are just using a fraction of the wires, each wire has (sb_level2_size - 1)*channel_usage partially on paths connected to it.
+#         # Calculate switch block load per tile
+#         # Each tile has Fs-1 switch blocks hanging off of it exept the last one which has 3 (because the wire is ending)
+#         sb_load_per_intermediate_tile = (Fs - 1)
+#         # Calculate number of on/partial/off
+#         # We assume that each routing wire is only driving one more routing wire (at the end)
+#         self.sb_load_on = 1
+#         # Each used routing multiplexer comes with (sb_level2_size - 1) partially on paths. 
+#         # If all wires were used, we'd have (sb_level2_size - 1) partially on paths per wire, TODO: Is this accurate? See ble output load
+#         # but since we are just using a fraction of the wires, each wire has (sb_level2_size - 1)*channel_usage partially on paths connected to it.
         
-        # Stratix had around 50% channel usage, 60-70% is pushing it for most FPGAs
-        # Channel usage is correction factor because we dont turn all muxes on, if we use half of our routing wires we put 0.5 for channel usage
-        self.sb_load_partial = int(round(float(sb_level2_size - 1.0)*channel_usage))
-        # The number of off sb_mux is (total - partial)
-        # Everything that is not partially on will be off
-        # The one ON swtich was already considered so we dont include it in the load
-        self.sb_load_off = sb_load_per_intermediate_tile*L - self.sb_load_partial
+#         # Stratix had around 50% channel usage, 60-70% is pushing it for most FPGAs
+#         # Channel usage is correction factor because we dont turn all muxes on, if we use half of our routing wires we put 0.5 for channel usage
+#         self.sb_load_partial = int(round(float(sb_level2_size - 1.0)*channel_usage))
+#         # The number of off sb_mux is (total - partial)
+#         # Everything that is not partially on will be off
+#         # The one ON swtich was already considered so we dont include it in the load
+#         self.sb_load_off = sb_load_per_intermediate_tile*L - self.sb_load_partial
         
-        # Calculate connection block load per tile
-        # We assume that cluster inputs are divided evenly between horizontal and vertical routing channels
-        # We can get the total number of CB inputs connected to the channel segment by multiplying cluster inputs by cb_mux_size, then divide by W to get cb_inputs/wire
-        cb_load_per_tile = int(round((I/2*cb_mux_size)//W))
-        # Now we got to find out how many are on, how many are partially on and how many are off
-        # For each tile, we have half of the cluster inputs connecting to a routing channel and only a fraction of these inputs are actually used
-        # It is logical to assume that used cluster inputs will be connected to used routing wires, so we have I/2*input_usage inputs per tile,
-        # we have L tiles so, I/2*input_usage*L fully on cluster inputs connected to W*channel_usage routing wires
-        # If we look at the whole wire, we are selecting I/2*input_usage*L signals from W*channel_usage wires
-        cb_load_on_probability = float((I/2.0*cluster_input_usage*L))/(W*channel_usage)
-        self.cb_load_on = int(round(cb_load_on_probability))
-        # If < 1, we round up to one because at least one wire will have a fully on path connected to it and we model for that case.
-        if self.cb_load_on == 0:
-            self.cb_load_on = 1 
-        # Each fully turned on cb_mux comes with (cb_level2_size - 1) partially on paths
-        # The number of partially on paths per tile is I/2*input_usage * (cb_level2_size - 1) 
-        # Number of partially on paths per wire is (I/2*input_usage * (cb_level2_size - 1) * L) / W
-        cb_load_partial_probability = (I/2*cluster_input_usage * (cb_level2_size - 1) * L) / W
-        self.cb_load_partial = int(round(cb_load_partial_probability))
-        # If < 1, we round up to one because at least one wire will have a partially on path connected to it and we model for that case.
-        if self.cb_load_partial == 0:
-            self.cb_load_partial = 1 
-        # Number of off paths is just number connected to routing wire - on - partial
-        self.cb_load_off = cb_load_per_tile*L - self.cb_load_partial - self.cb_load_on
+#         # Calculate connection block load per tile
+#         # We assume that cluster inputs are divided evenly between horizontal and vertical routing channels
+#         # We can get the total number of CB inputs connected to the channel segment by multiplying cluster inputs by cb_mux_size, then divide by W to get cb_inputs/wire
+#         cb_load_per_tile = int(round((I/2*cb_mux_size)//W))
+#         # Now we got to find out how many are on, how many are partially on and how many are off
+#         # For each tile, we have half of the cluster inputs connecting to a routing channel and only a fraction of these inputs are actually used
+#         # It is logical to assume that used cluster inputs will be connected to used routing wires, so we have I/2*input_usage inputs per tile,
+#         # we have L tiles so, I/2*input_usage*L fully on cluster inputs connected to W*channel_usage routing wires
+#         # If we look at the whole wire, we are selecting I/2*input_usage*L signals from W*channel_usage wires
+#         cb_load_on_probability = float((I/2.0*cluster_input_usage*L))/(W*channel_usage)
+#         self.cb_load_on = int(round(cb_load_on_probability))
+#         # If < 1, we round up to one because at least one wire will have a fully on path connected to it and we model for that case.
+#         if self.cb_load_on == 0:
+#             self.cb_load_on = 1 
+#         # Each fully turned on cb_mux comes with (cb_level2_size - 1) partially on paths
+#         # The number of partially on paths per tile is I/2*input_usage * (cb_level2_size - 1) 
+#         # Number of partially on paths per wire is (I/2*input_usage * (cb_level2_size - 1) * L) / W
+#         cb_load_partial_probability = (I/2*cluster_input_usage * (cb_level2_size - 1) * L) / W
+#         self.cb_load_partial = int(round(cb_load_partial_probability))
+#         # If < 1, we round up to one because at least one wire will have a partially on path connected to it and we model for that case.
+#         if self.cb_load_partial == 0:
+#             self.cb_load_partial = 1 
+#         # Number of off paths is just number connected to routing wire - on - partial
+#         self.cb_load_off = cb_load_per_tile*L - self.cb_load_partial - self.cb_load_on
      
-        # Now we want to figure out how to distribute this among the tiles. We have L tiles.
-        tile_sb_on_budget = self.sb_load_on
-        tile_sb_partial_budget = self.sb_load_partial
-        tile_sb_off_budget = self.sb_load_off
-        tile_sb_total_budget = tile_sb_on_budget + tile_sb_partial_budget + tile_sb_off_budget
-        tile_sb_max = math.ceil(float(tile_sb_total_budget)/L)
-        tile_sb_on = []
-        tile_sb_partial = []
-        tile_sb_off = []
-        tile_sb_total = []
+#         # Now we want to figure out how to distribute this among the tiles. We have L tiles.
+#         tile_sb_on_budget = self.sb_load_on
+#         tile_sb_partial_budget = self.sb_load_partial
+#         tile_sb_off_budget = self.sb_load_off
+#         tile_sb_total_budget = tile_sb_on_budget + tile_sb_partial_budget + tile_sb_off_budget
+#         tile_sb_max = math.ceil(float(tile_sb_total_budget)/L)
+#         tile_sb_on = []
+#         tile_sb_partial = []
+#         tile_sb_off = []
+#         tile_sb_total = []
 
-        # How this works: We have a certain amount of switch block mux connections to give to the wire,
-        # we start at the furthest tile from the drive point and we allocate one mux input per tile iteratively until we run out of mux inputs.
-        # The result of this is that on and partial mux inputs will be spread evenly along the wire with a bias towards putting 
-        # them farthest away from the driver first (simulating a worst case).
-        while tile_sb_total_budget != 0:
-            # For each tile distribute load
-            for i in range(L):
-                # Add to lists
-                if len(tile_sb_on) < (i+1):
-                    tile_sb_on.append(0)
-                if len(tile_sb_partial) < (i+1):
-                    tile_sb_partial.append(0)
-                if len(tile_sb_off) < (i+1):
-                    tile_sb_off.append(0)
-                if len(tile_sb_total) < (i+1):
-                    tile_sb_total.append(0)
-                # Distribute loads
-                if tile_sb_on_budget != 0:
-                    if tile_sb_total[i] != tile_sb_max:
-                        tile_sb_on[i] = tile_sb_on[i] + 1
-                        tile_sb_on_budget = tile_sb_on_budget - 1
-                        tile_sb_total[i] = tile_sb_total[i] + 1
-                        tile_sb_total_budget = tile_sb_total_budget - 1
-                if tile_sb_partial_budget != 0:
-                    if tile_sb_total[i] != tile_sb_max:
-                        tile_sb_partial[i] = tile_sb_partial[i] + 1
-                        tile_sb_partial_budget = tile_sb_partial_budget - 1
-                        tile_sb_total[i] = tile_sb_total[i] + 1
-                        tile_sb_total_budget = tile_sb_total_budget - 1
-                if tile_sb_off_budget != 0:
-                    if tile_sb_total[i] != tile_sb_max:
-                        tile_sb_off[i] = tile_sb_off[i] + 1
-                        tile_sb_off_budget = tile_sb_off_budget - 1
-                        tile_sb_total[i] = tile_sb_total[i] + 1
-                        tile_sb_total_budget = tile_sb_total_budget - 1
+#         # How this works: We have a certain amount of switch block mux connections to give to the wire,
+#         # we start at the furthest tile from the drive point and we allocate one mux input per tile iteratively until we run out of mux inputs.
+#         # The result of this is that on and partial mux inputs will be spread evenly along the wire with a bias towards putting 
+#         # them farthest away from the driver first (simulating a worst case).
+#         while tile_sb_total_budget != 0:
+#             # For each tile distribute load
+#             for i in range(L):
+#                 # Add to lists
+#                 if len(tile_sb_on) < (i+1):
+#                     tile_sb_on.append(0)
+#                 if len(tile_sb_partial) < (i+1):
+#                     tile_sb_partial.append(0)
+#                 if len(tile_sb_off) < (i+1):
+#                     tile_sb_off.append(0)
+#                 if len(tile_sb_total) < (i+1):
+#                     tile_sb_total.append(0)
+#                 # Distribute loads
+#                 if tile_sb_on_budget != 0:
+#                     if tile_sb_total[i] != tile_sb_max:
+#                         tile_sb_on[i] = tile_sb_on[i] + 1
+#                         tile_sb_on_budget = tile_sb_on_budget - 1
+#                         tile_sb_total[i] = tile_sb_total[i] + 1
+#                         tile_sb_total_budget = tile_sb_total_budget - 1
+#                 if tile_sb_partial_budget != 0:
+#                     if tile_sb_total[i] != tile_sb_max:
+#                         tile_sb_partial[i] = tile_sb_partial[i] + 1
+#                         tile_sb_partial_budget = tile_sb_partial_budget - 1
+#                         tile_sb_total[i] = tile_sb_total[i] + 1
+#                         tile_sb_total_budget = tile_sb_total_budget - 1
+#                 if tile_sb_off_budget != 0:
+#                     if tile_sb_total[i] != tile_sb_max:
+#                         tile_sb_off[i] = tile_sb_off[i] + 1
+#                         tile_sb_off_budget = tile_sb_off_budget - 1
+#                         tile_sb_total[i] = tile_sb_total[i] + 1
+#                         tile_sb_total_budget = tile_sb_total_budget - 1
          
-        # Assign these per-tile counts to the object
-        self.tile_sb_on = tile_sb_on
-        self.tile_sb_partial = tile_sb_partial
-        self.tile_sb_off = tile_sb_off
+#         # Assign these per-tile counts to the object
+#         self.tile_sb_on = tile_sb_on
+#         self.tile_sb_partial = tile_sb_partial
+#         self.tile_sb_off = tile_sb_off
          
-        tile_cb_on_budget = self.cb_load_on
-        tile_cb_partial_budget = self.cb_load_partial
-        tile_cb_off_budget = self.cb_load_off
-        tile_cb_total_budget = tile_cb_on_budget + tile_cb_partial_budget + tile_cb_off_budget
-        tile_cb_max = math.ceil(float(tile_cb_total_budget)/L)
-        tile_cb_on = []
-        tile_cb_partial = []
-        tile_cb_off = []
-        tile_cb_total = []
+#         tile_cb_on_budget = self.cb_load_on
+#         tile_cb_partial_budget = self.cb_load_partial
+#         tile_cb_off_budget = self.cb_load_off
+#         tile_cb_total_budget = tile_cb_on_budget + tile_cb_partial_budget + tile_cb_off_budget
+#         tile_cb_max = math.ceil(float(tile_cb_total_budget)/L)
+#         tile_cb_on = []
+#         tile_cb_partial = []
+#         tile_cb_off = []
+#         tile_cb_total = []
 
-        while tile_cb_total_budget != 0:
-            # For each tile distribute load
-            for i in range(L):
-                # Add to lists
-                if len(tile_cb_on) < (i+1):
-                    tile_cb_on.append(0)
-                if len(tile_cb_partial) < (i+1):
-                    tile_cb_partial.append(0)
-                if len(tile_cb_off) < (i+1):
-                    tile_cb_off.append(0)
-                if len(tile_cb_total) < (i+1):
-                    tile_cb_total.append(0)
-                # Distribute loads
-                if tile_cb_on_budget != 0:
-                    if tile_cb_total[i] != tile_cb_max:
-                        tile_cb_on[i] = tile_cb_on[i] + 1
-                        tile_cb_on_budget = tile_cb_on_budget - 1
-                        tile_cb_total[i] = tile_cb_total[i] + 1
-                        tile_cb_total_budget = tile_cb_total_budget - 1
-                if tile_cb_partial_budget != 0:
-                    if tile_cb_total[i] != tile_cb_max:
-                        tile_cb_partial[i] = tile_cb_partial[i] + 1
-                        tile_cb_partial_budget = tile_cb_partial_budget - 1
-                        tile_cb_total[i] = tile_cb_total[i] + 1
-                        tile_cb_total_budget = tile_cb_total_budget - 1
-                if tile_cb_off_budget != 0:
-                    if tile_cb_total[i] != tile_cb_max:
-                        tile_cb_off[i] = tile_cb_off[i] + 1
-                        tile_cb_off_budget = tile_cb_off_budget - 1
-                        tile_cb_total[i] = tile_cb_total[i] + 1
-                        tile_cb_total_budget = tile_cb_total_budget - 1
+#         while tile_cb_total_budget != 0:
+#             # For each tile distribute load
+#             for i in range(L):
+#                 # Add to lists
+#                 if len(tile_cb_on) < (i+1):
+#                     tile_cb_on.append(0)
+#                 if len(tile_cb_partial) < (i+1):
+#                     tile_cb_partial.append(0)
+#                 if len(tile_cb_off) < (i+1):
+#                     tile_cb_off.append(0)
+#                 if len(tile_cb_total) < (i+1):
+#                     tile_cb_total.append(0)
+#                 # Distribute loads
+#                 if tile_cb_on_budget != 0:
+#                     if tile_cb_total[i] != tile_cb_max:
+#                         tile_cb_on[i] = tile_cb_on[i] + 1
+#                         tile_cb_on_budget = tile_cb_on_budget - 1
+#                         tile_cb_total[i] = tile_cb_total[i] + 1
+#                         tile_cb_total_budget = tile_cb_total_budget - 1
+#                 if tile_cb_partial_budget != 0:
+#                     if tile_cb_total[i] != tile_cb_max:
+#                         tile_cb_partial[i] = tile_cb_partial[i] + 1
+#                         tile_cb_partial_budget = tile_cb_partial_budget - 1
+#                         tile_cb_total[i] = tile_cb_total[i] + 1
+#                         tile_cb_total_budget = tile_cb_total_budget - 1
+#                 if tile_cb_off_budget != 0:
+#                     if tile_cb_total[i] != tile_cb_max:
+#                         tile_cb_off[i] = tile_cb_off[i] + 1
+#                         tile_cb_off_budget = tile_cb_off_budget - 1
+#                         tile_cb_total[i] = tile_cb_total[i] + 1
+#                         tile_cb_total_budget = tile_cb_total_budget - 1
         
-        # Assign these per-tile counts to the object
-        self.tile_cb_on = tile_cb_on
-        self.tile_cb_partial = tile_cb_partial
-        self.tile_cb_off = tile_cb_off
+#         # Assign these per-tile counts to the object
+#         self.tile_cb_on = tile_cb_on
+#         self.tile_cb_partial = tile_cb_partial
+#         self.tile_cb_off = tile_cb_off
 
 
 class _pgateoutputcrossbar(_SizableCircuit):
@@ -5443,20 +5477,40 @@ class FPGA:
         self.update_delays_cnt = 0
 
         # Stuff for multi wire length support
-        self.sb_muxes: List[_SwitchBlockMUX] = []
-        self.num_sbs_per_tile = 0
+        self.num_sb_muxes_per_tile = 0
+        self.avg_sb_mux_area = 0
+        self.num_cb_muxes_per_tile = 0
+        self.avg_cb_mux_area = 0
+        self.num_local_muxes_per_tile = 0
+        self.avg_local_mux_area = 0
+        # Delay stuff
+        self.avg_sb_mux_delay = 0
+
+        # Lists of subcircuits which we have to consider for each wire length
+        self.sb_muxes: List[_SwitchBlockMUX] = [] # List of switch block muxes for each wire length
+        self.cb_muxes: List[_ConnectionBlockMUX] = [] 
+        # self.local_muxes: List[]
         self.routing_wire_loads : List[_RoutingWireLoad] = []
         self.cluster_output_loads : List[_GeneralBLEOutputLoad] = []
-
+        self.logic_clusters: List[_LogicCluster] = []
         # Initialize the specs
         self.specs = _Specs(coffe_info.fpga_arch_conf["fpga_arch_params"], run_options.quick_mode)
+
+        # data structure to store per wire information 
+        self.fpga_per_wire_data = { wire["id"]: 
+                {
+                    "num_sbs": 0
+                } for wire in self.specs.wire_types
+        }
+
 
         # From specs init
         # We need the minimum length wire to use for some circuits
         # Currently we are just using the minimum length wire type as the input to connection block mux
         wire_lens = [ wire["len"] for wire in self.specs.wire_types]
         self.min_len_wire = self.specs.wire_types[wire_lens.index(min(wire_lens))]
-
+        global min_len_wire
+        min_len_wire = self.min_len_wire
 
         ######################################
         ### INITIALIZE SPICE LIBRARY NAMES ###
@@ -5474,31 +5528,114 @@ class FPGA:
         ### CREATE SWITCH BLOCK OBJECT ###
         ##################################
 
+        # if this list is non empty
+        if self.specs.wire_types:
+            # if we specify multiple wire types, we need an Fs_mtx of quadratic length to specify each wire type Fs in switch block
+            if len(self.specs.wire_types)**2 == len(self.specs.Fs_mtx):
+                # We create this many muxes that exist in the FPGA
+                # <TAG><SWEEP GENERATE>
+                No = self.specs.num_cluster_outputs
+                # Calculate Mux size for each combination of wire types
+                for i, Fs_ele in enumerate(self.specs.Fs_mtx):
+                    # use wire index of source wire for wire length
+                    # This determines number of starting / non starting connections 
+                    src_wire_length = self.specs.wire_types[Fs_ele["src"]]["len"] # wire going into SB
+                    dst_wire_length = self.specs.wire_types[Fs_ele["dst"]]["len"] # wire driven from SB mux
+                    r_to_r_sb_mux_size = self.specs.Fs + (self.specs.Fs-1) * (src_wire_length-1) # use the src wire length, as this determines the number of starting wires @ SB
+                    # To calculate the num of sb muxes per side we first calculate the number of logic cluster opins per side
+                    # dst_chan_width = dst_wire_type_fraction_of_channel * channel_width
+                    # num_opins_per_side = cluster_outputs * Fcout * dst_chan_width / 2
+                    # the above div by 2 is coming from half the cluster outputs being sent to SBs on each side of the LC (think of the channel above it)
+                    # num_sb_muxes_per_side = dst_chan_width / 2 * src_wire_length
+                    # the above div by 2 is from the unidirectional routing, meaning half of channel width is being driven 
+                    clb_to_r_sb_mux_size = No * self.specs.Fcout * src_wire_length / 2 # should this be ceiled?
+                    sb_mux_size_required = int(r_to_r_sb_mux_size + clb_to_r_sb_mux_size)
+                    # Num tracks driven by this type of SB, if there are N wire types then there will be N^2 SBs, the sum of all SBs driving the same wire type should 
+                    #       be equal to the number of tracks of that wire type, so we divide by the sqrt of the number of SBs to get the number of tracks driven by each SB
+                    num_driven_tracks = int( self.specs.wire_types[Fs_ele["dst"]]["num_tracks"] / math.sqrt(len(self.specs.Fs_mtx)) )
+                    # Calculate number of this switch block mux per tile
+                    num_sb_mux_per_tile = 4 * num_driven_tracks // (2 * src_wire_length)
+                    # above 4 factor is from number of sides of SB driving wires, 2 is from the unidirectional routing
+                    # Sb mux names are based on wire type they are driving
+                    sb_mux_name = f"sb_mux_uid{i}" # f"sb_mux_L{dst_wire_length}_Fs_uid{i}"
+                    # Initialize the switch block, pass in our dst wire for the load
+                    self.sb_muxes.append(
+                        _SwitchBlockMUX(sb_mux_size_required, num_sb_mux_per_tile, self.specs.use_tgate, sb_mux_name, self.specs.wire_types[Fs_ele["dst"]])
+                    )
 
-        # For each wire type we calculate the switch block mux sizes
-        for i, wire in enumerate(self.specs.wire_types):
-            wire_length = wire["len"]
-            num_tracks = wire["num_tracks"]
-            
-            # Calculate switch block mux size (for direct-drive routing)
-            # The mux will need Fs + (Fs-1)(L-1) inputs for routing-to-routing connections
-            # The Fs term comes from starting wires, the (Fs-1) term comes from non-starting wires, of which there are (L-1)
-            r_to_r_sb_mux_size = self.specs.Fs + (self.specs.Fs-1)*(wire_length-1)
-            # Then, each mux needs No*Fcout*L/2 additional inputs for logic cluster outputs (No = number of cluster outputs (Or))
-            No = self.specs.num_cluster_outputs
-            clb_to_r_sb_mux_size = No * self.specs.Fcout * wire_length/2
-            sb_mux_size_required = int(r_to_r_sb_mux_size + clb_to_r_sb_mux_size)
-            # Calculate number of switch block muxes per tile
-            # round to nearest integer
-            num_sb_mux_per_tile = 2 * num_tracks // wire_length
-            # add up our total number of sbs per tile
-            self.num_sbs_per_tile += num_sb_mux_per_tile
-            # Sb mux names are based on wire type
-            sb_mux_name = f"sb_mux_L{wire_length}_uid{i}"
-            # Initialize the switch block
-            self.sb_muxes.append(
-                _SwitchBlockMUX(sb_mux_size_required, num_sb_mux_per_tile, self.specs.use_tgate, sb_mux_name, wire)
-            )  
+        # Assume a starting wire in every direction for every switch block
+        # if self.specs.sb_conn["mode"] == "full":
+        #     # The routing mux size will be added from all wire length types
+        #     r_to_r_sb_mux_size = 0
+        #     clb_to_r_sb_mux_size = 0
+        #     uni_dir_sb_per_ch_track_ins = 0
+        #     # For each wire type we calculate the switch block mux sizes
+        #     for i, wire in enumerate(self.specs.wire_types):
+        #         wire_length = wire["len"]
+        #         No = self.specs.num_cluster_outputs
+        #         # Sum up routing mux inputs from each wire type 
+        #         r_to_r_sb_mux_size += self.specs.Fs + (self.specs.Fs-1) * (wire_length-1)
+        #         # TODO make sure this is ok to do, I think its fine but I don't remember where the wire_length / 2 term comes from
+        #         clb_to_r_sb_mux_size += No * self.specs.Fcout * wire_length/2
+        #         # Adding up our granularity
+        #         uni_dir_sb_per_ch_track_ins += wire_length                
+
+        #     # All switch blocks for this configuration will have the same number of inputs on muxes
+        #     sb_mux_size_required = int(r_to_r_sb_mux_size + clb_to_r_sb_mux_size) / 2
+
+        #     # Total number of switch blocks (mixing those driving different wires)
+        #     # 0.5 * (Fs-1)? * channel_width / "sb track to mux granularity"
+        #     # "sb track to mux granularity" -> the number of tracks on a channel that are considered to be "handled" by a single mux
+        #     # Calculate number of switch block muxes per tile, rounded to nearest int
+        #     # TODO remove multiply by 2 or figure out why it should actually be there -> it shouldn't have been there
+        #     # the weird thing that happened was that our muxes are twice as big so we only need half as many of them
+        #     num_sb_mux_per_tile = int(2 * self.specs.W / uni_dir_sb_per_ch_track_ins) * 2
+
+        #     for i, wire in enumerate(self.specs.wire_types):
+        #         wire_length = wire["len"]
+        #         num_tracks = wire["num_tracks"]
+                
+        #         # From our total number of switch blocks per tile a subset of them will be just driving this wire type
+        #         # TODO verify, should be equal to our calculated number of sb mux per tile times the percentage of wires of this type
+        #         sb_mux_per_tile_per_wire = int(num_sb_mux_per_tile * num_tracks / self.specs.W)
+        #         # add up our total number of sbs per tile
+        #         self.fpga_per_wire_data[wire["id"]]["num_sbs"] = sb_mux_per_tile_per_wire
+        #         self.num_sb_muxes_per_tile += sb_mux_per_tile_per_wire
+        #         # Sb mux names are based on wire type
+        #         sb_mux_name = f"sb_mux_L{wire_length}_uid{i}"
+        #         # Initialize the switch block
+        #         self.sb_muxes.append(
+        #             _SwitchBlockMUX(sb_mux_size_required, sb_mux_per_tile_per_wire, self.specs.use_tgate, sb_mux_name, wire)
+        #         )
+        # else:
+        #     # For each wire type we calculate the switch block mux sizes
+        #     for i, wire in enumerate(self.specs.wire_types):
+        #         # In this calculation its OK to seperate the switch blocks by wire length + number of tracks
+        #         # Because there are all linearly scaling factors in switch block equations
+        #         wire_length = wire["len"]
+        #         num_tracks = wire["num_tracks"]
+                
+        #         # Calculate switch block mux size (for direct-drive routing)
+        #         # The mux will need Fs + (Fs-1)(L-1) inputs for routing-to-routing connections
+        #         # The Fs term comes from starting wires, the (Fs-1) term comes from non-starting wires, of which there are (L-1)
+        #         r_to_r_sb_mux_size = self.specs.Fs + (self.specs.Fs-1) * (wire_length-1)
+        #         # Then, each mux needs No*Fcout*L/2 additional inputs for logic cluster outputs (No = number of cluster outputs (Or))
+        #         No = self.specs.num_cluster_outputs
+        #         clb_to_r_sb_mux_size = No * self.specs.Fcout * wire_length/2
+        #         sb_mux_size_required = int(r_to_r_sb_mux_size + clb_to_r_sb_mux_size)
+        #         # Calculate number of switch block muxes per tile
+        #         # round to nearest integer
+        #         num_sb_mux_per_tile = 2 * num_tracks // wire_length
+        #         # add up our total number of sbs per tile
+        #         self.fpga_per_wire_data[wire["id"]]["num_sbs"] = num_sb_mux_per_tile
+                
+        #         # self.num_sbs_per_tile += num_sb_mux_per_tile
+        #         # Sb mux names are based on wire type
+        #         sb_mux_name = f"sb_mux_L{wire_length}_uid{i}"
+        #         # Initialize the switch block
+        #         self.sb_muxes.append(
+        #             _SwitchBlockMUX(sb_mux_size_required, num_sb_mux_per_tile, self.specs.use_tgate, sb_mux_name, wire)
+        #         )  
 
         # Calculate switch block mux size (for direct-drive routing)
         # The mux will need Fs + (Fs-1)(L-1) inputs for routing-to-routing connections
@@ -5520,11 +5657,11 @@ class FPGA:
 
         # Calculate connection block mux size
         # Size is W*Fcin
-        cb_mux_size_required = int(self.specs.W*self.specs.Fcin)
+        cb_mux_size_required = int(self.specs.W * self.specs.Fcin)
         num_cb_mux_per_tile = self.specs.I
-        # Initialize the connection block
-        self.cb_mux = _ConnectionBlockMUX(cb_mux_size_required, num_cb_mux_per_tile, self.specs.use_tgate)
-
+        self.num_cb_muxes_per_tile = num_cb_mux_per_tile
+        # # Initialize the connection block
+        self.cb_mux = _ConnectionBlockMUX(cb_mux_size_required, num_cb_mux_per_tile, self.specs.use_tgate, self.min_len_wire, self.sb_muxes[0].name)
         
         ###################################
         ### CREATE LOGIC CLUSTER OBJECT ###
@@ -5532,8 +5669,9 @@ class FPGA:
 
         # Calculate local mux size
         # Local mux size is (inputs + feedback) * population
-        local_mux_size_required = int((self.specs.I + self.specs.num_ble_local_outputs*self.specs.N) * self.specs.Fclocal)
-        num_local_mux_per_tile = self.specs.N*(self.specs.K+self.specs.independent_inputs)
+        local_mux_size_required = int((self.specs.I + self.specs.num_ble_local_outputs * self.specs.N) * self.specs.Fclocal)
+        num_local_mux_per_tile = self.specs.N * (self.specs.K + self.specs.independent_inputs)
+        self.num_local_muxes_per_tile = num_local_mux_per_tile
 
         inter_wire_length = 0.5
         # Todo: make this a parameter
@@ -5541,29 +5679,57 @@ class FPGA:
         self.carry_skip_periphery_count = 0
         if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip":
             self.carry_skip_periphery_count = int(math.floor((self.specs.N * self.specs.FAs_per_flut)/self.skip_size))
+        
+        
         # initialize the logic cluster
         self.logic_cluster = _LogicCluster(
             self.specs.N, self.specs.K, self.specs.num_ble_general_outputs, self.specs.num_ble_local_outputs, self.specs.Rsel, self.specs.Rfb, 
             local_mux_size_required, num_local_mux_per_tile, self.specs.use_tgate, self.specs.use_finfet, self.specs.use_fluts, 
-            self.specs.enable_carry_chain, self.specs.FAs_per_flut, self.carry_skip_periphery_count
+            self.specs.enable_carry_chain, self.specs.FAs_per_flut, self.carry_skip_periphery_count,
+            self.min_len_wire
         )
         
         ###########################
         ### CREATE LOAD OBJECTS ###
         ###########################
 
-        # Create cluster output load object (for each wire type)
-        # Create routing wire load object (for each wire type)
-        # self.cluster_output_load = _GeneralBLEOutputLoad()
-        for i, wire in enumerate(self.specs.wire_types):
-            wire_length = wire["len"]
+        for i, sb_mux in enumerate(self.sb_muxes):
+            # For each type of switch block mux we have in SB we should model a BLE load using that switch block
+            #       This is because BLEs are loaded by SB muxes, and we want to know the delay / area of BLE outputs for each of such muxes
+            #       Note: We are not assuming that there are this many seperate BLE outputs existing in the device 
+            # <TAG><SWEEP MODEL>
             self.cluster_output_loads.append(
-                _GeneralBLEOutputLoad(wire)
+                _GeneralBLEOutputLoad(min_len_wire, self.sb_muxes, i)
             )
             self.routing_wire_loads.append(
-                # Pass in wire length + unique id used for metal_layers dict
-                _RoutingWireLoad(wire)
+                _RoutingWireLoad(min_len_wire, self.sb_muxes, i)
             )
+
+        # Create cluster output load object (for each wire type)
+        # Create routing wire load object (for each wire type)
+        # for i, wire in enumerate(self.specs.wire_types):
+        #     # Initialize the connection block
+        #     # self.cb_muxes.append(
+        #     #     _ConnectionBlockMUX(cb_mux_size_required, num_cb_mux_per_tile, self.specs.use_tgate, wire)
+        #     # )
+        #     # Initialize the logic clusters
+        #     # self.logic_clusters.append(
+        #     #     _LogicCluster(
+        #     #         self.specs.N, self.specs.K, self.specs.num_ble_general_outputs, self.specs.num_ble_local_outputs, self.specs.Rsel, self.specs.Rfb, 
+        #     #         local_mux_size_required, num_local_mux_per_tile, self.specs.use_tgate, self.specs.use_finfet, self.specs.use_fluts, 
+        #     #         self.specs.enable_carry_chain, self.specs.FAs_per_flut, self.carry_skip_periphery_count,
+        #     #         wire
+        #     #     )
+        #     # )
+            
+        #     # We create a 
+        #     self.cluster_output_loads.append(
+        #         _GeneralBLEOutputLoad(wire)
+        #     )
+        #     self.routing_wire_loads.append(
+        #         # Pass in wire length + unique id used for metal_layers dict
+        #         _RoutingWireLoad(wire)
+        #     )
 
 
         ##################################
@@ -5747,12 +5913,16 @@ class FPGA:
                                                           self.specs.min_tran_width))
         self.transistor_sizes.update(self.logic_cluster.generate(self.subcircuits_filename, 
                                                                  self.specs.min_tran_width, 
-                                                                 self.specs))
+                                                                 self.specs))        
         # Iterate over all existing sb muxes and generate them + cluster / gen routing load collateral 
-        for sb_mux, routing_wire_load, cluster_output_load in zip(
-                self.sb_muxes,
-                self.routing_wire_loads,
-                self.cluster_output_loads):
+        for sb_mux in self.sb_muxes:
+
+            # self.transistor_sizes.update(cb_mux.generate(self.subcircuits_filename, 
+            #                                               self.specs.min_tran_width))
+            
+            # self.transistor_sizes.update(logic_cluster.generate(self.subcircuits_filename, 
+            #                                                      self.specs.min_tran_width, 
+            #                                                      self.specs))
 
             self.transistor_sizes.update(
                 sb_mux.generate(
@@ -5760,12 +5930,17 @@ class FPGA:
                     self.specs.min_tran_width
                 )
             )
-            # Generate a cluster_output_load (BLE output to general routing load) for each wire type
-            cluster_output_load.generate(self.subcircuits_filename, self.specs, sb_mux)
-            # Generate a routing_wire_load for each wire type
-            routing_wire_load.generate(self.subcircuits_filename, self.specs, sb_mux, self.cb_mux)
-            # Generate the top files
             sb_mux.generate_top()
+
+        for cluster_output_load in self.cluster_output_loads:
+            cluster_output_load.generate(self.subcircuits_filename, self.specs)
+
+        for routing_wire_load in self.routing_wire_loads:
+            routing_wire_load.generate(self.subcircuits_filename, self.specs, sb_mux, self.cb_mux)
+        
+
+        self.cb_mux.generate_top()
+        self.logic_cluster.generate_top()
             
 
         if self.specs.enable_carry_chain == 1:
@@ -5799,13 +5974,13 @@ class FPGA:
         # Generate top-level files. These top-level files are the files that COFFE uses to measure 
         # the delay of FPGA circuitry. 
         # self.sb_mux.generate_top()
-        self.cb_mux.generate_top(self.min_len_wire)
-        self.logic_cluster.generate_top(self.min_len_wire)
+        # self.cb_mux.generate_top(self.min_len_wire)
+        # self.logic_cluster.generate_top(self.min_len_wire)
 
         if self.specs.enable_carry_chain == 1:
             self.carrychain.generate_top()
             self.carrychainperf.generate_top()
-            self.carrychainmux.generate_top()
+            self.carrychainmux.generate_top(self.min_len_wire)
             self.carrychaininter.generate_top()
             if self.specs.carry_chain_type == "skip":
                 self.carrychainand.generate_top()
@@ -5871,11 +6046,15 @@ class FPGA:
         # Call area calculation functions of sub-blocks
         for sb_mux in self.sb_muxes:
             sb_mux.update_area(self.area_dict, self.width_dict)
-        
+
         self.cb_mux.update_area(self.area_dict, self.width_dict)
         self.logic_cluster.update_area(self.area_dict, self.width_dict)
-        
+        # for cb_mux in self.cb_muxes:
+        #     cb_mux.update_area(self.area_dict, self.width_dict)
+        # for logic_cluster in self.logic_clusters:
+        #     logic_cluster.update_area(self.area_dict, self.width_dict)
 
+        # self.logic_cluster.update_area(self.area_dict, self.width_dict)
         for hardblock in self.hardblocklist:
             hardblock.update_area(self.area_dict, self.width_dict)
         
@@ -5901,23 +6080,57 @@ class FPGA:
         self.area_dict["sb_total"] = switch_block_area
         self.width_dict["sb_total"] = math.sqrt(switch_block_area)
         
+        connection_block_area = 0
+        connection_block_area_no_sram = 0
+        # <CB TAG> Change here to change how combined area of different connection blocks is calculated
         # Calculate total area of connection block
+        # for i, cb_mux in enumerate(self.cb_muxes):
+        #     # The number of connection blocks per tile will always be the same regardless of channel width / wire length but to get the area we should take weighted average of multiple wire types
+        #     connection_block_area += (self.specs.wire_types[i]["num_tracks"]/self.specs.W) * cb_mux.num_per_tile * self.area_dict[cb_mux.name + "_sram"]
+        #     connection_block_area_no_sram += (self.specs.wire_types[i]["num_tracks"]/self.specs.W) * cb_mux.num_per_tile*self.area_dict[cb_mux.name]
+        
+        
+        
         connection_block_area = self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name + "_sram"]
+        connection_block_area_no_sram = self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name]
         self.area_dict["cb_total"] = connection_block_area
+        self.area_dict["cb_total_no_sram"] = connection_block_area_no_sram
         self.width_dict["cb_total"] = math.sqrt(connection_block_area)
         
         # This is checking if we are intializing the areas or iterating on them, self.lb_height should only == 0 if the FPGA object was just intialized
         if self.lb_height == 0.0:        
+            # Again take weighted average for each wire type
+            # The number of local muxes per tile will always be the same regardless of channel width / wire length but to get the area we should take weighted average of multiple wire types
+            local_mux_area = 0
+            local_mux_area_no_sram = 0
+            ff_area = 0
+            for i, logic_cluster in enumerate(self.logic_clusters):
+                # Calculate total area of local muxes
+                local_mux_area += (logic_cluster.gen_r_wire["num_tracks"] / self.specs.W) * logic_cluster.local_mux.num_per_tile * self.area_dict[logic_cluster.local_mux.name + "_sram"]
+                local_mux_area_no_sram += (logic_cluster.gen_r_wire["num_tracks"] / self.specs.W) * logic_cluster.local_mux.num_per_tile * self.area_dict[logic_cluster.local_mux.name]
+                # Calculate total ff area
+                ff_area += (logic_cluster.gen_r_wire["num_tracks"] / self.specs.W) * self.specs.N * self.area_dict[logic_cluster.ble.ff.name]
+
+            # local_mux_area = self.logic_cluster.local_mux.num_per_tile*self.area_dict[self.logic_cluster.local_mux.name + "_sram"]
+            # Local Muxes
+            # self.area_dict["local_mux_total"] = local_mux_area
+            # self.width_dict["local_mux_total"] = math.sqrt(local_mux_area)
+            
+            # Flip FLops
+            # self.area_dict["ff_total"] = ff_area
+            # self.width_dict["ff_total"] = math.sqrt(ff_area)
+            
             # Calculate total area of local muxes
             local_mux_area = self.logic_cluster.local_mux.num_per_tile*self.area_dict[self.logic_cluster.local_mux.name + "_sram"]
+            local_mux_area_no_sram = self.logic_cluster.local_mux.num_per_tile*self.area_dict[self.logic_cluster.local_mux.name]
+            self.area_dict["local_mux_total_no_sram"] = local_mux_area_no_sram
             self.area_dict["local_mux_total"] = local_mux_area
             self.width_dict["local_mux_total"] = math.sqrt(local_mux_area)
-            
             # Calculate total lut area
             lut_area = self.specs.N*self.area_dict["lut_and_drivers"]
             self.area_dict["lut_total"] = lut_area
             self.width_dict["lut_total"] = math.sqrt(lut_area)
-            
+
             # Calculate total ff area
             ff_area = self.specs.N*self.area_dict[self.logic_cluster.ble.ff.name]
             self.area_dict["ff_total"] = ff_area
@@ -5942,12 +6155,28 @@ class FPGA:
             # cb_area_total = self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name]
             # cb_area_total_sram = self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name + "_sram"] - cb_area_total
 
+            local_mux_area = 0
+            local_mux_sram_area = 0
+            ff_total_area = 0
+            # This is the local mux area without srams
+            for logic_cluster in self.logic_clusters:
+                # local mux area calculation
+                local_mux_area += (logic_cluster.gen_r_wire["num_tracks"] / self.specs.W) * logic_cluster.local_mux.num_per_tile * self.area_dict[logic_cluster.local_mux.name]            
+                local_mux_sram_area += (logic_cluster.gen_r_wire["num_tracks"] / self.specs.W) * logic_cluster.local_mux.num_per_tile * (self.area_dict[logic_cluster.local_mux.name + "_sram"] - self.area_dict[logic_cluster.local_mux.name])
+                # BLE flip flop area calculation
+                ff_total_area += (logic_cluster.gen_r_wire["num_tracks"] / self.specs.W) * self.specs.N * self.area_dict[logic_cluster.ble.ff.name]
+
+            # Overriding above
             local_mux_area = self.logic_cluster.local_mux.num_per_tile*self.area_dict[self.logic_cluster.local_mux.name]            
             local_mux_sram_area = self.logic_cluster.local_mux.num_per_tile* (self.area_dict[self.logic_cluster.local_mux.name + "_sram"] - self.area_dict[self.logic_cluster.local_mux.name])
+            # Calculate total area of local muxes
+            self.area_dict["local_mux_total_no_sram"] = local_mux_area
+
 
             lut_area = self.specs.N*self.area_dict["lut_and_drivers"] - self.specs.N*(2**self.specs.K)*self.area_dict["sram"]
             lut_area_sram = self.specs.N*(2**self.specs.K)*self.area_dict["sram"]
 
+            # For some reason we multiply the FF area by two if its a finfet?
             ffableout_area_total = self.specs.N*self.area_dict[self.logic_cluster.ble.ff.name]
             if self.specs.use_fluts:
                 ffableout_area_total = 2 * ffableout_area_total
@@ -5976,8 +6205,8 @@ class FPGA:
             self.area_dict["lut_total"] = lut_area + self.specs.N*(2**self.specs.K)*self.area_dict["sram"]
             self.width_dict["lut_total"] = math.sqrt(lut_area + self.specs.N*(2**self.specs.K)*self.area_dict["sram"])
 
-            self.area_dict["ff_total"] = self.specs.N*self.area_dict[self.logic_cluster.ble.ff.name]
-            self.width_dict["ff_total"] = math.sqrt(self.specs.N*self.area_dict[self.logic_cluster.ble.ff.name])
+            # self.area_dict["ff_total"] = ff_total_area #self.specs.N*self.area_dict[self.logic_cluster.ble.ff.name]
+            # self.width_dict["ff_total"] = math.sqrt(ff_total_area) #math.sqrt(self.specs.N*self.area_dict[self.logic_cluster.ble.ff.name])
 
             self.area_dict["ffableout_area_total"] = ffableout_area_total
             self.width_dict["ffableout_area_total"] = math.sqrt(ffableout_area_total)
@@ -6005,16 +6234,20 @@ class FPGA:
 
         
         if self.specs.enable_bram_block == 1:
+            single_ff_area = 0
+            for logic_cluster in self.logic_clusters:
+                single_ff_area += (logic_cluster.gen_r_wire["num_tracks"] / self.specs.W) * self.area_dict[logic_cluster.ble.ff.name]
+
             # Calculate RAM area:
 
             # LOCAL MUX + FF area
-            RAM_local_mux_area = self.RAM.RAM_local_mux.num_per_tile * self.area_dict[self.RAM.RAM_local_mux.name + "_sram"] + self.area_dict[self.logic_cluster.ble.ff.name]
+            RAM_local_mux_area = self.RAM.RAM_local_mux.num_per_tile * self.area_dict[self.RAM.RAM_local_mux.name + "_sram"] + single_ff_area #self.area_dict[self.logic_cluster.ble.ff.name]
             self.area_dict["ram_local_mux_total"] = RAM_local_mux_area
             self.width_dict["ram_local_mux_total"] = math.sqrt(RAM_local_mux_area)
 
             # SB and CB in the RAM tile:
             RAM_area =(RAM_local_mux_area + self.area_dict[self.cb_mux.name + "_sram"] * self.RAM.ram_inputs + (2** (self.RAM.conf_decoder_bits + 3)) *self.area_dict[self.sb_mux.name + "_sram"]) 
-            RAM_SB_area = 2** (self.RAM.conf_decoder_bits + 3) *self.area_dict[self.sb_mux.name + "_sram"] 
+            RAM_SB_area = 2 ** (self.RAM.conf_decoder_bits + 3) * self.area_dict[self.sb_mux.name + "_sram"] 
             RAM_CB_area =  self.area_dict[self.cb_mux.name + "_sram"] * self.RAM.ram_inputs 
 
 
@@ -6155,21 +6388,25 @@ class FPGA:
                 self.num_luts_stripes =  self.num_luts_stripes + 1
 
         # measure the width of each stripe:
-        self.w_cb = (self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name])/(self.num_cb_stripes * self.lb_height)
+        # self.w_cb = (self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name])/(self.num_cb_stripes * self.lb_height)
+        self.w_cb = self.num_cb_muxes_per_tile * self.area_dict[self.cb_mux.name] / (self.num_cb_stripes * self.lb_height)
         # width of switch block
-        self.w_sb = self.area_dict["sb_total"] / (self.num_sb_stripes * self.lb_height) 
+        self.w_sb = self.num_sb_muxes_per_tile * self.area_dict["sb_mux_avg"] / (self.num_sb_stripes * self.lb_height) 
         # self.w_sb = (self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name])/(self.num_sb_stripes * self.lb_height)
-        self.w_ic = (self.logic_cluster.local_mux.num_per_tile*self.area_dict[self.logic_cluster.local_mux.name])/(self.num_ic_stripes * self.lb_height)
+        self.w_ic = (self.logic_cluster.local_mux.num_per_tile * self.area_dict[self.logic_cluster.local_mux.name])/(self.num_ic_stripes * self.lb_height)
+        # self.w_ic = self.area_dict["local_mux_total"] / (self.num_ic_stripes * self.lb_height)
         self.w_lut = (self.specs.N*self.area_dict["lut_and_drivers"] - self.specs.N*(2**self.specs.K)*self.area_dict["sram"])/(self.num_lut_stripes * self.lb_height)
         #if self.specs.enable_carry_chain == 1:
         self.w_cc = self.area_dict["cc_area_total"]/(self.num_cc_stripes * self.lb_height)
         self.w_ffble = self.area_dict["ffableout_area_total"]/(self.num_ffble_stripes * self.lb_height)
         # These are SRAM widths from subcircuits
-        self.w_scb = (self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name + "_sram"] - self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name])/(self.num_cbs_stripes * self.lb_height)
+        # self.w_scb = (self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name + "_sram"] - self.cb_mux.num_per_tile*self.area_dict[self.cb_mux.name])/(self.num_cbs_stripes * self.lb_height)
+        self.w_scb = (self.area_dict["cb_total"] - self.area_dict["cb_total_no_sram"])/(self.num_cbs_stripes * self.lb_height)
         self.w_ssb = (self.area_dict["sb_total"] - self.area_dict["sb_total_no_sram"])/(self.num_sbs_stripes * self.lb_height)
 
         # self.w_ssb = (self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name + "_sram"] - self.sb_mux.num_per_tile*self.area_dict[self.sb_mux.name])/(self.num_sbs_stripes * self.lb_height)        
         self.w_sic = (self.logic_cluster.local_mux.num_per_tile* (self.area_dict[self.logic_cluster.local_mux.name + "_sram"] - self.area_dict[self.logic_cluster.local_mux.name]))/(self.num_ics_stripes * self.lb_height)
+        # self.w_sic = (self.area_dict["local_mux_total"] - self.area_dict["local_mux_total_no_sram"])/(self.num_ics_stripes * self.lb_height)
         self.w_slut = (self.specs.N*(2**self.specs.K)*self.area_dict["sram"]) / (self.num_luts_stripes * self.lb_height)
 
         # create a temporary dictionary of stripe width to use in distance calculation:
@@ -6340,11 +6577,12 @@ class FPGA:
 
         if self.lb_height == 0:
             # iterate through subcircuits associated with wire types
-            for sb_mux, cluster_output_load, routing_wire_load in zip(self.sb_muxes, self.cluster_output_loads, self.routing_wire_loads):
+            for sb_mux, cluster_output_load, routing_wire_load in zip(self.sb_muxes, self.cluster_output_loads, self.routing_wire_loads): #, self.cb_muxes, self.logic_clusters):
                 sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 1.0)
                 cluster_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 0.0, 0.0)
                 routing_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 0.0, 2.0, 2.0)
-
+                # cb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 1.0)
+                # logic_cluster.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 1.0, 1.0, 0.0, 0.0)
 
             # self.cluster_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 0.0, 0.0)
             # self.sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 1.0)
@@ -6352,19 +6590,19 @@ class FPGA:
             self.logic_cluster.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, 1.0, 1.0, 0.0, 0.0)
         else:
             # These ratios seem to be in units of stripes per switch block 
-            sb_ratio = (self.lb_height/(self.num_sbs_per_tile/self.num_sb_stripes)) / self.dict_real_widths["sb"]
+            sb_ratio = (self.lb_height/(self.num_sb_muxes_per_tile/self.num_sb_stripes)) / self.dict_real_widths["sb"]
             if sb_ratio < 1.0:
                 sb_ratio = 1/sb_ratio
 			
 			#if the ratio is larger than 2.0, we can look at this stripe as two stripes put next to each other and partly fix the ratio:
 				
-            cb_ratio = (self.lb_height/(self.cb_mux.num_per_tile/self.num_cb_stripes)) / self.dict_real_widths["cb"]
+            cb_ratio = (self.lb_height/(self.num_cb_muxes_per_tile/self.num_cb_stripes)) / self.dict_real_widths["cb"]
             if cb_ratio < 1.0:
                 cb_ratio = 1/cb_ratio
 				
 			#if the ratio is larger than 2.0, we can look at this stripe as two stripes put next to each other and partly fix the ratio:
 
-            ic_ratio = (self.lb_height/(self.logic_cluster.local_mux.num_per_tile/self.num_ic_stripes)) / self.dict_real_widths["ic"]
+            ic_ratio = (self.lb_height/(self.num_local_muxes_per_tile/self.num_ic_stripes)) / self.dict_real_widths["ic"]
             if ic_ratio < 1.0:
                 ic_ratio = 1/ic_ratio
 				
@@ -6386,10 +6624,12 @@ class FPGA:
             #print "ratios " + str(sb_ratio) +" "+ str(cb_ratio) +" "+ str(ic_ratio) +" "+ str(lut_ratio)
             
             # iterate thorough subckts associated with wire types
-            for sb_mux, cluster_output_load, routing_wire_load in zip(self.sb_muxes, self.cluster_output_loads, self.routing_wire_loads):
+            for sb_mux, cluster_output_load, routing_wire_load in zip(self.sb_muxes, self.cluster_output_loads, self.routing_wire_loads): # self.cb_muxes, self.logic_clusters):
                 sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, sb_ratio)
                 cluster_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.d_ffble_to_sb, self.lb_height)
                 routing_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.lb_height, self.num_sb_stripes, self.num_cb_stripes)
+                # cb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, cb_ratio)
+                # logic_cluster.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, ic_ratio, lut_ratio, self.d_ffble_to_ic, self.d_cb_to_ic + self.lb_height)
 
             # self.cluster_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.d_ffble_to_sb, self.lb_height)
             # self.sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, sb_ratio)
@@ -6485,6 +6725,7 @@ class FPGA:
             sb_mux.tfall = tfall
             sb_mux.trise = trise
             sb_mux.delay = max(tfall, trise)
+            sb_mux.avg_crit_path_delay += sb_mux.delay * sb_mux.delay_weight
             crit_path_delay += sb_mux.delay * sb_mux.delay_weight
             # append to FPGA delay
             self.delay_dict[sb_mux.name] = sb_mux.delay 
@@ -7514,8 +7755,8 @@ class FPGA:
             cluster_output_load.print_details(report_file)
             routing_wire_load.print_details(report_file)
         # self.sb_mux.print_details(report_file)
-        self.cb_mux.print_details(report_file)
-        self.logic_cluster.print_details(report_file)
+        # self.cb_mux.print_details(report_file)
+        # self.logic_cluster.print_details(report_file)
         # self.cluster_output_load.print_details(report_file)
         # self.routing_wire_load.print_details(report_file)
         if self.specs.enable_bram_block == 1:

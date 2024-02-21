@@ -1954,6 +1954,7 @@ def load_arch_params(filename): #,run_options):
         'L': -1,
         'wire_types': [],
         'sb_conn' : {},
+        'Fs_mtx' : {},
         'Fs': -1,
         'N': -1,
         'K': -1,
@@ -2053,6 +2054,9 @@ def load_arch_params(filename): #,run_options):
         elif param == 'sb_conn':
             # Dict of sb connectivity params
             param_dict["fpga_arch_params"]["sb_conn"] = value
+        elif param == "Fs_mtx":
+            # list of dicts
+            param_dict["fpga_arch_params"]["Fs_mtx"] = value
         elif param == 'Fs':
             param_dict["fpga_arch_params"]['Fs'] = int(value)
         elif param == 'N':

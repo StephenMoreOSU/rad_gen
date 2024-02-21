@@ -347,13 +347,18 @@ def RAM_local_routing_load_generate(spice_filename, num_on, num_partial, num_off
     return wire_names_list   
  
  
-def generate_ble_outputs(spice_filename, num_local_out, num_gen_out):
+def generate_ble_outputs(spice_filename, num_local_out, num_gen_out, gen_r_wire: dict):
     """ Create the BLE outputs block. Contains 'num_local_out' local outputs and 'num_gen_out' general outputs. """
     
     #TODO: The order of the wires is weird in this netlist, have a look at it later.
     # Total number of BLE outputs
     total_outputs = num_local_out + num_gen_out
     
+
+    subckt_local_ble_output_name = f"local_ble_output_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+    subckt_general_ble_output_name = f"general_ble_output_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+    wire_gen_ble_outputs = f"wire_ble_outputs_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+
     # Open SPICE file for appending
     spice_file = open(spice_filename, 'a')
     
@@ -366,17 +371,17 @@ def generate_ble_outputs(spice_filename, num_local_out, num_gen_out):
     for i in range(num_local_out):
         #if it is the first 2:1 local ble feedback mux then attach the n_local_out signal to its output else assign a random signal to it
         if i == 0:
-            spice_file.write("Xlocal_ble_output_" + str(i+1) + " n_1_" + str(current_node) + " n_local_out n_gate n_gate_n n_vdd_local_output_on n_gnd local_ble_output\n")
+            spice_file.write("Xlocal_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_local_out n_gate n_gate_n n_vdd_local_output_on n_gnd {subckt_local_ble_output_name}\n")
         else:
-            spice_file.write("Xlocal_ble_output_" + str(i+1) + " n_1_" + str(current_node) + " n_hang_" + str(current_node) + " n_gate n_gate_n n_vdd n_gnd local_ble_output\n")
+            spice_file.write("Xlocal_ble_output_" + str(i+1) + " n_1_" + str(current_node) + " n_hang_" + str(current_node) + f" n_gate n_gate_n n_vdd n_gnd {subckt_local_ble_output_name}\n")
         spice_file.write("Xwire_ble_outputs_" + str(i+1) + " n_1_" + str(current_node) + " n_1_" + str(current_node + 1) + " wire Rw='wire_ble_outputs_res/" + str(total_outputs-1) + "' Cw='wire_ble_outputs_cap/" + str(total_outputs-1) + "'\n")
         current_node = current_node + 1
     for i in range(num_gen_out):
         #if it is the first 2:1 general ble output mux then attach the n_general_out signal to its output else assign a random signal to it
         if i == 0:
-            spice_file.write("Xgeneral_ble_output_" + str(i+1) + " n_1_" + str(current_node) + " n_general_out n_gate n_gate_n n_vdd_general_output_on n_gnd general_ble_output\n")
+            spice_file.write("Xgeneral_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_general_out n_gate n_gate_n n_vdd_general_output_on n_gnd {subckt_general_ble_output_name}\n")
         else:
-            spice_file.write("Xgeneral_ble_output_" + str(i+1) + " n_1_" + str(current_node) + " n_hang_" + str(current_node) + " n_gate n_gate_n n_vdd n_gnd general_ble_output\n")
+            spice_file.write("Xgeneral_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_hang_" + str(current_node) + f" n_gate n_gate_n n_vdd n_gnd {subckt_general_ble_output_name}\n")
         # Only add wire if this is not the last ble output.
         if (i+1) != num_gen_out:
             spice_file.write("Xwire_ble_outputs_" + str(num_local_out+i+1) + " n_1_" + str(current_node) + " n_1_" + str(current_node + 1) + " wire Rw='wire_ble_outputs_res/" + str(total_outputs-1) + "' Cw='wire_ble_outputs_cap/" + str(total_outputs-1) + "'\n")
@@ -387,7 +392,7 @@ def generate_ble_outputs(spice_filename, num_local_out, num_gen_out):
     
     # Create a list of all wires used in this subcircuit
     wire_names_list = []
-    wire_names_list.append("wire_ble_outputs")
+    wire_names_list.append(wire_gen_ble_outputs)
     
     return wire_names_list
     
