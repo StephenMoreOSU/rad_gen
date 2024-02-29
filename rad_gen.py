@@ -143,7 +143,12 @@ def main(args: Optional[argparse.Namespace] = None) -> Union[None, Any]:
         if rad_gen_info["ic_3d"].args.buffer_sens_study:
             ic_3d.run_buffer_sens_study(rad_gen_info["ic_3d"])
         if rad_gen_info["ic_3d"].args.debug_spice != None:
-            debug_procs = [ rg_ds.SpProcess(top_sp_dir=rg_utils.clean_path("~/rad_gen/spice_sim"), title = title) for title in rad_gen_info["ic_3d"].cli_args.debug_spice ]
+            debug_procs = [ 
+                rg_ds.SpProcess(
+                    top_sp_dir = rg_utils.clean_path("~/rad_gen/spice_sim"),
+                    title = title
+                ) for title in rad_gen_info["ic_3d"].cli_args.debug_spice
+            ]
             for sp_process in debug_procs:
                 ic_3d.run_spice_debug(rad_gen_info["ic_3d"], sp_process)
         

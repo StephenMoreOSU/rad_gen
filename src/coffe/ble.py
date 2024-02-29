@@ -9,7 +9,14 @@ import src.coffe.load_subcircuits as load_subcircuits
 import src.coffe.utils as utils
 
 from src.coffe.lut import _LUT
+# CIRC IMPORT ERROR
+# from src.coffe.logic_block import _LocalBLEOutputLoad
+from src.coffe.gen_routing_loads import _GeneralBLEOutputLoad
+from src.coffe.sb_mux import _SwitchBlockMUX
 
+import src.common.data_structs as rg_ds
+import src.common.spice_parser as sp_parser
+import re
 
 from typing import Dict, List, Tuple, Union, Any
 import math, os
@@ -17,8 +24,13 @@ import math, os
 class _LocalBLEOutput(_SizableCircuit):
     """ Local BLE Output class """
     
-    def __init__(self, use_tgate, gen_r_wire: dict):
-        self.name = f"local_ble_output_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+    def __init__(self, use_tgate, gen_r_wire: dict, local_ble_output_load: Any):
+        self.name = f"local_ble_output" #_wire_uid{gen_r_wire['id']}"
+        # load obj onto the local_ble_output
+        self.local_ble_output_load = local_ble_output_load
+        # load obj into the general_ble_output
+        # self.gen_ble_output = gen_ble_output
+
         self.gen_r_wire = gen_r_wire
         # Delay weight in a representative critical path
         self.delay_weight = fpga.DELAY_WEIGHT_LOCAL_BLE_OUTPUT
@@ -58,6 +70,8 @@ class _LocalBLEOutput(_SizableCircuit):
         # Change to directory    
         os.chdir(self.name)   
         
+        subckt_local_ble_output_load: str = self.local_ble_output_load.name
+
         local_ble_output_filename = self.name + ".sp"
         top_file = open(local_ble_output_filename, 'w')
         top_file.write(".TITLE Local BLE output\n\n") 
@@ -170,14 +184,20 @@ class _LocalBLEOutput(_SizableCircuit):
 class _GeneralBLEOutput(_SizableCircuit):
     """ General BLE Output """
     
-    def __init__(self, use_tgate, gen_r_wire: dict):
+    def __init__(self, use_tgate, gen_r_wire: dict, gen_ble_output_load: _GeneralBLEOutputLoad):
         self.gen_r_wire = gen_r_wire
+        # load obj onto the general_ble_output
+        self.output_load: _GeneralBLEOutputLoad = gen_ble_output_load
         # default name format for general BLE output
-        self.name = f"general_ble_output_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+        self.name = f"general_ble_output_sb_mux_uid{gen_ble_output_load.sb_on_idx}"
         # self.name = "general_ble_output"
         self.delay_weight = fpga.DELAY_WEIGHT_GENERAL_BLE_OUTPUT
         self.use_tgate = use_tgate
-        
+        # Insts in the top level spice file
+        self.top_insts: List[rg_ds.SpSubCktInst] = []
+        # Stores parameter name of wire loads & transistors
+        self.wire_names: List[str] = []
+        self.transistor_names: List[str] = []
         
     def generate(self, subcircuit_filename, min_tran_width):
         print("Generating general BLE output")
@@ -205,14 +225,36 @@ class _GeneralBLEOutput(_SizableCircuit):
     def generate_general_ble_output_top(self):
         """ """
         
+        #   __  __ ___   _   ___ _   _ ___ ___   ___ _____ _ _____ ___ __  __ ___ _  _ _____ ___ 
+        #  |  \/  | __| /_\ / __| | | | _ \ __| / __|_   _/_\_   _| __|  \/  | __| \| |_   _/ __|
+        #  | |\/| | _| / _ \\__ \ |_| |   / _|  \__ \ | |/ _ \| | | _|| |\/| | _|| .` | | | \__ \
+        #  |_|  |_|___/_/ \_\___/\___/|_|_\___| |___/ |_/_/ \_\_| |___|_|  |_|___|_|\_| |_| |___/
+        
+        # Get list of insts to get to the general_ble_output inst in lut_output_load
+        inst_path_lut_out_load_to_gen_ble_out: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts, 
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) for re_str in ["lut_output_load", "ble_outputs", "general_ble_output"] ], #"general_ble_output" is the param_inst but param is suffix ie no change
+            [] # You need to pass in an empty list to init function, if you don't weird things will happen (like getting previous results from other function calls)
+        )
+
+        meas_gen_ble_out_mux_drv_in_node: str = ".".join([inst.name for inst in inst_path_lut_out_load_to_gen_ble_out] + ["n_2_1"])
+
+        # Not needed unless the "Xgeneral_ble_output_load" inst name changes
+        # inst_path_top_gen_ble_out_load: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+        #     self.top_insts, 
+        #     [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) for re_str in ["general_ble_output_load"] ],
+        #     [] # You need to pass in an empty list to init function, if you don't weird things will happen (like getting previous results from other function calls)
+        # )
+        # meas_top_gen_ble_out_load_meas_node: str = ".".join([inst.name for inst in inst_path_top_gen_ble_out_load] + ["n_2_1"])
+
         # Create directories
         if not os.path.exists(self.name):
             os.makedirs(self.name)  
         # Change to directory    
         os.chdir(self.name)  
         
-        p_str = f"_L{self.gen_r_wire['len']}_uid{self.gen_r_wire['id']}"
-        subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
+        # p_str = f"_wire_uid{self.gen_r_wire['id']}"
+        # subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
 
         general_ble_output_filename = self.name + ".sp"
         top_file = open(general_ble_output_filename, 'w')
@@ -239,9 +281,9 @@ class _GeneralBLEOutput(_SizableCircuit):
         top_file.write("********************************************************************************\n\n")
         top_file.write("* inv_general_ble_output_1 delay\n")
         top_file.write(".MEASURE TRAN meas_inv_general_ble_output_1_tfall TRIG V(n_1_1) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(Xlut_output_load.Xble_outputs.Xgeneral_ble_output_1.n_2_1) VAL='supply_v/2' FALL=1\n")
+        top_file.write(f"+    TARG V({meas_gen_ble_out_mux_drv_in_node}) VAL='supply_v/2' FALL=1\n")
         top_file.write(".MEASURE TRAN meas_inv_general_ble_output_1_trise TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(Xlut_output_load.Xble_outputs.Xgeneral_ble_output_1.n_2_1) VAL='supply_v/2' RISE=1\n\n")
+        top_file.write(f"+    TARG V({meas_gen_ble_out_mux_drv_in_node}) VAL='supply_v/2' RISE=1\n\n")
         top_file.write("* inv_general_ble_output_2 delays\n")
         top_file.write(".MEASURE TRAN meas_inv_general_ble_output_2_tfall TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
         top_file.write("+    TARG V(Xgeneral_ble_output_load.n_meas_point) VAL='supply_v/2' FALL=1\n")
@@ -269,7 +311,7 @@ class _GeneralBLEOutput(_SizableCircuit):
             top_file.write("Xlut n_in n_1_1 vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
             top_file.write("Xlut_output_load n_1_1 n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd_general_output lut_output_load\n\n")
 
-        top_file.write(f"Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd {subckt_gen_ble_out_load_str}\n")
+        top_file.write(f"Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd {self.output_load.name}\n")
         top_file.write(".END")
         top_file.close()
 
@@ -279,7 +321,64 @@ class _GeneralBLEOutput(_SizableCircuit):
         return (self.name + "/" + self.name + ".sp")
 
 
-    def generate_top(self):
+    def generate_top(self, all_subckts: Dict[str, rg_ds.SpSubCkt]):
+
+        self.top_insts: List[rg_ds.SpSubCktInst] = [
+            # LUT
+            rg_ds.SpSubCktInst(
+                name="Xlut",
+                subckt=all_subckts["lut"],
+                # port : node
+                conns = {
+                    "n_in": "n_1_1",
+                    "n_out": "vdd",
+                    "n_a" : "gnd",
+                    "n_a_n": "vdd",
+                    "n_b": "gnd",
+                    "n_b_n": "vdd",
+                    "n_c": "gnd",
+                    "n_c_n": "vdd",
+                    "n_d": "gnd",
+                    "n_d_n": "vdd",
+                    "n_e": "gnd",
+                    "n_e_n": "vdd",
+                    "n_f": "gnd",
+                    "n_f_n": "vdd",
+                    "n_vdd": "gnd",
+                    "n_gnd": "lut",
+                }
+            ),
+            # LUT LOAD
+            rg_ds.SpSubCktInst(
+                name="Xlut_output_load",
+                subckt=all_subckts["lut_output_load"],
+                conns = {
+                    "n_in": "n_1_1",
+                    "n_local_out": "n_local_out",
+                    "n_general_out": "n_general_out",
+                    "n_gate": "vsram",
+                    "n_gate_n": "vsram_n",
+                    "n_vdd": "vdd",
+                    "n_gnd": "gnd",
+                    "n_vdd_local_output_on": "vdd",
+                    "n_vdd_general_output_on": "vdd_general_output",
+                }
+            ),
+            # GENERAL BLE OUTPUT LOAD
+            rg_ds.SpSubCktInst(
+                name="Xgeneral_ble_output_load",
+                subckt = all_subckts[self.output_load.name],
+                conns = {
+                    "n_1_1": "n_general_out",
+                    "n_out": "n_hang1",
+                    "n_gate": "vsram",
+                    "n_gate_n": "vsram_n",
+                    "n_vdd": "vdd",
+                    "n_gnd": "gnd",
+                }
+            )
+        ]
+
         print("Generating top-level " + self.name)
         self.top_spice_path = self.generate_general_ble_output_top()
         
@@ -525,10 +624,41 @@ class _LUTOutputLoad:
         self.num_general_outputs = num_general_outputs
         self.wire_names = []
         
+
+    def generate_lut_output_load(self, spice_filename):
+        """ Create the LUT output load subcircuit. It consists of a FF which 
+            has the register select mux at its input and all BLE outputs which 
+            include the output routing mux (Or) and the output feedback mux (Ofb) """
+
+
+        # Total number of BLE outputs
+        total_outputs = self.num_local_outputs + self.num_general_outputs
+
+        # Open SPICE file for appending
+        spice_file = open(spice_filename, 'a')
+        
+        spice_file.write("******************************************************************************************\n")
+        spice_file.write("* LUT output load\n")
+        spice_file.write("******************************************************************************************\n")
+        spice_file.write(".SUBCKT lut_output_load n_in n_local_out n_general_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_output_on n_vdd_general_output_on\n")
+        spice_file.write("Xwire_lut_output_load_1 n_in n_1_1 wire Rw='wire_lut_output_load_1_res' Cw='wire_lut_output_load_1_cap'\n")
+        spice_file.write("Xff n_1_1 n_hang1 n_gate n_gate_n n_vdd n_gnd n_gnd n_vdd n_gnd n_vdd n_vdd n_gnd ff\n")
+        spice_file.write("Xwire_lut_output_load_2 n_1_1 n_1_2 wire Rw='wire_lut_output_load_2_res' Cw='wire_lut_output_load_2_cap'\n")
+        spice_file.write("Xble_outputs n_1_2 n_local_out n_general_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_output_on n_vdd_general_output_on ble_outputs\n")
+        spice_file.write(".ENDS\n\n\n")
+
+        spice_file.close()
+        
+        # Create a list of all wires used in this subcircuit
+        wire_names_list = []
+        wire_names_list.append("wire_lut_output_load_1")
+        wire_names_list.append("wire_lut_output_load_2")
+        
+        return wire_names_list
         
     def generate(self, subcircuit_filename, min_tran_width):
         print("Generating LUT output load")
-        self.wire_names = load_subcircuits.generate_lut_output_load(subcircuit_filename, self.num_local_outputs, self.num_general_outputs)
+        self.wire_names = self.generate_lut_output_load(subcircuit_filename)
         
      
     def update_wires(self, width_dict, wire_lengths, wire_layers):
@@ -539,16 +669,18 @@ class _LUTOutputLoad:
         wire_lengths["wire_lut_output_load_2"] = width_dict["ff"]
         
         # Update wire layers
-        wire_layers["wire_lut_output_load_1"] = 0
-        wire_layers["wire_lut_output_load_2"] = 0
+        wire_layers["wire_lut_output_load_1"] = fpga.LOCAL_WIRE_LAYER
+        wire_layers["wire_lut_output_load_2"] = fpga.LOCAL_WIRE_LAYER
 
 class _flut_mux(_CompoundCircuit):
     
-    def __init__(self, use_tgate, use_finfet, enable_carry_chain, gen_r_wire: dict):
+    def __init__(self, use_tgate, use_finfet, enable_carry_chain, gen_ble_output_load: _GeneralBLEOutputLoad):
         # name
         self.name = "flut_mux"
+        # Gen ble output load that is loading the flut_mux
+        self.gen_ble_output_load = gen_ble_output_load
         # self.name = f"flut_mux_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
-        self.gen_r_wire = gen_r_wire
+        # self.gen_r_wire = gen_r_wire
         # use tgate
         self.use_tgate = use_tgate
         # A dictionary of the initial transistor sizes
@@ -595,8 +727,8 @@ class _flut_mux(_CompoundCircuit):
         #- I also think that in both cases whether there is a carry chain mux or not the delay should 
         #  be measured between the n_1_1 and n_1_3 and not between n_1_1 and n_local_out.
         
-        p_str = f"_L{self.gen_r_wire['len']}_uid{self.gen_r_wire['id']}"
-        subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
+        # p_str = f"_wire_uid{self.gen_r_wire['id']}"
+        # subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
 
         # Create directories
         if not os.path.exists(self.name):
@@ -673,7 +805,7 @@ class _flut_mux(_CompoundCircuit):
             else:
                 top_file.write("Xlut_output_load n_1_3 n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
 
-        top_file.write(f"Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd {subckt_gen_ble_out_load_str}\n")
+        top_file.write(f"Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd {self.gen_ble_output_load.name}\n")
         top_file.write(".END")
         top_file.close()
 
@@ -710,6 +842,9 @@ class _flut_mux(_CompoundCircuit):
 
     def update_wires(self, width_dict, wire_lengths, wire_layers, lut_ratio):
         """ Update wire of member objects. """
+        
+        # TODO get wires from self.wire_names instead
+
         # Update wire lengths
         if not self.use_tgate :
             wire_lengths["wire_" + self.name] = width_dict["ptran_" + self.name]
@@ -729,11 +864,23 @@ class _flut_mux(_CompoundCircuit):
 
 class _BLE(_CompoundCircuit):
 
-    def __init__(self, K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, N, gen_r_wire: dict):
+    def __init__(
+            self, K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, 
+            enable_carry_chain, FAs_per_flut, 
+            carry_skip_periphery_count, N, 
+            gen_r_wire: dict,
+            local_ble_output_load: Any,
+            gen_ble_output_load: _GeneralBLEOutputLoad
+        ):
         # BLE name
         self.name = "ble"
         # General routing wire associated
-        self.gen_r_wire = gen_r_wire
+        self.gen_r_wire: dict = gen_r_wire
+        # local ble output load object
+        self.local_ble_output_load: Any = local_ble_output_load
+        # General ble output load object
+        self.gen_ble_output_load: _GeneralBLEOutputLoad = gen_ble_output_load
+        # Switch block mux loading the g
         # number of bles in a cluster
         self.N = N
         # Size of LUT
@@ -745,9 +892,10 @@ class _BLE(_CompoundCircuit):
         # Number of general outputs
         self.num_general_outputs = Or
         # Create BLE local output object
-        self.local_output = _LocalBLEOutput(use_tgate, gen_r_wire)
+        self.local_output = _LocalBLEOutput(use_tgate, gen_r_wire, self.local_ble_output_load)
         # Create BLE general output object
-        self.general_output = _GeneralBLEOutput(use_tgate, gen_r_wire)
+        self.general_output = _GeneralBLEOutput(use_tgate, gen_r_wire, self.gen_ble_output_load)
+
         # Creating a BLE general output object for each type of wire we have
         # self.general_outputs = [_GeneralBLEOutput(use_tgate, wire) for wire in wire_types]
         # Create LUT object
@@ -760,14 +908,68 @@ class _BLE(_CompoundCircuit):
         self.use_fluts = use_fluts
         # The extra mux for the fracturable luts
         if use_fluts:
-            self.fmux = _flut_mux(use_tgate, use_finfet, enable_carry_chain, gen_r_wire)
+            self.fmux = _flut_mux(use_tgate, use_finfet, enable_carry_chain, self.gen_ble_output_load)
 
         # TODO: why is the carry chain object not defined here?
         self.enable_carry_chain = enable_carry_chain
         self.FAs_per_flut = FAs_per_flut
         self.carry_skip_periphery_count = carry_skip_periphery_count
 
+        # wire_names
+        self.wire_names: List[str] = []
+
+
+
+    def generate_ble_outputs(self, spice_filename):
+        """ Create the BLE outputs block. Contains 'num_local_out' local outputs and 'num_gen_out' general outputs. """
         
+        #TODO: The order of the wires is weird in this netlist, have a look at it later.
+        # Total number of BLE outputs
+        total_outputs = self.num_local_outputs + self.num_general_outputs
+        
+
+        subckt_local_ble_output_name = f"{self.local_output.name}" # f"local_ble_output_wire_uid{self.gen_r_wire['id']}"
+        subckt_general_ble_output_name = f"{self.general_output.name}" #f"general_ble_output_wire_uid{self.gen_r_wire['id']}"
+        # Typically the param string coming from the gen_ble_output load is coming from ON SB loading it
+        wire_gen_ble_outputs = f"wire_ble_outputs{self.gen_ble_output_load.param_str}"
+        # wire_gen_ble_outputs = f"wire_ble_outputs_wire_uid{self.gen_r_wire['id']}"
+
+        # Open SPICE file for appending
+        spice_file = open(spice_filename, 'a')
+        
+        spice_file.write("******************************************************************************************\n")
+        spice_file.write("* BLE outputs\n")
+        spice_file.write("******************************************************************************************\n")
+        spice_file.write(".SUBCKT ble_outputs n_1_" + str(int((total_outputs + 1)/2)+1) + " n_local_out n_general_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_output_on n_vdd_general_output_on\n")
+        # Create the BLE output bar
+        current_node = 2
+        for i in range(self.num_local_outputs):
+            #if it is the first 2:1 local ble feedback mux then attach the n_local_out signal to its output else assign a random signal to it
+            if i == 0:
+                spice_file.write("Xlocal_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_local_out n_gate n_gate_n n_vdd_local_output_on n_gnd {subckt_local_ble_output_name}\n")
+            else:
+                spice_file.write("Xlocal_ble_output_" + str(i+1) + " n_1_" + str(current_node) + " n_hang_" + str(current_node) + f" n_gate n_gate_n n_vdd n_gnd {subckt_local_ble_output_name}\n")
+            spice_file.write("Xwire_ble_outputs_" + str(i+1) + " n_1_" + str(current_node) + " n_1_" + str(current_node + 1) + f" wire Rw='{wire_gen_ble_outputs}_res/" + str(total_outputs-1) + f"' Cw='{wire_gen_ble_outputs}_cap/" + str(total_outputs-1) + "'\n")
+            current_node = current_node + 1
+        for i in range(self.num_general_outputs):
+            #if it is the first 2:1 general ble output mux then attach the n_general_out signal to its output else assign a random signal to it
+            if i == 0:
+                spice_file.write("Xgeneral_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_general_out n_gate n_gate_n n_vdd_general_output_on n_gnd {subckt_general_ble_output_name}\n")
+            else:
+                spice_file.write("Xgeneral_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_hang_" + str(current_node) + f" n_gate n_gate_n n_vdd n_gnd {subckt_general_ble_output_name}\n")
+            # Only add wire if this is not the last ble output.
+            if (i+1) != self.num_general_outputs:
+                spice_file.write("Xwire_ble_outputs_" + str(self.num_local_outputs+i+1) + " n_1_" + str(current_node) + " n_1_" + str(current_node + 1) + f" wire Rw='{wire_gen_ble_outputs}_res/" + str(total_outputs-1) + f"' Cw='{wire_gen_ble_outputs}_cap/" + str(total_outputs-1) + "'\n")
+            current_node = current_node + 1
+        spice_file.write(".ENDS\n\n\n")
+
+        spice_file.close()
+        
+        # Create a list of all wires used in this subcircuit
+        wire_names_list = []
+        wire_names_list.append(wire_gen_ble_outputs)
+        
+        return wire_names_list
         
     def generate(self, subcircuit_filename, min_tran_width):
         print("Generating BLE")
@@ -785,7 +987,7 @@ class _BLE(_CompoundCircuit):
         # for gen_output in self.general_outputs:
         #     init_tran_sizes.update(gen_output.generate(subcircuit_filename, 
         #                                                 min_tran_width))
-        load_subcircuits.generate_ble_outputs(subcircuit_filename, self.num_local_outputs, self.num_general_outputs, self.gen_r_wire)
+        self.wire_names = self.generate_ble_outputs(subcircuit_filename)
  
         #flut mux
         if self.use_fluts:
@@ -796,10 +998,10 @@ class _BLE(_CompoundCircuit):
         return init_tran_sizes
 
      
-    def generate_top(self):
+    def generate_top(self, all_subckts: Dict[str, rg_ds.SpSubCkt]):
         self.lut.generate_top()
         self.local_output.generate_top()
-        self.general_output.generate_top()
+        self.general_output.generate_top(all_subckts)
 
         if self.use_fluts:
             self.fmux.generate_top()   
@@ -852,7 +1054,12 @@ class _BLE(_CompoundCircuit):
     def update_wires(self, width_dict, wire_lengths, wire_layers, lut_ratio):
         """ Update wire of member objects. """
         
-        
+        # Filter wire names list to get the name of ble_output_wire (with any parameters added to suffix)
+        ble_outputs_wire_key = [ wire_name for wire_name in self.wire_names if "wire_ble_outputs" in wire_name][0]
+
+
+        # Assert keys exist in wire_names, unneeded but following convension if wire keys not coming from wire_names
+        assert ble_outputs_wire_key in self.wire_names
 
         # Update lut and ff wires.
         self.lut.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
@@ -863,8 +1070,8 @@ class _BLE(_CompoundCircuit):
         self.general_output.update_wires(width_dict, wire_lengths, wire_layers)
         
         # Wire connecting all BLE output mux-inputs together
-        wire_lengths["wire_ble_outputs"] = self.num_local_outputs*width_dict[self.local_output.name] + self.num_general_outputs*width_dict[self.general_output.name]
-        wire_layers["wire_ble_outputs"] = fpga.LOCAL_WIRE_LAYER
+        wire_lengths[ble_outputs_wire_key] = self.num_local_outputs * width_dict[self.local_output.name] + self.num_general_outputs * width_dict[self.general_output.name]
+        wire_layers[ble_outputs_wire_key] = fpga.LOCAL_WIRE_LAYER
 
         # Update LUT load wires
         self.lut_output_load.update_wires(width_dict, wire_lengths, wire_layers)

@@ -1,11 +1,22 @@
 from src.coffe.circuit_baseclasses import _SizableCircuit, _CompoundCircuit
 import src.coffe.fpga as fpga
 
+
 import src.coffe.mux_subcircuits as mux_subcircuits
 import src.coffe.load_subcircuits as load_subcircuits
 import src.coffe.utils as utils
 
+from src.coffe.sb_mux import _SwitchBlockMUX
+from src.coffe.gen_routing_loads import _RoutingWireLoad
+from src.coffe.gen_routing_loads import _GeneralBLEOutputLoad
 from src.coffe.ble import _BLE
+
+import src.common.data_structs as rg_ds
+
+# import src.coffe.sb_mux as sb_mux
+# import src.coffe.gen_routing_loads as gen_
+# import src.coffe.ble as 
+
 
 from typing import Dict, List, Tuple, Union, Any
 import math, os
@@ -13,12 +24,14 @@ import math, os
 class _LocalMUX(_SizableCircuit):
     """ Local Routing MUX Class: Pass-transistor 2-level mux with no driver """
     
-    def __init__(self, required_size, num_per_tile, use_tgate, gen_r_wire: dict):
+    def __init__(self, required_size, num_per_tile, use_tgate, gen_wire_load: _RoutingWireLoad, sb_mux: _SwitchBlockMUX):
         # Subcircuit name
         # self.name = f"local_mux_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
         self.name = "local_mux"
         # Associated Gen Programmable Routing Wire
-        self.gen_r_wire = gen_r_wire
+        self.gen_wire_load = gen_wire_load
+        # SB mux used for circuit model
+        self.sb_mux = sb_mux
         # How big should this mux be (dictated by architecture specs)
         self.required_size = required_size 
         # How big did we make the mux (it is possible that we had to make the mux bigger for level sizes to work out, this is how big the mux turned out)
@@ -84,10 +97,11 @@ class _LocalMUX(_SizableCircuit):
         # Change to directory    
         os.chdir(self.name)
         
+        subckt_sb_mux_on_str = f"{self.sb_mux.name}_on"
+
         # TODO link with other definiions elsewhere, duplicated
-        p_str = f"_L{self.gen_r_wire['len']}_uid{self.gen_r_wire['id']}"
-        subckt_sb_mux_on_str = f"sb_mux{p_str}_on"
-        subckt_routing_wire_load_str =  f"routing_wire_load{p_str}"
+        # p_str = f"_wire_uid{self.gen_r_wire['id']}"
+        # subckt_routing_wire_load_str =  f"{self.gen_wire_load.name}"
 
 
         connection_block_filename = self.name + ".sp"
@@ -135,7 +149,7 @@ class _LocalMUX(_SizableCircuit):
         local_mux_file.write("** Circuit\n")
         local_mux_file.write("********************************************************************************\n\n")
         local_mux_file.write(f"Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd {subckt_sb_mux_on_str}\n")
-        local_mux_file.write(f"Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd {subckt_routing_wire_load_str}\n")
+        local_mux_file.write(f"Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd {self.gen_wire_load.name}\n")
         local_mux_file.write("Xlocal_routing_wire_load_1 n_1_3 n_1_4 vsram vsram_n vdd gnd vdd_local_mux local_routing_wire_load\n")
         local_mux_file.write("Xlut_A_driver_1 n_1_4 n_hang1 vsram vsram_n n_hang2 n_hang3 vdd gnd lut_A_driver\n\n")
         local_mux_file.write(".END")
@@ -188,8 +202,8 @@ class _LocalMUX(_SizableCircuit):
         wire_lengths["wire_" + self.name + "_L1"] = width_dict[self.name] * ratio
         wire_lengths["wire_" + self.name + "_L2"] = width_dict[self.name] * ratio
         # Update wire layers
-        wire_layers["wire_" + self.name + "_L1"] = 0
-        wire_layers["wire_" + self.name + "_L2"] = 0  
+        wire_layers["wire_" + self.name + "_L1"] = fpga.LOCAL_WIRE_LAYER
+        wire_layers["wire_" + self.name + "_L2"] = fpga.LOCAL_WIRE_LAYER
         
    
     def print_details(self, report_file):
@@ -239,12 +253,14 @@ class _LocalRoutingWireLoad:
     def update_wires(self, width_dict, wire_lengths, wire_layers, local_routing_wire_load_length):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
+        # TODO get wire keys from self.wire_names
+
         # Update wire lengths
         wire_lengths["wire_local_routing"] = width_dict["logic_cluster"]
         if local_routing_wire_load_length !=0:
             wire_lengths["wire_local_routing"] = local_routing_wire_load_length
         # Update wire layers
-        wire_layers["wire_local_routing"] = 0
+        wire_layers["wire_local_routing"] = fpga.LOCAL_WIRE_LAYER
     
         
     def print_details(self):
@@ -284,9 +300,30 @@ class _LocalBLEOutputLoad:
     def __init__(self):
         self.name = "local_ble_output_load"
         
+    def generate_local_ble_output_load(self, spice_filename):
+
+        # Open SPICE file for appending
+        spice_file = open(spice_filename, 'a')
         
+        spice_file.write("******************************************************************************************\n")
+        spice_file.write("* Local BLE output load\n")
+        spice_file.write("******************************************************************************************\n")
+        spice_file.write(".SUBCKT local_ble_output_load n_in n_gate n_gate_n n_vdd n_gnd\n")
+        spice_file.write("Xwire_local_ble_output_feedback n_in n_1_1 wire Rw='wire_local_ble_output_feedback_res' Cw='wire_local_ble_output_feedback_cap'\n")
+        spice_file.write("Xlocal_routing_wire_load_1 n_1_1 n_1_2 n_gate n_gate_n n_vdd n_gnd n_vdd local_routing_wire_load\n")
+        spice_file.write("Xlut_a_driver_1 n_1_2 n_hang1 vsram vsram_n n_hang2 n_hang3 n_vdd n_gnd lut_a_driver\n\n")
+        spice_file.write(".ENDS\n\n\n")
+        
+        spice_file.close()
+        
+        # Create a list of all wires used in this subcircuit
+        wire_names_list = []
+        wire_names_list.append("wire_local_ble_output_feedback")
+        
+        return wire_names_list
+
     def generate(self, subcircuit_filename):
-        load_subcircuits.generate_local_ble_output_load(subcircuit_filename)
+        self.generate_local_ble_output_load(subcircuit_filename)
      
      
     def update_wires(self, width_dict, wire_lengths, wire_layers, ble_ic_dis):
@@ -297,28 +334,54 @@ class _LocalBLEOutputLoad:
         if ble_ic_dis !=0:
             wire_lengths["wire_local_ble_output_feedback"] = ble_ic_dis
         # Update wire layers
-        wire_layers["wire_local_ble_output_feedback"] = 0
+        wire_layers["wire_local_ble_output_feedback"] = fpga.LOCAL_WIRE_LAYER
 
 
 
 class _LogicCluster(_CompoundCircuit):
     
-    def __init__(self, N, K, Or, Ofb, Rsel, Rfb, local_mux_size_required, num_local_mux_per_tile, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, gen_r_wire: dict):
+    def __init__(
+            self, N, K, Or, Ofb, Rsel, Rfb, local_mux_size_required,
+            num_local_mux_per_tile, use_tgate, use_finfet, use_fluts,
+            enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, 
+            gen_r_wire: dict,
+            gen_r_wire_load: _RoutingWireLoad,
+            gen_ble_output_load: _GeneralBLEOutputLoad,
+            drv_sb_mux: _SwitchBlockMUX
+        ):
         # Name of logic cluster
         # self.name = f"logic_cluster_{gen_r_wire['len']}_uid{gen_r_wire['id']}"
         self.name = "logic_cluster"
+        # Set general ble ouput load passed into constructor
+        self.gen_ble_output_load = gen_ble_output_load
+        # Set SB mux which drives local mux
+        self.drv_sb_mux = drv_sb_mux
         # General routing wire associated with this logic cluster
         self.gen_r_wire = gen_r_wire
+        # General routing wire load associated with this logic cluster
+        self.gen_r_wire_load = gen_r_wire_load
         # Cluster size
         self.N = N
-        # Create BLE object
-        self.ble = _BLE(K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain, FAs_per_flut, carry_skip_periphery_count, N, gen_r_wire)
-        # Create local mux object
-        self.local_mux = _LocalMUX(local_mux_size_required, num_local_mux_per_tile, use_tgate, gen_r_wire)
-        # Create local routing wire load object
-        self.local_routing_wire_load = _LocalRoutingWireLoad()
         # Create local BLE output load object
         self.local_ble_output_load = _LocalBLEOutputLoad()
+        # Create BLE object
+        self.ble = _BLE(
+            K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain,
+            FAs_per_flut, carry_skip_periphery_count, N,
+            gen_r_wire,
+            self.local_ble_output_load,
+            self.gen_ble_output_load
+        )
+        # Create local mux object
+        self.local_mux = _LocalMUX(
+            local_mux_size_required, num_local_mux_per_tile,
+            use_tgate, 
+            gen_r_wire_load,
+            self.drv_sb_mux
+        )
+        # Create local routing wire load object
+        self.local_routing_wire_load = _LocalRoutingWireLoad()
+
         self.use_fluts = use_fluts
         self.enable_carry_chain = enable_carry_chain
 
@@ -334,12 +397,12 @@ class _LogicCluster(_CompoundCircuit):
         return init_tran_sizes
 
 
-    def generate_top(self):
+    def generate_top(self, all_subckts: Dict[str, rg_ds.SpSubCkt]):
         # pass min_len_wire to our local mux 
         # gen programmable routing -> local mux -> ble 
         # We assume that the shortest wire of our options is loading the input of our local muxes
         self.local_mux.generate_top()
-        self.ble.generate_top()
+        self.ble.generate_top(all_subckts)
         
         
     def update_area(self, area_dict, width_dict):

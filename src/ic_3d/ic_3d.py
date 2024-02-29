@@ -226,7 +226,7 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
                             pn_opt_process = buff_dse.write_sp_buffer_updated(ic_3d_info, sweep_params, "pn-opt")
                             buff_dse.run_spice(sp_process = pn_opt_process)
                             # Measurements inputted in spice file are also our determination of simulation success, there should be no failed measurements
-                            plot_df, measurements, opt_params = buff_dse.parse_spice(ic_3d_info.res, sp_process = pn_opt_process)
+                            plot_df, measurements, opt_params, _ = buff_dse.parse_spice(ic_3d_info.res, sp_process = pn_opt_process)
                             # We probably don't want to plot the voltage waveforms for every run but if we did one would do it here
                             # Check to make sure all measurements are captured AND they all have non "failed" values
                             if any( [m["val"] == "failed" for m in measurements] ):
@@ -276,7 +276,7 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
                         # Write the simulation with the optimized pn sizes found above, this is just to prevent weirdness between hspice opt commands and our results
                         sized_buffer_process = buff_dse.write_sp_buffer_updated(ic_3d_info, sweep_params, "sized", inv_sizes)
                         buff_dse.run_spice(sp_process = sized_buffer_process)
-                        plot_df, measurements, _ = buff_dse.parse_spice(ic_3d_info.res, sp_process = sized_buffer_process)
+                        plot_df, measurements, _, _ = buff_dse.parse_spice(ic_3d_info.res, sp_process = sized_buffer_process)
                         
                         ####################### CREATE CIRCUIT ITERATION INFO #######################
                         # Store all measurements not found in key substrs into a dict
@@ -562,17 +562,21 @@ def run_pdn_modeling(ic_3d_info: rg_ds.Ic3d):
     pdn.pdn_modeling(ic_3d_info)
 
 
-def run_spice_debug(ic_3d_info: rg_ds.Ic3d, spProcess: rg_ds.SpProcess):
+def run_spice_debug(spProcess: rg_ds.SpProcess) -> Tuple[pd.DataFrame, dict, Dict[str, List[Dict[int, float]]] ]:
+    res = rg_ds.Regexes()
+    sp_sim_settings = rg_ds.SpGlobalSimSettings()
+    
     buff_dse.run_spice(sp_process = spProcess)
     parse_flags = {
         "plot": True,
-        "measure": True
+        "measure": True,
+        "gen_params": True,
     }
-    plot_df, measurements, _ = buff_dse.parse_spice(ic_3d_info.res, spProcess, parse_flags)
+    plot_df, measurements, _, gen_params = buff_dse.parse_spice(res, spProcess, parse_flags)
     # Unit conversion
-    plot_df["time"] = buff_dse.unit_conversion(ic_3d_info.sp_sim_settings.unit_lookup_factors["time"], plot_df["time"], ic_3d_info.sp_sim_settings.abs_unit_lookups )
+    plot_df["time"] = buff_dse.unit_conversion(sp_sim_settings.unit_lookup_factors["time"], plot_df["time"], sp_sim_settings.abs_unit_lookups )
     for key in plot_df.columns[1:]:
-        plot_df[key] = buff_dse.unit_conversion(ic_3d_info.sp_sim_settings.unit_lookup_factors["voltage"], plot_df[key], ic_3d_info.sp_sim_settings.abs_unit_lookups )
+        plot_df[key] = buff_dse.unit_conversion(sp_sim_settings.unit_lookup_factors["voltage"], plot_df[key], sp_sim_settings.abs_unit_lookups )
     
     fig = go.Figure()
 
@@ -584,8 +588,8 @@ def run_spice_debug(ic_3d_info: rg_ds.Ic3d, spProcess: rg_ds.SpProcess):
     # This will be invalid if the user wants to look at something other than voltage
     fig.update_layout(
         title=f"Spice {spProcess.title} Waveforms @ {spProcess.sp_file}",
-        xaxis_title=f"Time ({ic_3d_info.sp_sim_settings.unit_lookup_factors['time']}s)", 
-        yaxis_title=f"Voltage ({ic_3d_info.sp_sim_settings.unit_lookup_factors['voltage']}V)",
+        xaxis_title=f"Time ({sp_sim_settings.unit_lookup_factors['time']}s)", 
+        yaxis_title=f"Voltage ({sp_sim_settings.unit_lookup_factors['voltage']}V)",
     )
     fig.show()
     # assuming all measurements are delays we can convert to ps
@@ -596,13 +600,15 @@ def run_spice_debug(ic_3d_info: rg_ds.Ic3d, spProcess: rg_ds.SpProcess):
     # Filter out delays with other measurements
     delay_substrings = ["delay", "t_rise", "t_fall"]
     delay_df = meas_df[meas_df['name'].str.contains('|'.join(delay_substrings))]
-    delay_df.loc[:, 'val'] = delay_df.loc[:,'val'].apply(lambda x: buff_dse.unit_conversion(ic_3d_info.sp_sim_settings.unit_lookup_factors["time"], x, ic_3d_info.sp_sim_settings.abs_unit_lookups, sig_figs = 5)) 
-    delay_df.loc[:, 'targ'] = delay_df.loc[:,'targ'].apply(lambda x: buff_dse.unit_conversion(ic_3d_info.sp_sim_settings.unit_lookup_factors["time"], x, ic_3d_info.sp_sim_settings.abs_unit_lookups, sig_figs = 5)) 
-    delay_df.loc[:, 'trig'] = delay_df.loc[:,'trig'].apply(lambda x: buff_dse.unit_conversion(ic_3d_info.sp_sim_settings.unit_lookup_factors["time"], x, ic_3d_info.sp_sim_settings.abs_unit_lookups, sig_figs = 5)) 
+    delay_df.loc[:, 'val'] = delay_df.loc[:,'val'].apply(lambda x: buff_dse.unit_conversion(sp_sim_settings.unit_lookup_factors["time"], x, sp_sim_settings.abs_unit_lookups, sig_figs = 5)) 
+    delay_df.loc[:, 'targ'] = delay_df.loc[:,'targ'].apply(lambda x: buff_dse.unit_conversion(sp_sim_settings.unit_lookup_factors["time"], x, sp_sim_settings.abs_unit_lookups, sig_figs = 5)) 
+    delay_df.loc[:, 'trig'] = delay_df.loc[:,'trig'].apply(lambda x: buff_dse.unit_conversion(sp_sim_settings.unit_lookup_factors["time"], x, sp_sim_settings.abs_unit_lookups, sig_figs = 5)) 
     
-    print(delay_df)
+    # print(delay_df)
     # for l in rg_utils.get_df_output_lines(delay_df):
     #     print(l)
+
+    return plot_df, measurements, gen_params
 
 
 def run_ic_3d_dse(ic_3d_cli: rg_ds.Ic3dCLI) -> Tuple[float]:

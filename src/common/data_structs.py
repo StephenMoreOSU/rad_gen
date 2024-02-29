@@ -111,7 +111,8 @@ class Regexes:
     sp_grab_measure_re: re.Pattern = re.compile( r"\b(\w+)\s*=\s*(failed|not found|[-+]?\d*(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*(?:\w+)?(?=\s|$)" )
     # global grabs all ".param" statements -> group 1 is name of parameter, group 2 is the value in scientific notation
     sp_grab_param_re: re.Pattern = re.compile(r"\.param\s+([^\s=]+)\s*=\s*([+\-]?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)\s*\$")
-
+    # Above grab_param_re didn't seem to work for coffe params
+    sp_coffe_grab_params_re: re.Pattern = re.compile(r"^\s+(\d+):(\w+)\s+=\s*([+\-]?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)\s*$", re.MULTILINE)
     # COFFE parsing
     coffe_key_w_spaces_rep_re: re.Pattern = re.compile(r'^([^0-9]+)\s+([0-9.]+[eE]{0,1}[0-9-]+)$', re.MULTILINE)
 
@@ -1354,6 +1355,34 @@ class SpSubCkt:
     insts: list = None
     direct_conn_insts: bool = False
 
+    def print(self, summary: bool = False) -> str:
+        msg_lines = []
+        if summary:
+            line = ""
+            line += f" {self.name} " 
+            #f".SUBCKT {self.name} " # {' '.join(self.ports)} "
+            if self.params:
+                line += ' '.join([f'{k}={v}' for k,v in self.params.items()])
+            return [line]
+        else:
+            print(f"#"*80)
+            print(f"SUBCKT: {self.name}")
+            print(f"Ports: ")
+            for key, _ in self.ports.items():
+                print(f"{key:<10}",end="")
+            print("")
+            if self.params:
+                print(f"Params")
+                print(f"{'param':<10} : {'default_val':>10}")
+                print(self.params)
+                for key, val in self.params.items():
+                    print(f"{key:<10} : {val:>10}")
+            print(f"Insts: ")
+            for inst in self.insts:
+                print("-"*80)
+                inst.print()
+            return ""
+
     def connect_insts(self):
         """
         Connects the instances of the subckt together
@@ -1397,12 +1426,45 @@ class SpSubCktInst:
     subckt: SpSubCkt
     name: str                                           # Name of instantiation ie X<inst_name> ... <ports> ... <subckt_name>
     conns: dict = field(default_factory = lambda: {})
+
+    parent_subckt: SpSubCkt = None
     param_values: dict = None 
     
+
+    # def find_top_subckt(self):
+    #     """
+    #     Finds the top level subckt for the current subckt instance
+    #     """
+    #     if self.parent_subckt == None:
+    #         return self.subckt
+    #     else:
+    #         return self.parent_subckt.find_top_subckt()
+
+    def print(self, summary: bool = False) -> str:
+        if summary:
+            line = ""
+            line += f" {self.subckt.name:<20}" 
+            if self.param_values:
+                line += f'{" ":<20}'.join([f'{k:>10} = {v:<35}' for k,v in self.param_values.items()])
+            # else:
+            #     line += f"{'N/A':>10}{'N/A':>10}"
+            return [line]
+        else:
+            print(f"\nINST: {self.name} of SUBCKT: {self.subckt.name}")
+            print(f"Connected Nets: ")
+            print(f"{'port':<10} --> {'node':>10}")
+            for key, val in self.conns.items():
+                print(f"{key:<10} --> {val:>10}")
+            print(f"Param Values:")
+            for key, val in self.param_values.items():
+                print(f"{key:<10} = {val:>10}")
+
+
     # initialize the param_values to those stored in the subckt params, if the user wants to override them they will specify them at creation of SpSubCktInst object
-    def __post_init__(self):
-        if self.param_values == None:
-            self.param_values = self.subckt.params.copy()
+    # def __post_init__(self):
+        # <TODO CRITICAL> FIX THIS FOR IC 3D STUFF
+        # if self.param_values == None:
+        #     self.param_values = self.subckt.params.copy()
 
 @dataclass
 class TechInfo:

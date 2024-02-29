@@ -5,22 +5,34 @@ import src.coffe.fpga as fpga
 import src.coffe.mux_subcircuits as mux_subcircuits
 import src.coffe.utils as utils
 
+# import src.coffe.sb_mux as sb_mux
+# import src.coffe.gen_routing_loads as gen_routing_loads
+
+from src.coffe.sb_mux import _SwitchBlockMUX
+# from src.coffe.gen_routing_loads import _RoutingWireLoad 
+# import src.coffe.gen_routing_loads as gen_routing_loads
+
 from typing import Dict, List, Tuple, Union, Any
 import math, os
 
 
 
 class _ConnectionBlockMUX(_SizableCircuit):
+    # import src.coffe.sb_mux as sb_mux
+    # from src.coffe.sb_mux import _SwitchBlockMUX
+    # from src.coffe.gen_routing_loads import _RoutingWireLoad 
     """ Connection Block MUX Class: Pass-transistor 2-level mux """
     
-    def __init__(self, required_size, num_per_tile, use_tgate, gen_r_wire: dict, sb_mux_name: str):
+    def __init__(self, required_size, num_per_tile, use_tgate, gen_r_wire: dict, sb_mux: _SwitchBlockMUX, gen_r_wire_load: Any):
         # Name of SB mux loading this CB mux 
-        self.sb_mux_name = sb_mux_name
+        self.sb_mux : _SwitchBlockMUX = sb_mux
         # Subcircuit name
         # self.name = f"cb_mux_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
         self.name = "cb_mux"
         # Associated Gen Programmable Routing Wire
         self.gen_r_wire = gen_r_wire
+        # Associated Gen Programmable Routing Wire Load
+        self.gen_r_wire_load : Any = gen_r_wire_load
         # How big should this mux be (dictated by architecture specs)
         self.required_size = required_size 
         # How big did we make the mux (it is possible that we had to make the mux bigger for level sizes to work out, this is how big the mux turned out)
@@ -39,7 +51,9 @@ class _ConnectionBlockMUX(_SizableCircuit):
         self.delay_weight = fpga.DELAY_WEIGHT_CB_MUX
         # use pass transistor or transmission gates
         self.use_tgate = use_tgate
-        
+        # Stores parameter name of wire loads & transistors
+        self.wire_names: List[str] = []
+        self.transistor_names: List[str] = []
     
     def generate(self, subcircuit_filename, min_tran_width):
         print("Generating connection block mux")
@@ -88,9 +102,9 @@ class _ConnectionBlockMUX(_SizableCircuit):
         os.chdir(self.name)
         
         # TODO link with other definiions elsewhere, duplicated
-        subckt_sb_mux_on_str = f"{self.sb_mux_name}_on"
-        p_str = f"_L{min_len_wire['len']}_uid{min_len_wire['id']}"
-        subckt_routing_wire_load_str =  f"routing_wire_load{p_str}"
+        subckt_sb_mux_on_str = f"{self.sb_mux.name}_on"
+        # p_str = f"_wire_uid{min_len_wire['id']}"
+        subckt_routing_wire_load_str =  f"{self.gen_r_wire_load.name}"
 
         connection_block_filename = self.name + ".sp"
         cb_file = open(connection_block_filename, 'w')
@@ -205,16 +219,30 @@ class _ConnectionBlockMUX(_SizableCircuit):
     
     def update_wires(self, width_dict, wire_lengths, wire_layers, ratio):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+    
+        # Verify that indeed the wires we will update come from the ones initialized in the generate function
+        drv_wire_key = [key for key in self.wire_names if f"wire_{self.name}_driver" in key][0]
+        l1_wire_key = [key for key in self.wire_names if f"wire_{self.name}_L1" in key][0]
+        l2_wire_key = [key for key in self.wire_names if f"wire_{self.name}_L2" in key][0]
+
+        # Not sure where these keys are coming from TODO figure that out and verify them
+        s1_inv_key = f"inv_{self.name}_1"
+        s2_inv_key = f"inv_{self.name}_2"
+
+       # Assert keys exist in wire_names, unneeded but following convension if wire keys not coming from wire_names
+        for wire_key in [drv_wire_key, l1_wire_key, l2_wire_key]:
+            assert wire_key in self.wire_names
 
         # Update wire lengths
-        wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_2"])/4
-        wire_lengths["wire_" + self.name + "_L1"] = width_dict[self.name] * ratio
-        wire_lengths["wire_" + self.name + "_L2"] = width_dict[self.name] * ratio
+        # Divide both driver widths by 4 to get wire from pin -> driver input? Maybe just a back of envelope estimate 
+        wire_lengths[drv_wire_key] = (width_dict[s1_inv_key] + width_dict[s2_inv_key]) / 4
+        wire_lengths[l1_wire_key] = width_dict[self.name] * ratio
+        wire_lengths[l2_wire_key] = width_dict[self.name] * ratio
         
         # Update set wire layers
-        wire_layers["wire_" + self.name + "_driver"] = 0
-        wire_layers["wire_" + self.name + "_L1"] = 0
-        wire_layers["wire_" + self.name + "_L2"] = 0    
+        wire_layers[drv_wire_key] = fpga.LOCAL_WIRE_LAYER
+        wire_layers[l1_wire_key] = fpga.LOCAL_WIRE_LAYER
+        wire_layers[l2_wire_key] = fpga.LOCAL_WIRE_LAYER   
         
    
     def print_details(self, report_file):

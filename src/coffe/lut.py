@@ -300,7 +300,7 @@ class _LUTInputDriver(_SizableCircuit):
         # getting name of min len wire local mux from global to just save myself the pain of changing all these variable names
         # global min_len_wire
         min_len_wire = fpga.min_len_wire
-        local_mux_key = f"local_mux_L{min_len_wire['len']}_uid{min_len_wire['id']}"
+        # local_mux_key = f"local_mux_L{min_len_wire['len']}_uid{min_len_wire['id']}"
         local_mux_key = "local_mux"
 
         if not self.use_tgate :  

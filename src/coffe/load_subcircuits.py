@@ -17,7 +17,7 @@ def general_routing_load_generate(spice_filename: str, tile_sb_on: List[int], ti
     wire_id = gen_r_wire["id"]
 
     # param string suffixes
-    p_str_suffix = f"_L{wire_length}_uid{wire_id}"
+    p_str_suffix = f"_wire_uid{wire_id}"
     routing_wire_load_pstr = f"wire_gen_routing{p_str_suffix}"
     wire_sb_load_on_pstr = f"wire_sb_load_on{p_str_suffix}"
     wire_sb_load_partial_pstr = f"wire_sb_load_partial{p_str_suffix}"
@@ -347,177 +347,177 @@ def RAM_local_routing_load_generate(spice_filename, num_on, num_partial, num_off
     return wire_names_list   
  
  
-def generate_ble_outputs(spice_filename, num_local_out, num_gen_out, gen_r_wire: dict):
-    """ Create the BLE outputs block. Contains 'num_local_out' local outputs and 'num_gen_out' general outputs. """
+# def generate_ble_outputs(spice_filename, num_local_out, num_gen_out, gen_r_wire: dict):
+#     """ Create the BLE outputs block. Contains 'num_local_out' local outputs and 'num_gen_out' general outputs. """
     
-    #TODO: The order of the wires is weird in this netlist, have a look at it later.
-    # Total number of BLE outputs
-    total_outputs = num_local_out + num_gen_out
-    
-
-    subckt_local_ble_output_name = f"local_ble_output_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
-    subckt_general_ble_output_name = f"general_ble_output_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
-    wire_gen_ble_outputs = f"wire_ble_outputs_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
-
-    # Open SPICE file for appending
-    spice_file = open(spice_filename, 'a')
-    
-    spice_file.write("******************************************************************************************\n")
-    spice_file.write("* BLE outputs\n")
-    spice_file.write("******************************************************************************************\n")
-    spice_file.write(".SUBCKT ble_outputs n_1_" + str(int((total_outputs + 1)/2)+1) + " n_local_out n_general_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_output_on n_vdd_general_output_on\n")
-    # Create the BLE output bar
-    current_node = 2
-    for i in range(num_local_out):
-        #if it is the first 2:1 local ble feedback mux then attach the n_local_out signal to its output else assign a random signal to it
-        if i == 0:
-            spice_file.write("Xlocal_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_local_out n_gate n_gate_n n_vdd_local_output_on n_gnd {subckt_local_ble_output_name}\n")
-        else:
-            spice_file.write("Xlocal_ble_output_" + str(i+1) + " n_1_" + str(current_node) + " n_hang_" + str(current_node) + f" n_gate n_gate_n n_vdd n_gnd {subckt_local_ble_output_name}\n")
-        spice_file.write("Xwire_ble_outputs_" + str(i+1) + " n_1_" + str(current_node) + " n_1_" + str(current_node + 1) + " wire Rw='wire_ble_outputs_res/" + str(total_outputs-1) + "' Cw='wire_ble_outputs_cap/" + str(total_outputs-1) + "'\n")
-        current_node = current_node + 1
-    for i in range(num_gen_out):
-        #if it is the first 2:1 general ble output mux then attach the n_general_out signal to its output else assign a random signal to it
-        if i == 0:
-            spice_file.write("Xgeneral_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_general_out n_gate n_gate_n n_vdd_general_output_on n_gnd {subckt_general_ble_output_name}\n")
-        else:
-            spice_file.write("Xgeneral_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_hang_" + str(current_node) + f" n_gate n_gate_n n_vdd n_gnd {subckt_general_ble_output_name}\n")
-        # Only add wire if this is not the last ble output.
-        if (i+1) != num_gen_out:
-            spice_file.write("Xwire_ble_outputs_" + str(num_local_out+i+1) + " n_1_" + str(current_node) + " n_1_" + str(current_node + 1) + " wire Rw='wire_ble_outputs_res/" + str(total_outputs-1) + "' Cw='wire_ble_outputs_cap/" + str(total_outputs-1) + "'\n")
-        current_node = current_node + 1
-    spice_file.write(".ENDS\n\n\n")
-
-    spice_file.close()
-    
-    # Create a list of all wires used in this subcircuit
-    wire_names_list = []
-    wire_names_list.append(wire_gen_ble_outputs)
-    
-    return wire_names_list
-    
-    
-def generate_lut_output_load(spice_filename, num_local_out, num_gen_out):
-    """ Create the LUT output load subcircuit. It consists of a FF which 
-        has the register select mux at its input and all BLE outputs which 
-        include the output routing mux (Or) and the output feedback mux (Ofb) """
-
-    # Total number of BLE outputs
-    total_outputs = num_local_out + num_gen_out
-
-    # Open SPICE file for appending
-    spice_file = open(spice_filename, 'a')
-    
-    spice_file.write("******************************************************************************************\n")
-    spice_file.write("* LUT output load\n")
-    spice_file.write("******************************************************************************************\n")
-    spice_file.write(".SUBCKT lut_output_load n_in n_local_out n_general_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_output_on n_vdd_general_output_on\n")
-    spice_file.write("Xwire_lut_output_load_1 n_in n_1_1 wire Rw='wire_lut_output_load_1_res' Cw='wire_lut_output_load_1_cap'\n")
-    spice_file.write("Xff n_1_1 n_hang1 n_gate n_gate_n n_vdd n_gnd n_gnd n_vdd n_gnd n_vdd n_vdd n_gnd ff\n")
-    spice_file.write("Xwire_lut_output_load_2 n_1_1 n_1_2 wire Rw='wire_lut_output_load_2_res' Cw='wire_lut_output_load_2_cap'\n")
-    spice_file.write("Xble_outputs n_1_2 n_local_out n_general_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_output_on n_vdd_general_output_on ble_outputs\n")
-    spice_file.write(".ENDS\n\n\n")
-
-    spice_file.close()
-    
-    # Create a list of all wires used in this subcircuit
-    wire_names_list = []
-    wire_names_list.append("wire_lut_output_load_1")
-    wire_names_list.append("wire_lut_output_load_2")
-    
-    return wire_names_list
+#     #TODO: The order of the wires is weird in this netlist, have a look at it later.
+#     # Total number of BLE outputs
+#     total_outputs = num_local_out + num_gen_out
     
 
-def generate_local_ble_output_load(spice_filename):
+#     subckt_local_ble_output_name = f"local_ble_output_wire_uid{gen_r_wire['id']}"
+#     subckt_general_ble_output_name = f"general_ble_output_wire_uid{gen_r_wire['id']}"
+#     wire_gen_ble_outputs = f"wire_ble_outputs_wire_uid{gen_r_wire['id']}"
 
-    # Open SPICE file for appending
-    spice_file = open(spice_filename, 'a')
+#     # Open SPICE file for appending
+#     spice_file = open(spice_filename, 'a')
     
-    spice_file.write("******************************************************************************************\n")
-    spice_file.write("* Local BLE output load\n")
-    spice_file.write("******************************************************************************************\n")
-    spice_file.write(".SUBCKT local_ble_output_load n_in n_gate n_gate_n n_vdd n_gnd\n")
-    spice_file.write("Xwire_local_ble_output_feedback n_in n_1_1 wire Rw='wire_local_ble_output_feedback_res' Cw='wire_local_ble_output_feedback_cap'\n")
-    spice_file.write("Xlocal_routing_wire_load_1 n_1_1 n_1_2 n_gate n_gate_n n_vdd n_gnd n_vdd local_routing_wire_load\n")
-    spice_file.write("Xlut_a_driver_1 n_1_2 n_hang1 vsram vsram_n n_hang2 n_hang3 n_vdd n_gnd lut_a_driver\n\n")
-    spice_file.write(".ENDS\n\n\n")
-    
-    spice_file.close()
-    
-    # Create a list of all wires used in this subcircuit
-    wire_names_list = []
-    wire_names_list.append("wire_local_ble_output_feedback")
-    
-    return wire_names_list
-    
-    
-def generate_general_ble_output_load(spice_filename: str, num_sb_mux_off: int, num_sb_mux_partial: int, num_sb_mux_on: int, gen_r_wire: dict):
-    """ Create the cluster output load SPICE deck. We assume 2-level muxes. The load is distributed as
-        off, then partial, then on. 
-        Inputs are SPICE file, number of SB muxes that are off, then partially on, then on.
-        Returns wire names used in this SPICE circuit."""
-    
-    # Get gen routing wire information
-    wire_length = gen_r_wire["len"]
-    wire_id = gen_r_wire["id"]
+#     spice_file.write("******************************************************************************************\n")
+#     spice_file.write("* BLE outputs\n")
+#     spice_file.write("******************************************************************************************\n")
+#     spice_file.write(".SUBCKT ble_outputs n_1_" + str(int((total_outputs + 1)/2)+1) + " n_local_out n_general_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_output_on n_vdd_general_output_on\n")
+#     # Create the BLE output bar
+#     current_node = 2
+#     for i in range(num_local_out):
+#         #if it is the first 2:1 local ble feedback mux then attach the n_local_out signal to its output else assign a random signal to it
+#         if i == 0:
+#             spice_file.write("Xlocal_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_local_out n_gate n_gate_n n_vdd_local_output_on n_gnd {subckt_local_ble_output_name}\n")
+#         else:
+#             spice_file.write("Xlocal_ble_output_" + str(i+1) + " n_1_" + str(current_node) + " n_hang_" + str(current_node) + f" n_gate n_gate_n n_vdd n_gnd {subckt_local_ble_output_name}\n")
+#         spice_file.write("Xwire_ble_outputs_" + str(i+1) + " n_1_" + str(current_node) + " n_1_" + str(current_node + 1) + " wire Rw='wire_ble_outputs_res/" + str(total_outputs-1) + "' Cw='wire_ble_outputs_cap/" + str(total_outputs-1) + "'\n")
+#         current_node = current_node + 1
+#     for i in range(num_gen_out):
+#         #if it is the first 2:1 general ble output mux then attach the n_general_out signal to its output else assign a random signal to it
+#         if i == 0:
+#             spice_file.write("Xgeneral_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_general_out n_gate n_gate_n n_vdd_general_output_on n_gnd {subckt_general_ble_output_name}\n")
+#         else:
+#             spice_file.write("Xgeneral_ble_output_" + str(i+1) + " n_1_" + str(current_node) + f" n_hang_" + str(current_node) + f" n_gate n_gate_n n_vdd n_gnd {subckt_general_ble_output_name}\n")
+#         # Only add wire if this is not the last ble output.
+#         if (i+1) != num_gen_out:
+#             spice_file.write("Xwire_ble_outputs_" + str(num_local_out+i+1) + " n_1_" + str(current_node) + " n_1_" + str(current_node + 1) + " wire Rw='wire_ble_outputs_res/" + str(total_outputs-1) + "' Cw='wire_ble_outputs_cap/" + str(total_outputs-1) + "'\n")
+#         current_node = current_node + 1
+#     spice_file.write(".ENDS\n\n\n")
 
-    # for ease defining subckt names here
-    p_str = f"_L{wire_length}_uid{wire_id}"
-    sb_mux_name = f"sb_mux{p_str}"
-    sb_mux_on_str = f"{sb_mux_name}_on"
-    sb_mux_partial_str = f"{sb_mux_name}_partial"
-    sb_mux_off_str = f"{sb_mux_name}_off"
-
-
-    # Total number of sb muxes connected to this logic cluster output
-    sb_mux_total = num_sb_mux_off + num_sb_mux_partial + num_sb_mux_on
+#     spice_file.close()
     
-    # Open SPICE file for appending
-    spice_file = open(spice_filename, 'a')
+#     # Create a list of all wires used in this subcircuit
+#     wire_names_list = []
+#     wire_names_list.append(wire_gen_ble_outputs)
+    
+#     return wire_names_list
+    
+    
+# def generate_lut_output_load(spice_filename, num_local_out, num_gen_out):
+#     """ Create the LUT output load subcircuit. It consists of a FF which 
+#         has the register select mux at its input and all BLE outputs which 
+#         include the output routing mux (Or) and the output feedback mux (Ofb) """
 
-    # Define the parameters for wire RCs, these will be returned from this function
-    # Commenting out while testing to see if the multi sb mux itself is working, dont want to have to change LUT stuff
-    wire_general_ble_output_pstr = f"wire_general_ble_output_L{wire_length}_uid{wire_id}"
-    #wire_general_ble_output_pstr = f"wire_general_ble_output"
+#     # Total number of BLE outputs
+#     total_outputs = num_local_out + num_gen_out
+
+#     # Open SPICE file for appending
+#     spice_file = open(spice_filename, 'a')
+    
+#     spice_file.write("******************************************************************************************\n")
+#     spice_file.write("* LUT output load\n")
+#     spice_file.write("******************************************************************************************\n")
+#     spice_file.write(".SUBCKT lut_output_load n_in n_local_out n_general_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_output_on n_vdd_general_output_on\n")
+#     spice_file.write("Xwire_lut_output_load_1 n_in n_1_1 wire Rw='wire_lut_output_load_1_res' Cw='wire_lut_output_load_1_cap'\n")
+#     spice_file.write("Xff n_1_1 n_hang1 n_gate n_gate_n n_vdd n_gnd n_gnd n_vdd n_gnd n_vdd n_vdd n_gnd ff\n")
+#     spice_file.write("Xwire_lut_output_load_2 n_1_1 n_1_2 wire Rw='wire_lut_output_load_2_res' Cw='wire_lut_output_load_2_cap'\n")
+#     spice_file.write("Xble_outputs n_1_2 n_local_out n_general_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_output_on n_vdd_general_output_on ble_outputs\n")
+#     spice_file.write(".ENDS\n\n\n")
+
+#     spice_file.close()
+    
+#     # Create a list of all wires used in this subcircuit
+#     wire_names_list = []
+#     wire_names_list.append("wire_lut_output_load_1")
+#     wire_names_list.append("wire_lut_output_load_2")
+    
+#     return wire_names_list
+    
+
+# def generate_local_ble_output_load(spice_filename):
+
+#     # Open SPICE file for appending
+#     spice_file = open(spice_filename, 'a')
+    
+#     spice_file.write("******************************************************************************************\n")
+#     spice_file.write("* Local BLE output load\n")
+#     spice_file.write("******************************************************************************************\n")
+#     spice_file.write(".SUBCKT local_ble_output_load n_in n_gate n_gate_n n_vdd n_gnd\n")
+#     spice_file.write("Xwire_local_ble_output_feedback n_in n_1_1 wire Rw='wire_local_ble_output_feedback_res' Cw='wire_local_ble_output_feedback_cap'\n")
+#     spice_file.write("Xlocal_routing_wire_load_1 n_1_1 n_1_2 n_gate n_gate_n n_vdd n_gnd n_vdd local_routing_wire_load\n")
+#     spice_file.write("Xlut_a_driver_1 n_1_2 n_hang1 vsram vsram_n n_hang2 n_hang3 n_vdd n_gnd lut_a_driver\n\n")
+#     spice_file.write(".ENDS\n\n\n")
+    
+#     spice_file.close()
+    
+#     # Create a list of all wires used in this subcircuit
+#     wire_names_list = []
+#     wire_names_list.append("wire_local_ble_output_feedback")
+    
+#     return wire_names_list
+    
+    
+# def generate_general_ble_output_load(spice_filename: str, num_sb_mux_off: int, num_sb_mux_partial: int, num_sb_mux_on: int, gen_r_wire: dict):
+#     """ Create the cluster output load SPICE deck. We assume 2-level muxes. The load is distributed as
+#         off, then partial, then on. 
+#         Inputs are SPICE file, number of SB muxes that are off, then partially on, then on.
+#         Returns wire names used in this SPICE circuit."""
+    
+#     # Get gen routing wire information
+#     wire_length = gen_r_wire["len"]
+#     wire_id = gen_r_wire["id"]
+
+#     # for ease defining subckt names here
+#     p_str = f"_L{wire_length}_uid{wire_id}"
+#     sb_mux_name = f"sb_mux{p_str}"
+#     sb_mux_on_str = f"{sb_mux_name}_on"
+#     sb_mux_partial_str = f"{sb_mux_name}_partial"
+#     sb_mux_off_str = f"{sb_mux_name}_off"
+
+
+#     # Total number of sb muxes connected to this logic cluster output
+#     sb_mux_total = num_sb_mux_off + num_sb_mux_partial + num_sb_mux_on
+    
+#     # Open SPICE file for appending
+#     spice_file = open(spice_filename, 'a')
+
+#     # Define the parameters for wire RCs, these will be returned from this function
+#     # Commenting out while testing to see if the multi sb mux itself is working, dont want to have to change LUT stuff
+#     wire_general_ble_output_pstr = f"wire_general_ble_output_L{wire_length}_uid{wire_id}"
+#     #wire_general_ble_output_pstr = f"wire_general_ble_output"
 
     
-    spice_file.write("******************************************************************************************\n")
-    spice_file.write("* General BLE output load\n")
-    spice_file.write("******************************************************************************************\n")
-    # For multi wire change to --> general_ble_output_load_L{gen_routing_wire_length}
-    spice_file.write(f".SUBCKT general_ble_output_load_L{wire_length}_uid{wire_id} n_1_1 n_out n_gate n_gate_n n_vdd n_gnd\n")
-    current_node = "n_1_1"
-    next_node = "n_1_2"
-    for i in range(num_sb_mux_off):
-        spice_file.write("Xwire_general_ble_output_" + str(i+1) + " " + current_node + " " + next_node + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
-        spice_file.write("Xsb_mux_off_" + str(i+1) + " " + next_node + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_off_str}\n")
-        current_node = next_node
-        next_node = "n_1_" + str(i+3)
-    for i in range(num_sb_mux_partial):
-        spice_file.write("Xwire_general_ble_output_" + str(i+num_sb_mux_off+1) + " " + current_node + " " + next_node + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
-        spice_file.write("Xsb_mux_partial_" + str(i+1) + " " + next_node + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_partial_str}\n")
-        current_node = next_node
-        next_node = "n_1_" + str(i+num_sb_mux_off+3)
-    for i in range(num_sb_mux_on):
+#     spice_file.write("******************************************************************************************\n")
+#     spice_file.write("* General BLE output load\n")
+#     spice_file.write("******************************************************************************************\n")
+#     # For multi wire change to --> general_ble_output_load_L{gen_routing_wire_length}
+#     spice_file.write(f".SUBCKT general_ble_output_load_L{wire_length}_uid{wire_id} n_1_1 n_out n_gate n_gate_n n_vdd n_gnd\n")
+#     current_node = "n_1_1"
+#     next_node = "n_1_2"
+#     for i in range(num_sb_mux_off):
+#         spice_file.write("Xwire_general_ble_output_" + str(i+1) + " " + current_node + " " + next_node + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
+#         spice_file.write("Xsb_mux_off_" + str(i+1) + " " + next_node + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_off_str}\n")
+#         current_node = next_node
+#         next_node = "n_1_" + str(i+3)
+#     for i in range(num_sb_mux_partial):
+#         spice_file.write("Xwire_general_ble_output_" + str(i+num_sb_mux_off+1) + " " + current_node + " " + next_node + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
+#         spice_file.write("Xsb_mux_partial_" + str(i+1) + " " + next_node + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_partial_str}\n")
+#         current_node = next_node
+#         next_node = "n_1_" + str(i+num_sb_mux_off+3)
+#     for i in range(num_sb_mux_on):
         
-        # The last 'on' sb_mux needs to have special node names to be able to connect it to the output and also for measurements.
-        if i == (num_sb_mux_on-1):
-            spice_file.write(f"Xwire_general_ble_output_" + str(i+num_sb_mux_off+num_sb_mux_partial+1) + " " + current_node + " n_meas_point" 
-                             + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
-            spice_file.write("Xsb_mux_on_" + str(i+1) + f" n_meas_point n_out n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n")
-        else:
-            spice_file.write("Xwire_general_ble_output_" + str(i+num_sb_mux_off+num_sb_mux_partial+1) + " " + current_node + " " + next_node 
-                             + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
-            spice_file.write("Xsb_mux_on_" + str(i+1) + " " + next_node + " n_hang_" + str(i) + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n")
-        current_node = next_node
-        next_node = "n_1_" + str(i+num_sb_mux_off+num_sb_mux_partial+3)
+#         # The last 'on' sb_mux needs to have special node names to be able to connect it to the output and also for measurements.
+#         if i == (num_sb_mux_on-1):
+#             spice_file.write(f"Xwire_general_ble_output_" + str(i+num_sb_mux_off+num_sb_mux_partial+1) + " " + current_node + " n_meas_point" 
+#                              + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
+#             spice_file.write("Xsb_mux_on_" + str(i+1) + f" n_meas_point n_out n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n")
+#         else:
+#             spice_file.write("Xwire_general_ble_output_" + str(i+num_sb_mux_off+num_sb_mux_partial+1) + " " + current_node + " " + next_node 
+#                              + f" wire Rw='{wire_general_ble_output_pstr}_res/" + str(sb_mux_total) + f"' Cw='{wire_general_ble_output_pstr}_cap/" + str(sb_mux_total) + "'\n")
+#             spice_file.write("Xsb_mux_on_" + str(i+1) + " " + next_node + " n_hang_" + str(i) + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n")
+#         current_node = next_node
+#         next_node = "n_1_" + str(i+num_sb_mux_off+num_sb_mux_partial+3)
 
-    spice_file.write(".ENDS\n\n\n")
+#     spice_file.write(".ENDS\n\n\n")
     
-    spice_file.close()
+#     spice_file.close()
     
-    # Create a list of all wires used in this subcircuit
-    wire_names_list = []
-    wire_names_list.append(wire_general_ble_output_pstr)
+#     # Create a list of all wires used in this subcircuit
+#     wire_names_list = []
+#     wire_names_list.append(wire_general_ble_output_pstr)
     
-    return wire_names_list
+#     return wire_names_list

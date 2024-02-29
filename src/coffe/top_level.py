@@ -1,81 +1,81 @@
 import os
 
-def generate_switch_block_top(mux_name: str, gen_r_wire: dict):
-    """ Generate the top level switch block SPICE file """
+# def generate_switch_block_top(mux_name: str, gen_r_wire: dict):
+#     """ Generate the top level switch block SPICE file """
     
-    # Create directories
-    if not os.path.exists(mux_name):
-        os.makedirs(mux_name)  
-    # Change to directory    
-    os.chdir(mux_name)  
+#     # Create directories
+#     if not os.path.exists(mux_name):
+#         os.makedirs(mux_name)  
+#     # Change to directory    
+#     os.chdir(mux_name)  
     
-    # get wire information from dict
-    wire_length = gen_r_wire["len"]
-    wire_id = gen_r_wire["id"]
-    # param string default format used by wire
-    # TODO remove duplicates
-    p_str = f"_L{wire_length}_uid{wire_id}"
+#     # get wire information from dict
+#     wire_length = gen_r_wire["len"]
+#     wire_id = gen_r_wire["id"]
+#     # param string default format used by wire
+#     # TODO remove duplicates
+#     p_str = f"_L{wire_length}_uid{wire_id}"
 
-    switch_block_filename = mux_name + ".sp"
-    sb_file = open(switch_block_filename, 'w')
-    sb_file.write(f".TITLE Switch block multiplexer\n\n") 
+#     switch_block_filename = mux_name + ".sp"
+#     sb_file = open(switch_block_filename, 'w')
+#     sb_file.write(f".TITLE Switch block multiplexer\n\n") 
     
-    sb_file.write("********************************************************************************\n")
-    sb_file.write("** Include libraries, parameters and other\n")
-    sb_file.write("********************************************************************************\n\n")
-    sb_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
+#     sb_file.write("********************************************************************************\n")
+#     sb_file.write("** Include libraries, parameters and other\n")
+#     sb_file.write("********************************************************************************\n\n")
+#     sb_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
     
-    sb_file.write("********************************************************************************\n")
-    sb_file.write("** Setup and input\n")
-    sb_file.write("********************************************************************************\n\n")
-    sb_file.write(".TRAN 1p 8n SWEEP DATA=sweep_data\n")
-    sb_file.write(".OPTIONS BRIEF=1\n\n")
-    sb_file.write("* Input signal\n")
-    sb_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 8n)\n\n")
+#     sb_file.write("********************************************************************************\n")
+#     sb_file.write("** Setup and input\n")
+#     sb_file.write("********************************************************************************\n\n")
+#     sb_file.write(".TRAN 1p 8n SWEEP DATA=sweep_data\n")
+#     sb_file.write(".OPTIONS BRIEF=1\n\n")
+#     sb_file.write("* Input signal\n")
+#     sb_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 8n)\n\n")
 
-    sb_file.write("* Power rail for the circuit under test.\n")
-    sb_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-    sb_file.write("V_SB_MUX vdd_sb_mux gnd supply_v\n\n")
+#     sb_file.write("* Power rail for the circuit under test.\n")
+#     sb_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
+#     sb_file.write("V_SB_MUX vdd_sb_mux gnd supply_v\n\n")
 
     
-    sb_file.write("********************************************************************************\n")
-    sb_file.write("** Measurement\n")
-    sb_file.write("********************************************************************************\n\n")
-    sb_file.write("* inv_sb_mux_1 delay\n")
-    sb_file.write(".MEASURE TRAN meas_inv_sb_mux_1_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n")
-    sb_file.write("+    TARG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.Xsb_mux_driver.n_1_1) VAL='supply_v/2' FALL=1\n")
-    sb_file.write(".MEASURE TRAN meas_inv_sb_mux_1_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
-    sb_file.write("+    TARG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.Xsb_mux_driver.n_1_1) VAL='supply_v/2' RISE=1\n\n")
-    sb_file.write("* inv_sb_mux_2 delays\n")
-    sb_file.write(".MEASURE TRAN meas_inv_sb_mux_2_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
-    sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
-    sb_file.write(".MEASURE TRAN meas_inv_sb_mux_2_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n")
-    sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n\n")
-    sb_file.write("* Total delays\n")
-    sb_file.write(".MEASURE TRAN meas_total_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
-    sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
-    sb_file.write(".MEASURE TRAN meas_total_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n")
-    sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n\n")
+#     sb_file.write("********************************************************************************\n")
+#     sb_file.write("** Measurement\n")
+#     sb_file.write("********************************************************************************\n\n")
+#     sb_file.write("* inv_sb_mux_1 delay\n")
+#     sb_file.write(".MEASURE TRAN meas_inv_sb_mux_1_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n")
+#     sb_file.write("+    TARG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.Xsb_mux_driver.n_1_1) VAL='supply_v/2' FALL=1\n")
+#     sb_file.write(".MEASURE TRAN meas_inv_sb_mux_1_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
+#     sb_file.write("+    TARG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.Xsb_mux_driver.n_1_1) VAL='supply_v/2' RISE=1\n\n")
+#     sb_file.write("* inv_sb_mux_2 delays\n")
+#     sb_file.write(".MEASURE TRAN meas_inv_sb_mux_2_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
+#     sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
+#     sb_file.write(".MEASURE TRAN meas_inv_sb_mux_2_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n")
+#     sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n\n")
+#     sb_file.write("* Total delays\n")
+#     sb_file.write(".MEASURE TRAN meas_total_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
+#     sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
+#     sb_file.write(".MEASURE TRAN meas_total_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n")
+#     sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n\n")
 
-    sb_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) AT=7nn\n\n")
+#     sb_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) AT=7nn\n\n")
 
-    sb_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-    sb_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_SB_MUX) FROM=0ns TO=4ns\n")
-    sb_file.write(".MEASURE TRAN meas_avg_power PARAM = '-(meas_current/4n)*supply_v'\n\n")
+#     sb_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
+#     sb_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_SB_MUX) FROM=0ns TO=4ns\n")
+#     sb_file.write(".MEASURE TRAN meas_avg_power PARAM = '-(meas_current/4n)*supply_v'\n\n")
 
-    sb_file.write("********************************************************************************\n")
-    sb_file.write("** Circuit\n")
-    sb_file.write("********************************************************************************\n\n")
-    sb_file.write(f"Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd {mux_name}_on\n\n")
-    sb_file.write(f"Xrouting_wire_load_1 n_1_1 n_2_1 n_hang_1 vsram vsram_n vdd gnd vdd_sb_mux vdd routing_wire_load{p_str}\n\n")
-    sb_file.write(f"Xrouting_wire_load_2 n_2_1 n_3_1 n_hang_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load{p_str}\n\n")
-    sb_file.write(".END")
-    sb_file.close()
+#     sb_file.write("********************************************************************************\n")
+#     sb_file.write("** Circuit\n")
+#     sb_file.write("********************************************************************************\n\n")
+#     sb_file.write(f"Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd {mux_name}_on\n\n")
+#     sb_file.write(f"Xrouting_wire_load_1 n_1_1 n_2_1 n_hang_1 vsram vsram_n vdd gnd vdd_sb_mux vdd routing_wire_load{p_str}\n\n")
+#     sb_file.write(f"Xrouting_wire_load_2 n_2_1 n_3_1 n_hang_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load{p_str}\n\n")
+#     sb_file.write(".END")
+#     sb_file.close()
     
-    # Come out of swich block directory
-    os.chdir("../")
+#     # Come out of swich block directory
+#     os.chdir("../")
     
-    return (mux_name + "/" + mux_name + ".sp")
+#     return (mux_name + "/" + mux_name + ".sp")
     
     
 def generate_connection_block_top(mux_name, min_len_wire: dict):
@@ -4785,85 +4785,85 @@ def generate_flut_mux_top(name, use_tgate, enable_carry_chain, gen_r_wire: dict)
     return (name + "/" + name + ".sp")
 
 
-def generate_cc_mux_top(name, use_tgate, gen_r_wire: dict):
-    """ Creating the SPICE netlist for calculating the delay of the carry chain mux"""
+# def generate_cc_mux_top(name, use_tgate, gen_r_wire: dict):
+#     """ Creating the SPICE netlist for calculating the delay of the carry chain mux"""
     
-    p_str = f"_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
-    subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
+#     p_str = f"_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
+#     subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
 
-    # Create directories
-    if not os.path.exists(name):
-        os.makedirs(name)  
-    # Change to directory    
-    os.chdir(name)  
+#     # Create directories
+#     if not os.path.exists(name):
+#         os.makedirs(name)  
+#     # Change to directory    
+#     os.chdir(name)  
     
-    filename = name + ".sp"
-    top_file = open(filename, 'w')
-    top_file.write(".TITLE Carry chain mux\n\n") 
+#     filename = name + ".sp"
+#     top_file = open(filename, 'w')
+#     top_file.write(".TITLE Carry chain mux\n\n") 
     
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Include libraries, parameters and other\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Include libraries, parameters and other\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
     
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Setup and input\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-    top_file.write(".OPTIONS BRIEF=1\n\n")
-    top_file.write("* Input signal\n")
-    top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-    top_file.write("* Power rail for the circuit under test.\n")
-    top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-    top_file.write("V_FLUT vdd_test gnd supply_v\n\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Setup and input\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
+#     top_file.write(".OPTIONS BRIEF=1\n\n")
+#     top_file.write("* Input signal\n")
+#     top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
+#     top_file.write("* Power rail for the circuit under test.\n")
+#     top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
+#     top_file.write("V_FLUT vdd_test gnd supply_v\n\n")
 
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Measurement\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write("* inv_"+ name +"_1 delay\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+ name +"_1_tfall TRIG V(n_1_4) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(Xthemux.n_2_1) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+ name +"_1_trise TRIG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(Xthemux.n_2_1) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write("* inv_"+ name +"_2 delays\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+ name +"_2_tfall TRIG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+ name +"_2_trise TRIG V(n_1_4) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write("* Total delays\n")
-    top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-    #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_4) VAL='supply_v/2' RISE=1\n")
-    #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_general_out) AT=3n\n\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Measurement\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write("* inv_"+ name +"_1 delay\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+ name +"_1_tfall TRIG V(n_1_4) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(Xthemux.n_2_1) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+ name +"_1_trise TRIG V(n_1_4) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(Xthemux.n_2_1) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("* inv_"+ name +"_2 delays\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+ name +"_2_tfall TRIG V(n_1_4) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+ name +"_2_trise TRIG V(n_1_4) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("* Total delays\n")
+#     top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_4) VAL='supply_v/2' FALL=1\n")
+#     #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_4) VAL='supply_v/2' RISE=1\n")
+#     #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_general_out) AT=3n\n\n")
 
-    top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-    top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_FLUT) FROM=0ns TO=4ns\n")
-    top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/4n)*supply_v'\n\n")
+#     top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
+#     top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_FLUT) FROM=0ns TO=4ns\n")
+#     top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/4n)*supply_v'\n\n")
 
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Circuit\n")
-    top_file.write("********************************************************************************\n\n")
-    # lut, wire from lut to the mux, the mux, and the load same output load as before
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Circuit\n")
+#     top_file.write("********************************************************************************\n\n")
+#     # lut, wire from lut to the mux, the mux, and the load same output load as before
     
-    top_file.write("Xcarrychain_shape1 vdd gnd n_in n_1_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
-    top_file.write("Xcarrychain_shape2 vdd gnd n_1_1 n_1_2 n_hang_2 n_p_2 vdd gnd FA_carry_chain\n")
-    top_file.write("Xcarrychain_shape3 vdd gnd n_1_2 n_hang_3 n_1_3 n_p_3 vdd gnd FA_carry_chain\n")
-    top_file.write("Xinv_shape n_1_3 n_1_4 vdd gnd carry_chain_perf\n")
-    top_file.write("Xthemux n_1_4 n_1_5 vdd gnd vdd_test gnd carry_chain_mux\n")       
-    top_file.write("Xlut_output_load n_1_5 n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
+#     top_file.write("Xcarrychain_shape1 vdd gnd n_in n_1_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
+#     top_file.write("Xcarrychain_shape2 vdd gnd n_1_1 n_1_2 n_hang_2 n_p_2 vdd gnd FA_carry_chain\n")
+#     top_file.write("Xcarrychain_shape3 vdd gnd n_1_2 n_hang_3 n_1_3 n_p_3 vdd gnd FA_carry_chain\n")
+#     top_file.write("Xinv_shape n_1_3 n_1_4 vdd gnd carry_chain_perf\n")
+#     top_file.write("Xthemux n_1_4 n_1_5 vdd gnd vdd_test gnd carry_chain_mux\n")       
+#     top_file.write("Xlut_output_load n_1_5 n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
 
 
-    top_file.write(f"Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd {subckt_gen_ble_out_load_str}\n")
-    top_file.write(".END")
-    top_file.close()
+#     top_file.write(f"Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd {subckt_gen_ble_out_load_str}\n")
+#     top_file.write(".END")
+#     top_file.close()
 
-    # Come out of top-level directory
-    os.chdir("../")
+#     # Come out of top-level directory
+#     os.chdir("../")
     
-    return (name + "/" + name + ".sp")
+#     return (name + "/" + name + ".sp")
 
 
 """
@@ -5001,504 +5001,504 @@ def generate_carrychain_top(name, architecture):
     return (name + "/" + name + ".sp")
     """
 
-def generate_carry_chain_ripple_top(name):
+# def generate_carry_chain_ripple_top(name):
 
-    # Create directories
-    if not os.path.exists(name):
-        os.makedirs(name)  
-    # Change to directory    
-    os.chdir(name)  
+#     # Create directories
+#     if not os.path.exists(name):
+#         os.makedirs(name)  
+#     # Change to directory    
+#     os.chdir(name)  
     
-    filename = name + ".sp"
-    top_file = open(filename, 'w')
-    top_file.write(".TITLE Carry Chain\n\n") 
+#     filename = name + ".sp"
+#     top_file = open(filename, 'w')
+#     top_file.write(".TITLE Carry Chain\n\n") 
     
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Include libraries, parameters and other\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Include libraries, parameters and other\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
     
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Setup and input\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
-    top_file.write(".OPTIONS BRIEF=1\n\n")
-    top_file.write("* Input signals\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Setup and input\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
+#     top_file.write(".OPTIONS BRIEF=1\n\n")
+#     top_file.write("* Input signals\n")
 
 
-    top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-    top_file.write("* Power rail for the circuit under test.\n")
-    top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-    top_file.write("V_test vdd_test gnd supply_v\n\n")
+#     top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
+#     top_file.write("* Power rail for the circuit under test.\n")
+#     top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
+#     top_file.write("V_test vdd_test gnd supply_v\n\n")
 
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Measurement\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write("* inv_carry_chain_1 delay\n")
-    top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-
-
-    top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-
-    top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
-
-    top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-    top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
-    top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
-
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Circuit\n")
-    top_file.write("********************************************************************************\n\n")
-
-    # Generate Cin as part of wave-shaping circuitry:
-    top_file.write("Xcarrychain_shape1 vdd gnd n_in n_1_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
-    top_file.write("Xcarrychain_shape2 vdd gnd n_1_1 n_1_2 n_hang_s n_p_2 vdd gnd FA_carry_chain\n")
-    
-    
-    # Generate the uni under test:
-    top_file.write("Xcarrychain_main vdd gnd n_1_2 n_hang_2 n_1_3 n_p_3 vdd gnd FA_carry_chain\n")
-    top_file.write("Xinv n_1_3 n_out vdd_test gnd carry_chain_perf\n")
-    
-    # generate typical load
-    top_file.write("Xthemux n_out n_out2 vdd gnd vdd gnd carry_chain_mux\n")  
-
-    top_file.write(".END")
-    top_file.close()
-
-    # Come out of top-level directory
-    os.chdir("../")
-    
-    return (name + "/" + name + ".sp")
-    
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Measurement\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write("* inv_carry_chain_1 delay\n")
+#     top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
 
 
-def generate_carry_chain_skip_top(name, use_tgate):
+#     top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
 
-    # Create directories
-    if not os.path.exists(name):
-        os.makedirs(name)  
-    # Change to directory    
-    os.chdir(name)  
-    
-    filename = name + ".sp"
-    top_file = open(filename, 'w')
-    top_file.write(".TITLE Carry Chain\n\n") 
-    
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Include libraries, parameters and other\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-    
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Setup and input\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
-    top_file.write(".OPTIONS BRIEF=1\n\n")
-    top_file.write("* Input signals\n")
+#     top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
 
+#     top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
+#     top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
+#     top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
 
-    top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-    top_file.write("* Power rail for the circuit under test.\n")
-    top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-    top_file.write("V_test vdd_test gnd supply_v\n\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Circuit\n")
+#     top_file.write("********************************************************************************\n\n")
 
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Measurement\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write("* inv_carry_chain_1 delay\n")
-    top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-
-
-    top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-
-    top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
-
-    top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-    top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
-    top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
-
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Circuit\n")
-    top_file.write("********************************************************************************\n\n")
-
-    # Generate Cin as part of wave-shaping circuitry:
-    top_file.write("Xcarrychain_shape1 vdd gnd n_in n_1_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
-    top_file.write("Xcarrychain_shape2 vdd gnd n_1_1 n_1_2 n_hang_s n_p_2 vdd gnd FA_carry_chain\n")
+#     # Generate Cin as part of wave-shaping circuitry:
+#     top_file.write("Xcarrychain_shape1 vdd gnd n_in n_1_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
+#     top_file.write("Xcarrychain_shape2 vdd gnd n_1_1 n_1_2 n_hang_s n_p_2 vdd gnd FA_carry_chain\n")
     
     
-    # Generate the uni under test:
-    top_file.write("Xcarrychain_main vdd gnd n_1_2 n_hang_2 n_1_3 n_p_3 vdd gnd FA_carry_chain\n")
-    top_file.write("Xinv n_1_3 n_out vdd_test gnd carry_chain_perf\n")
-
-    # generate typical load
-    top_file.write("Xthemux n_out n_out2 vdd gnd vdd gnd carry_chain_mux\n")  
-
-    top_file.write(".END")
-    top_file.close()
-
-    # Come out of top-level directory
-    os.chdir("../")
+#     # Generate the uni under test:
+#     top_file.write("Xcarrychain_main vdd gnd n_1_2 n_hang_2 n_1_3 n_p_3 vdd gnd FA_carry_chain\n")
+#     top_file.write("Xinv n_1_3 n_out vdd_test gnd carry_chain_perf\n")
     
-    return (name + "/" + name + ".sp")
+#     # generate typical load
+#     top_file.write("Xthemux n_out n_out2 vdd gnd vdd gnd carry_chain_mux\n")  
 
+#     top_file.write(".END")
+#     top_file.close()
 
-
-def generate_carrychain_top(name):
-    """ """
+#     # Come out of top-level directory
+#     os.chdir("../")
     
-    # Create directories
-    if not os.path.exists(name):
-        os.makedirs(name)  
-    # Change to directory    
-    os.chdir(name)  
-    
-    filename = name + ".sp"
-    top_file = open(filename, 'w')
-    top_file.write(".TITLE Carry Chain\n\n") 
-    
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Include libraries, parameters and other\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-    
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Setup and input\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
-    top_file.write(".OPTIONS BRIEF=1\n\n")
-    top_file.write("* Input signals\n")
-
-    #top_file.write("VIN n_a gnd PWL (0 0 1.999n 0 2n 'supply_v' 3.999n 'supply_v' 4n 0 13.999n 0 14n 'supply_v' 23.999n 'supply_v' 24n 0)\n\n")
-    #top_file.write("VIN2 n_b gnd PWL (0 0 5.999n 0 6n supply_v 7.999n supply_v 8n 0 17.999n 0 18n supply_v 19.999n supply_v 20n 0 21.999n 0 22n supply_v)\n\n")
-    #top_file.write("VIN3 n_cin gnd PWL (0 0 9.999n 0 10n supply_v 11.999n supply_v 12n 0 13.999n 0 14n supply_v 15.999n supply_v 16n 0 )\n\n")
-    #top_file.write("VIN n_a gnd PWL (0 0 1.999n 0 2n 'supply_v' 3.999n 'supply_v' 4n 0 13.999n 0 14n 'supply_v' 23.999n 'supply_v' 24n 0)\n\n")
-    #top_file.write("VIN2 n_b gnd PWL (0 0 5.999n 0 6n supply_v 7.999n supply_v 8n 0 17.999n 0 18n supply_v 19.999n supply_v 20n 0 21.999n 0 22n supply_v)\n\n")
-    #top_file.write("VIN3 n_cin gnd PWL (0 0 9.999n 0 10n supply_v 11.999n supply_v 12n 0 13.999n 0 14n supply_v 15.999n supply_v 16n 0 )\n\n")
-    
-    top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-    top_file.write("* Power rail for the circuit under test.\n")
-    top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-    top_file.write("V_test vdd_test gnd supply_v\n\n")
-
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Measurement\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write("* inv_carry_chain_1 delay\n")
-    top_file.write(".MEASURE TRAN meas_inv_carry_chain_1_tfall TRIG V(n_1_1) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(Xcarrychain.n_cin_in_bar) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_carry_chain_1_trise TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(Xcarrychain.n_cin_in_bar) VAL='supply_v/2' RISE=1\n\n")
-
-    top_file.write("* inv_carry_chain_2 delays\n")
-    top_file.write(".MEASURE TRAN meas_inv_carry_chain_2_tfall TRIG V(n_1_1) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_sum_out) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_carry_chain_2_trise TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_sum_out) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write("* Total delays\n")
-
-
-    top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_1) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_1_2) VAL='supply_v/2' RISE=1\n\n")
-
-    top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
-
-    top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-    top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
-    top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
-
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Circuit\n")
-    top_file.write("********************************************************************************\n\n")
-
-    # Generate Cin as part of wave-shaping circuitry:
-    top_file.write("Xcarrychain_shape vdd gnd n_in n_0_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
-    top_file.write("Xcarrychain_shape1 vdd gnd n_0_1 n_0_2 n_hangz n_p_0 vdd gnd FA_carry_chain\n")
-    top_file.write("Xcarrychain_shape2 vdd gnd n_0_2 n_1_1 n_hangzz n_p_z vdd gnd FA_carry_chain\n")
-    
-    # Generate the adder under test:
-    top_file.write("Xcarrychain vdd gnd n_1_1 n_1_2 n_sum_out n_p_2 vdd_test gnd FA_carry_chain\n")
-    
-    # cout typical load
-    top_file.write("Xcarrychain_load vdd gnd n_1_2 n_1_3 n_sum_out2 n_p_3 vdd gnd FA_carry_chain\n")      
-
-    top_file.write(".END")
-    top_file.close()
-
-    # Come out of top-level directory
-    os.chdir("../")
-    
-    return (name + "/" + name + ".sp")
+#     return (name + "/" + name + ".sp")
     
 
-def generate_carry_inter_top(name):
 
-    # Create directories
-    if not os.path.exists(name):
-        os.makedirs(name)  
-    # Change to directory    
-    os.chdir(name)  
+# def generate_carry_chain_skip_top(name, use_tgate):
+
+#     # Create directories
+#     if not os.path.exists(name):
+#         os.makedirs(name)  
+#     # Change to directory    
+#     os.chdir(name)  
     
-    filename = name + ".sp"
-    top_file = open(filename, 'w')
-    top_file.write(".TITLE Carry Chain\n\n") 
+#     filename = name + ".sp"
+#     top_file = open(filename, 'w')
+#     top_file.write(".TITLE Carry Chain\n\n") 
     
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Include libraries, parameters and other\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Include libraries, parameters and other\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
     
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Setup and input\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
-    top_file.write(".OPTIONS BRIEF=1\n\n")
-    top_file.write("* Input signals\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Setup and input\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
+#     top_file.write(".OPTIONS BRIEF=1\n\n")
+#     top_file.write("* Input signals\n")
 
-    top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-    top_file.write("* Power rail for the circuit under test.\n")
-    top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-    top_file.write("V_test vdd_test gnd supply_v\n\n")
 
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Measurement\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write("* inv_nand"+name+"_1 delay\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+name+"_1_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(Xdrivers.n_1_1) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+name+"_1_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(Xdrivers.n_1_1) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
+#     top_file.write("* Power rail for the circuit under test.\n")
+#     top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
+#     top_file.write("V_test vdd_test gnd supply_v\n\n")
 
-    top_file.write("* inv_"+name+"_2 delays\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+name+"_2_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+name+"_2_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write("* Total delays\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Measurement\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write("* inv_carry_chain_1 delay\n")
+#     top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
 
-    top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
 
-    top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
+#     top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
 
-    top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-    top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
-    top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
+#     top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
 
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Circuit\n")
-    top_file.write("********************************************************************************\n\n")
+#     top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
+#     top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
+#     top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
 
-    # Generate Cin as part of wave-shaping circuitry:
-    top_file.write("Xcarrychain_0 vdd gnd n_in n_1_1 n_sum_out n_1p vdd gnd FA_carry_chain\n")   
-    top_file.write("Xcarrychain vdd gnd n_1_1 n_1_2 n_sum_out2 n_2p vdd gnd FA_carry_chain\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Circuit\n")
+#     top_file.write("********************************************************************************\n\n")
 
-    # Generate the unit under test:
-    top_file.write("Xdrivers n_1_2 n_1_3 vdd_test gnd carry_chain_inter\n")
-    # typical load (next carry chain)
-    top_file.write("Xcarrychain_l n_1_3 vdd gnd n_hangl n_sum_out3 n_3p vdd gnd FA_carry_chain\n")   
+#     # Generate Cin as part of wave-shaping circuitry:
+#     top_file.write("Xcarrychain_shape1 vdd gnd n_in n_1_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
+#     top_file.write("Xcarrychain_shape2 vdd gnd n_1_1 n_1_2 n_hang_s n_p_2 vdd gnd FA_carry_chain\n")
     
-
-    top_file.write(".END")
-    top_file.close()
-
-    # Come out of top-level directory
-    os.chdir("../")
     
-    return (name + "/" + name + ".sp")
+#     # Generate the uni under test:
+#     top_file.write("Xcarrychain_main vdd gnd n_1_2 n_hang_2 n_1_3 n_p_3 vdd gnd FA_carry_chain\n")
+#     top_file.write("Xinv n_1_3 n_out vdd_test gnd carry_chain_perf\n")
 
+#     # generate typical load
+#     top_file.write("Xthemux n_out n_out2 vdd gnd vdd gnd carry_chain_mux\n")  
 
+#     top_file.write(".END")
+#     top_file.close()
 
-def generate_carrychainand_top(name, use_tgate, nand1_size, nand2_size):
-    # Create directories
-    if not os.path.exists(name):
-        os.makedirs(name)  
-    # Change to directory    
-    os.chdir(name)  
+#     # Come out of top-level directory
+#     os.chdir("../")
     
-    filename = name + ".sp"
-    top_file = open(filename, 'w')
-    top_file.write(".TITLE Carry Chain\n\n") 
+#     return (name + "/" + name + ".sp")
+
+
+
+# def generate_carrychain_top(name):
+#     """ """
     
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Include libraries, parameters and other\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
+#     # Create directories
+#     if not os.path.exists(name):
+#         os.makedirs(name)  
+#     # Change to directory    
+#     os.chdir(name)  
     
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Setup and input\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
-    top_file.write(".OPTIONS BRIEF=1\n\n")
-    top_file.write("* Input signals\n")
-
-    top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-    top_file.write("* Power rail for the circuit under test.\n")
-    top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-    top_file.write("V_test vdd_test gnd supply_v\n\n")
-
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Measurement\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write("* inv_nand"+name+"_1 delay\n")
-    top_file.write(".MEASURE TRAN meas_inv_nand"+str(nand1_size)+"_"+name+"_1_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(Xandtree.n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_nand"+str(nand1_size)+"_"+name+"_1_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(Xandtree.n_1_2) VAL='supply_v/2' RISE=1\n\n")
-
-    top_file.write("* inv_"+name+"_2 delays\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+name+"_2_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(Xandtree.n_1_3) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+name+"_2_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(Xandtree.n_1_3) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write("* Total delays\n")
-
-
-    top_file.write("* inv_nand"+name+"_3 delay\n")
-    top_file.write(".MEASURE TRAN meas_inv_nand"+str(nand2_size)+"_"+name+"_3_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(Xandtree.n_1_5) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_nand"+str(nand2_size)+"_"+name+"_3_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(Xandtree.n_1_5) VAL='supply_v/2' RISE=1\n\n")
-
-    top_file.write("* inv_"+name+"_4 delays\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+name+"_4_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+name+"_4_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write("* Total delays\n")
-
-    top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-
-    top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
-
-    top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-    top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
-    top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
-
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Circuit\n")
-    top_file.write("********************************************************************************\n\n")
-
-    # Generate Cin as part of wave-shaping circuitry:
-    if not use_tgate:
-        top_file.write("Xlut n_in n_1_1 vdd vdd vdd vdd vdd vdd vdd gnd lut\n")
-    else :
-        top_file.write("Xlut n_in n_1_1 vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
+#     filename = name + ".sp"
+#     top_file = open(filename, 'w')
+#     top_file.write(".TITLE Carry Chain\n\n") 
     
-    top_file.write("Xcarrychain n_1_1 vdd gnd n_hang n_sum_out n_1_2 vdd gnd FA_carry_chain\n")
-    # Generate the unit under test:
-    top_file.write("Xandtree n_1_2 n_1_3 vdd_test gnd xcarry_chain_and\n")
-    # typical load
-    top_file.write("Xcarrychainskip_mux n_1_3 n_1_4 vdd gnd vdd gnd xcarry_chain_mux\n")   
-    top_file.write("Xcarrychain_mux n_1_4 n_1_5 vdd gnd vdd gnd carry_chain_mux\n")     
-
-    top_file.write(".END")
-    top_file.close()
-
-    # Come out of top-level directory
-    os.chdir("../")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Include libraries, parameters and other\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
     
-    return (name + "/" + name + ".sp")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Setup and input\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
+#     top_file.write(".OPTIONS BRIEF=1\n\n")
+#     top_file.write("* Input signals\n")
+
+#     #top_file.write("VIN n_a gnd PWL (0 0 1.999n 0 2n 'supply_v' 3.999n 'supply_v' 4n 0 13.999n 0 14n 'supply_v' 23.999n 'supply_v' 24n 0)\n\n")
+#     #top_file.write("VIN2 n_b gnd PWL (0 0 5.999n 0 6n supply_v 7.999n supply_v 8n 0 17.999n 0 18n supply_v 19.999n supply_v 20n 0 21.999n 0 22n supply_v)\n\n")
+#     #top_file.write("VIN3 n_cin gnd PWL (0 0 9.999n 0 10n supply_v 11.999n supply_v 12n 0 13.999n 0 14n supply_v 15.999n supply_v 16n 0 )\n\n")
+#     #top_file.write("VIN n_a gnd PWL (0 0 1.999n 0 2n 'supply_v' 3.999n 'supply_v' 4n 0 13.999n 0 14n 'supply_v' 23.999n 'supply_v' 24n 0)\n\n")
+#     #top_file.write("VIN2 n_b gnd PWL (0 0 5.999n 0 6n supply_v 7.999n supply_v 8n 0 17.999n 0 18n supply_v 19.999n supply_v 20n 0 21.999n 0 22n supply_v)\n\n")
+#     #top_file.write("VIN3 n_cin gnd PWL (0 0 9.999n 0 10n supply_v 11.999n supply_v 12n 0 13.999n 0 14n supply_v 15.999n supply_v 16n 0 )\n\n")
+    
+#     top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
+#     top_file.write("* Power rail for the circuit under test.\n")
+#     top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
+#     top_file.write("V_test vdd_test gnd supply_v\n\n")
+
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Measurement\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write("* inv_carry_chain_1 delay\n")
+#     top_file.write(".MEASURE TRAN meas_inv_carry_chain_1_tfall TRIG V(n_1_1) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(Xcarrychain.n_cin_in_bar) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_carry_chain_1_trise TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(Xcarrychain.n_cin_in_bar) VAL='supply_v/2' RISE=1\n\n")
+
+#     top_file.write("* inv_carry_chain_2 delays\n")
+#     top_file.write(".MEASURE TRAN meas_inv_carry_chain_2_tfall TRIG V(n_1_1) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_sum_out) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_carry_chain_2_trise TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_sum_out) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("* Total delays\n")
+
+
+#     top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_1) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_1_2) VAL='supply_v/2' RISE=1\n\n")
+
+#     top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
+
+#     top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
+#     top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
+#     top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
+
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Circuit\n")
+#     top_file.write("********************************************************************************\n\n")
+
+#     # Generate Cin as part of wave-shaping circuitry:
+#     top_file.write("Xcarrychain_shape vdd gnd n_in n_0_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
+#     top_file.write("Xcarrychain_shape1 vdd gnd n_0_1 n_0_2 n_hangz n_p_0 vdd gnd FA_carry_chain\n")
+#     top_file.write("Xcarrychain_shape2 vdd gnd n_0_2 n_1_1 n_hangzz n_p_z vdd gnd FA_carry_chain\n")
+    
+#     # Generate the adder under test:
+#     top_file.write("Xcarrychain vdd gnd n_1_1 n_1_2 n_sum_out n_p_2 vdd_test gnd FA_carry_chain\n")
+    
+#     # cout typical load
+#     top_file.write("Xcarrychain_load vdd gnd n_1_2 n_1_3 n_sum_out2 n_p_3 vdd gnd FA_carry_chain\n")      
+
+#     top_file.write(".END")
+#     top_file.close()
+
+#     # Come out of top-level directory
+#     os.chdir("../")
+    
+#     return (name + "/" + name + ".sp")
     
 
-def generate_skip_mux_top(name, use_tgate):
-    # Create directories
-    if not os.path.exists(name):
-        os.makedirs(name)  
-    # Change to directory    
-    os.chdir(name)  
+# def generate_carry_inter_top(name):
+
+#     # Create directories
+#     if not os.path.exists(name):
+#         os.makedirs(name)  
+#     # Change to directory    
+#     os.chdir(name)  
     
-    filename = name + ".sp"
-    top_file = open(filename, 'w')
-    top_file.write(".TITLE Carry Chain\n\n")
+#     filename = name + ".sp"
+#     top_file = open(filename, 'w')
+#     top_file.write(".TITLE Carry Chain\n\n") 
+    
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Include libraries, parameters and other\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
+    
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Setup and input\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
+#     top_file.write(".OPTIONS BRIEF=1\n\n")
+#     top_file.write("* Input signals\n")
 
+#     top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
+#     top_file.write("* Power rail for the circuit under test.\n")
+#     top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
+#     top_file.write("V_test vdd_test gnd supply_v\n\n")
 
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Include libraries, parameters and other\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Measurement\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write("* inv_nand"+name+"_1 delay\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+name+"_1_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(Xdrivers.n_1_1) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+name+"_1_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(Xdrivers.n_1_1) VAL='supply_v/2' RISE=1\n\n")
+
+#     top_file.write("* inv_"+name+"_2 delays\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+name+"_2_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+name+"_2_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("* Total delays\n")
+
+#     top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
+
+#     top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
+
+#     top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
+#     top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
+#     top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
+
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Circuit\n")
+#     top_file.write("********************************************************************************\n\n")
+
+#     # Generate Cin as part of wave-shaping circuitry:
+#     top_file.write("Xcarrychain_0 vdd gnd n_in n_1_1 n_sum_out n_1p vdd gnd FA_carry_chain\n")   
+#     top_file.write("Xcarrychain vdd gnd n_1_1 n_1_2 n_sum_out2 n_2p vdd gnd FA_carry_chain\n")
+
+#     # Generate the unit under test:
+#     top_file.write("Xdrivers n_1_2 n_1_3 vdd_test gnd carry_chain_inter\n")
+#     # typical load (next carry chain)
+#     top_file.write("Xcarrychain_l n_1_3 vdd gnd n_hangl n_sum_out3 n_3p vdd gnd FA_carry_chain\n")   
     
 
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Setup and input\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-    top_file.write(".OPTIONS BRIEF=1\n\n")
-    top_file.write("* Input signal\n")
-    top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-    top_file.write("* Power rail for the circuit under test.\n")
-    top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-    top_file.write("V_FLUT vdd_test gnd supply_v\n\n")
+#     top_file.write(".END")
+#     top_file.close()
 
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Measurement\n")
-    top_file.write("********************************************************************************\n\n")
-    top_file.write("* inv_"+ name +"_1 delay\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+ name +"_1_tfall TRIG V(n_1_3) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(Xcarrychainskip_mux.n_2_1) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+ name +"_1_trise TRIG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(Xcarrychainskip_mux.n_2_1) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write("* inv_"+ name +"_2 delays\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+ name +"_2_tfall TRIG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_inv_"+ name +"_2_trise TRIG V(n_1_3) VAL='supply_v/2' RISE=1\n")
-    top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write("* Total delays\n")
-    top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-    #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-    top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-    top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_3) VAL='supply_v/2' RISE=1\n")
-    #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' RISE=1\n\n")
-    top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_general_out) AT=3n\n\n")
-
-    top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-    top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_FLUT) FROM=0ns TO=4ns\n")
-    top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/4n)*supply_v'\n\n")
-
-
-    top_file.write("********************************************************************************\n")
-    top_file.write("** Circuit\n")
-    top_file.write("********************************************************************************\n\n")
-
-    # Generate Cin as part of wave-shaping circuitry:
-    if not use_tgate:
-        top_file.write("Xlut n_in n_1_1 vdd vdd vdd vdd vdd vdd vdd gnd lut\n")
-    else :
-        top_file.write("Xlut n_in n_1_1 vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
+#     # Come out of top-level directory
+#     os.chdir("../")
     
-    top_file.write("Xcarrychain n_1_1 vdd gnd n_hang n_sum_out n_1_2 vdd gnd FA_carry_chain\n")
+#     return (name + "/" + name + ".sp")
+
+
+
+# def generate_carrychainand_top(name, use_tgate, nand1_size, nand2_size):
+#     # Create directories
+#     if not os.path.exists(name):
+#         os.makedirs(name)  
+#     # Change to directory    
+#     os.chdir(name)  
     
-    top_file.write("Xandtree n_1_2 n_1_3 vdd gnd xcarry_chain_and\n")
-    # Generate the unit under test:
-    top_file.write("Xcarrychainskip_mux n_1_3 n_1_4 vdd gnd vdd_test gnd xcarry_chain_mux\n")   
-    # typical load
-    top_file.write("Xcarrychain_mux n_1_4 n_1_5 vdd gnd vdd gnd carry_chain_mux\n")     
+#     filename = name + ".sp"
+#     top_file = open(filename, 'w')
+#     top_file.write(".TITLE Carry Chain\n\n") 
+    
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Include libraries, parameters and other\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
+    
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Setup and input\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
+#     top_file.write(".OPTIONS BRIEF=1\n\n")
+#     top_file.write("* Input signals\n")
 
-    top_file.write(".END")
-    top_file.close()
+#     top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
+#     top_file.write("* Power rail for the circuit under test.\n")
+#     top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
+#     top_file.write("V_test vdd_test gnd supply_v\n\n")
 
-    # Come out of top-level directory
-    os.chdir("../")
-    return (name + "/" + name + ".sp")
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Measurement\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write("* inv_nand"+name+"_1 delay\n")
+#     top_file.write(".MEASURE TRAN meas_inv_nand"+str(nand1_size)+"_"+name+"_1_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(Xandtree.n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_nand"+str(nand1_size)+"_"+name+"_1_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(Xandtree.n_1_2) VAL='supply_v/2' RISE=1\n\n")
+
+#     top_file.write("* inv_"+name+"_2 delays\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+name+"_2_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(Xandtree.n_1_3) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+name+"_2_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(Xandtree.n_1_3) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("* Total delays\n")
+
+
+#     top_file.write("* inv_nand"+name+"_3 delay\n")
+#     top_file.write(".MEASURE TRAN meas_inv_nand"+str(nand2_size)+"_"+name+"_3_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(Xandtree.n_1_5) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_nand"+str(nand2_size)+"_"+name+"_3_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(Xandtree.n_1_5) VAL='supply_v/2' RISE=1\n\n")
+
+#     top_file.write("* inv_"+name+"_4 delays\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+name+"_4_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+name+"_4_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("* Total delays\n")
+
+#     top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
+
+#     top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
+
+#     top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
+#     top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
+#     top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
+
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Circuit\n")
+#     top_file.write("********************************************************************************\n\n")
+
+#     # Generate Cin as part of wave-shaping circuitry:
+#     if not use_tgate:
+#         top_file.write("Xlut n_in n_1_1 vdd vdd vdd vdd vdd vdd vdd gnd lut\n")
+#     else :
+#         top_file.write("Xlut n_in n_1_1 vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
+    
+#     top_file.write("Xcarrychain n_1_1 vdd gnd n_hang n_sum_out n_1_2 vdd gnd FA_carry_chain\n")
+#     # Generate the unit under test:
+#     top_file.write("Xandtree n_1_2 n_1_3 vdd_test gnd xcarry_chain_and\n")
+#     # typical load
+#     top_file.write("Xcarrychainskip_mux n_1_3 n_1_4 vdd gnd vdd gnd xcarry_chain_mux\n")   
+#     top_file.write("Xcarrychain_mux n_1_4 n_1_5 vdd gnd vdd gnd carry_chain_mux\n")     
+
+#     top_file.write(".END")
+#     top_file.close()
+
+#     # Come out of top-level directory
+#     os.chdir("../")
+    
+#     return (name + "/" + name + ".sp")
+    
+
+# def generate_skip_mux_top(name, use_tgate):
+#     # Create directories
+#     if not os.path.exists(name):
+#         os.makedirs(name)  
+#     # Change to directory    
+#     os.chdir(name)  
+    
+#     filename = name + ".sp"
+#     top_file = open(filename, 'w')
+#     top_file.write(".TITLE Carry Chain\n\n")
+
+
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Include libraries, parameters and other\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
+    
+
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Setup and input\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
+#     top_file.write(".OPTIONS BRIEF=1\n\n")
+#     top_file.write("* Input signal\n")
+#     top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
+#     top_file.write("* Power rail for the circuit under test.\n")
+#     top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
+#     top_file.write("V_FLUT vdd_test gnd supply_v\n\n")
+
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Measurement\n")
+#     top_file.write("********************************************************************************\n\n")
+#     top_file.write("* inv_"+ name +"_1 delay\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+ name +"_1_tfall TRIG V(n_1_3) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(Xcarrychainskip_mux.n_2_1) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+ name +"_1_trise TRIG V(n_1_3) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(Xcarrychainskip_mux.n_2_1) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("* inv_"+ name +"_2 delays\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+ name +"_2_tfall TRIG V(n_1_3) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_inv_"+ name +"_2_trise TRIG V(n_1_3) VAL='supply_v/2' RISE=1\n")
+#     top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("* Total delays\n")
+#     top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_3) VAL='supply_v/2' FALL=1\n")
+#     #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
+#     top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' FALL=1\n")
+#     top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_3) VAL='supply_v/2' RISE=1\n")
+#     #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' RISE=1\n\n")
+#     top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_general_out) AT=3n\n\n")
+
+#     top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
+#     top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_FLUT) FROM=0ns TO=4ns\n")
+#     top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/4n)*supply_v'\n\n")
+
+
+#     top_file.write("********************************************************************************\n")
+#     top_file.write("** Circuit\n")
+#     top_file.write("********************************************************************************\n\n")
+
+#     # Generate Cin as part of wave-shaping circuitry:
+#     if not use_tgate:
+#         top_file.write("Xlut n_in n_1_1 vdd vdd vdd vdd vdd vdd vdd gnd lut\n")
+#     else :
+#         top_file.write("Xlut n_in n_1_1 vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
+    
+#     top_file.write("Xcarrychain n_1_1 vdd gnd n_hang n_sum_out n_1_2 vdd gnd FA_carry_chain\n")
+    
+#     top_file.write("Xandtree n_1_2 n_1_3 vdd gnd xcarry_chain_and\n")
+#     # Generate the unit under test:
+#     top_file.write("Xcarrychainskip_mux n_1_3 n_1_4 vdd gnd vdd_test gnd xcarry_chain_mux\n")   
+#     # typical load
+#     top_file.write("Xcarrychain_mux n_1_4 n_1_5 vdd gnd vdd gnd carry_chain_mux\n")     
+
+#     top_file.write(".END")
+#     top_file.close()
+
+#     # Come out of top-level directory
+#     os.chdir("../")
+#     return (name + "/" + name + ".sp")
 
 
 def generate_dedicated_driver_top (name, top_name, num_bufs):

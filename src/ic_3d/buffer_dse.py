@@ -206,7 +206,6 @@ def get_meas_lines_new(ic_3d_info: rg_ds.Ic3d, sp_testing_model: rg_ds.SpTesting
 
 # GLOBALS
 
-
 # deps for spice_simulation_setup
 def init_subckt_libs(design_info: rg_ds.DesignInfo) -> rg_ds.SpSubCktLibs:
     # PORT DEFS
@@ -1660,7 +1659,7 @@ def unit_conversion(unit: str, val: float, unit_lookup: Dict[str, float], sig_fi
     return ret_val
 
 
-def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Dict[str, bool] = None) -> Tuple[pd.DataFrame, Dict[str, str], Dict[str, str]]:
+def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Dict[str, bool] = None) -> Tuple[ pd.DataFrame, Dict[str, str], Dict[str, str], Dict[str, List[Dict[int, float]]] ]:
     """
         Parses spice output ".lis" file
 
@@ -1674,15 +1673,17 @@ def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Di
             - measurements: list of dicts containing the measurement statement names, values, & triggers
 
     """
+    plot_df = None # get from "plot" flag
     measurements = []
     opt_params = []
-    plot_df = None # get from "plot" flag
-    
+    gen_params: Dict[List[Dict[int, float]]] = {}
+
     if parse_flags is None:
         parse_flags = {
             "plot": True,
             "measure": True,
-            "opt": True
+            "opt": True,
+            "gen_params" : True,
         }
 
     with open(sp_process.sp_outfile,"r") as lis_fd:
@@ -1747,11 +1748,25 @@ def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Di
                     "val": val, # opt param value
                 }
                 opt_params.append(opt_dict)
+        if parse_flags.get("gen_params"):
+            param_matches = res.sp_coffe_grab_params_re.findall(lis_text)
+            for match in param_matches:
+                # unpack match (contains 3 groups)
+                param_id, name, val = match
+                # print(param_id, name)
+                if not gen_params.get(name):
+                    gen_params[name] = [{param_id : val}]
+                elif isinstance(gen_params.get(name), list):
+                    gen_params[name].append({f"{param_id}": val})
+                else:
+                    raise ValueError(f"params[{name}] is undefined as a list")
+
+
 
         # Now we use the captured parameters
 
 
-        return plot_df, measurements, opt_params
+        return plot_df, measurements, opt_params, gen_params
 
 
 def plot_time_vs_voltage(sp_sim_settings: rg_ds.SpGlobalSimSettings, plot_df: pd.DataFrame):

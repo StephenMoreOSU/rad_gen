@@ -10,24 +10,29 @@ import src.coffe.utils as utils
 
 from typing import Dict, List, Tuple, Union, Any
 from dataclasses import dataclass
-
+import copy
 import math, os
 
-@dataclass
-class BLEOutputLoadSBInfo:
-    sb_mux: _SwitchBlockMUX
-    num_on_assumption: int 
-    num_partial: int
-    num_off: int
+# @dataclass
+# class BLEOutputLoadSBInfo:
+#     sb_mux: _SwitchBlockMUX
+#     num_on_assumption: int 
+#     num_partial: int
+#     num_off: int
 
 
 class _GeneralBLEOutputLoad:
     """ Logic cluster output load (i.e. general BLE output load). 
         Made up of a wire loaded by SB muxes. """
 
-    def __init__(self, gen_r_wire: dict, sb_muxes: List[_SwitchBlockMUX], sb_on_idx: int ):
+    def __init__(self, sb_muxes: List[_SwitchBlockMUX], sb_on_idx: int ):
+        # switch block mux thats ON at the output of this load
+        self.sb_mux_on: _SwitchBlockMUX = sb_muxes[sb_on_idx]
         # Subcircuit name
-        self.name = "general_ble_output_load"
+        self.name: str = f"general_ble_output_load{self.sb_mux_on.param_str}"
+        # basename for this subckt, name without the parameter suffix
+        self.basename: str = f"general_ble_output_load"
+        self.param_str: str = self.name.replace(self.basename, "")
         # Associated switch block mux which loads the BLE
         # self.sb_muxes = sb_muxes
         # Assumed routing channel usage, we need this for load calculation 
@@ -41,7 +46,7 @@ class _GeneralBLEOutputLoad:
         # List of wires in this subcircuit
         self.wire_names = []
         # The general routing wire length associated with this output load
-        self.gen_r_wire : dict = gen_r_wire 
+        # self.gen_r_wire : dict = gen_r_wire 
         # Multi Wire Length Support
         # Variables used for SB support
         # Which SB in our list of SBs do we assume is ON in this case? or in other words, which SB is connected to BLE output?
@@ -84,7 +89,7 @@ class _GeneralBLEOutputLoad:
 
         # Define the parameters for wire RCs, these will be returned from this function
         # Commenting out while testing to see if the multi sb mux itself is working, dont want to have to change LUT stuff
-        wire_general_ble_output_pstr = f"wire_general_ble_output{sb_mux_on.param_str}"
+        wire_general_ble_output_pstr = f"wire_{self.name}"
         
         # wire_general_ble_output_pstr = f"wire_general_ble_output"
         # subckt_general_ble_output_str
@@ -115,48 +120,52 @@ class _GeneralBLEOutputLoad:
         next_node = "n_1_2"
         # Write out all of the OFF SB muxes
         total_num_sb_mux_off = 0
-        for sb_mux_info in self.sb_muxes_info:
+        node_it = 0
+        for sb_id, sb_mux_info in enumerate(self.sb_muxes_info):
             cur_sb_mux = sb_mux_info["sb_mux"]
             subckt_sb_mux_off_str: str = f"{cur_sb_mux.name}_off"
             for i in range(sb_mux_info["num_off"]):
                 spice_file_lines += [
-                    f"Xwire_general_ble_output_{i+1} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
-                    f"Xsb_mux_off_{i+1} {next_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_off_str}",
+                    f"Xwire_general_ble_output_sb_{sb_id}_{i+1} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
+                    f"X{cur_sb_mux.name}_off_{i+1} {next_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_off_str}",
                 ]
                 current_node = next_node
-                next_node = f"n_1_{i+3}"
+                next_node = f"n_1_{node_it+3}"
+                node_it += 1
                 total_num_sb_mux_off += 1
         # Write out all of the partial SB muxes
         total_num_sb_partial = 0
-        for sb_mux_info in self.sb_muxes_info:
+        for sb_id, sb_mux_info in enumerate(self.sb_muxes_info):
             cur_sb_mux = sb_mux_info["sb_mux"]
             subckt_sb_mux_partial_str: str = f"{cur_sb_mux.name}_partial"
             for i in range(sb_mux_info["num_partial"]):
                 spice_file_lines += [
-                    f"Xwire_general_ble_output_{i + 1 + total_num_sb_mux_off} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
-                    f"Xsb_mux_partial_{i + 1} {next_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_partial_str}",
+                    f"Xwire_general_ble_output_sb_{sb_id}_{i + 1 + total_num_sb_mux_off} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
+                    f"X{cur_sb_mux.name}_partial_{i + 1} {next_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_partial_str}",
                 ]
                 current_node = next_node
-                next_node = f"n_1_{i + total_num_sb_mux_off + 3}"
+                next_node = f"n_1_{node_it + total_num_sb_mux_off + 3}"
+                node_it += 1
                 total_num_sb_partial += 1
         # Write out all of the ON SB muxes
         total_num_sb_on = 0
-        for sb_mux_info in self.sb_muxes_info:
+        for sb_id, sb_mux_info in enumerate(self.sb_muxes_info):
             cur_sb_mux = sb_mux_info["sb_mux"]
             subckt_sb_mux_on_str: str = f"{cur_sb_mux.name}_on"
             for i in range(sb_mux_info["num_on"]):
                 if i == sb_mux_info["num_on"] - 1:
                     spice_file_lines += [
-                        f"Xwire_general_ble_output_{i + 1 + total_num_sb_mux_off + total_num_sb_partial} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
-                        f"Xsb_mux_on_{i + 1} {meas_node} {out_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_on_str}",
+                        f"Xwire_general_ble_output_sb_{sb_id}_{i + 1 + total_num_sb_mux_off + total_num_sb_partial} {current_node} {meas_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
+                        f"X{cur_sb_mux.name}_on_{i + 1} {meas_node} {out_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_on_str}",
                     ]
                 else:
                     spice_file_lines += [
                         f"Xwire_general_ble_output_{i + 1 + total_num_sb_mux_off + total_num_sb_partial} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
-                        f"Xsb_mux_on_{i + 1} {next_node} n_hang_{i} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_on_str}",
+                        f"X{cur_sb_mux.name}_on_{i + 1} {next_node} n_hang_{i} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_on_str}",
                     ]    
             current_node = next_node
-            next_node = f"n_1_{i + total_num_sb_mux_off + total_num_sb_partial + 3}"
+            next_node = f"n_1_{node_it + total_num_sb_mux_off + total_num_sb_partial + 3}"
+            node_it += 1
             total_num_sb_on += 1
         
         # End of Subckt
@@ -215,7 +224,17 @@ class _GeneralBLEOutputLoad:
         # the routing channels. This wire spans some fraction of a tile. We can set what that
         # fraction is with the output track-access span (track-access locality).
 
-        gen_ble_out_wire_key = f"wire_general_ble_output_L{self.gen_r_wire['len']}_uid{self.gen_r_wire['id']}"
+
+        # gen_ble_out_wire_key = f"wire_general_ble_output_wire_uid{self.gen_r_wire['id']}"
+
+        # Look for keys in the wire names which would be suffixed by some parameter string
+        filt_wires = [key for key in self.wire_names if "wire_general_ble_output" in key]
+        assert len(filt_wires) == 1, f"Expected 1 wire, found {len(filt_wires)} wires"
+        gen_ble_out_wire_key = filt_wires[0]
+
+        # Make sure it exists in the class definition, unncessesary here but just maintaining convention as some wire keys are not coming from wire_names
+        assert gen_ble_out_wire_key in self.wire_names, f"Wire {gen_ble_out_wire_key} not found in wire names list"
+        
         # height is the lb_height, I wonder why once we have initialized the lb_height we no longer use the output track locality
         wire_lengths[gen_ble_out_wire_key] = width_dict["tile"] * fpga.OUTPUT_TRACK_ACCESS_SPAN
         if height != 0.0:
@@ -320,9 +339,10 @@ class _RoutingWireLoad:
     """ This is the routing wire load for an architecture with direct drive and only one segment length.
         Two-level muxes are assumed and we model for partially on paths. """
         
-    def __init__(self, gen_r_wire: dict, sb_muxes: List[_SwitchBlockMUX], driven_sb_mux_idx: int ):
+    def __init__(self, gen_r_wire: dict, sb_muxes: List[_SwitchBlockMUX], driven_sb_mux_idx: int):
+        sb_mux_on = sb_muxes[driven_sb_mux_idx]
         # Name of this wire
-        self.name = "routing_wire_load"
+        self.name = f"routing_wire_load{sb_mux_on.param_str}"
         # What length of wire is this routing wire load representing?
         self.gen_r_wire = gen_r_wire
         # We assume that half of the wires in a routing channel are used (limited by routability)
@@ -351,23 +371,22 @@ class _RoutingWireLoad:
         # Which SB in our list of SBs do we assume is ON in this case? or in other words, which SB is connected to BLE output?
         self.driven_sb_mux_idx = driven_sb_mux_idx
         # For each tile in load we need an sb_muxes_info object
-        self.tiles_info = [
-            {
-                "sb_muxes_info": [ 
-                    {
-                        "sb_mux": sb_mux,
-                        # number of each mode of sb mux
-                        "num_on": None, 
-                        "num_partial": None, 
-                        "num_off": None,
-                        # frequency of sb mux type in this tile (percentage)
-                        "freq_ratio": sb_mux.num_per_tile / sum([sb_mux_i.num_per_tile for sb_mux_i in sb_muxes])
-                    } for sb_mux in sb_muxes
-                ]
-            }
-        ]
-        # self.sb_muxes_info = [ {"sb_mux": sb_mux, "num_on": None, "num_partial": None, "num_off": None} for sb_mux in sb_muxes]
-        self.total_sb_muxes = None
+        self.tile_info = {
+            "sb_muxes_info": [ 
+                {
+                    "sb_mux": sb_mux,
+                    "id" : i,
+                    # budget of each mode of sb mux for this type
+                    "on_budget": None, 
+                    "partial_budget": None, 
+                    "off_budget": None,
+                    # frequency of sb mux type in this tile (percentage)
+                    "freq_ratio": sb_mux.num_per_tile / sum([sb_mux_i.num_per_tile for sb_mux_i in sb_muxes])# if sb_mux_i.src_r_wire["id"] == gen_r_wire["id"]])
+                # We only want to use muxes which sink this wire type, so only the ones which have a src_r_wire of this type...
+                } for i, sb_mux in enumerate(sb_muxes) if sb_mux.src_r_wire["id"] == gen_r_wire["id"]
+            ]
+        }
+        # self.total_sb_muxes = None
         
     def general_routing_load_generate(self, spice_filename: str, sb_mux: _SwitchBlockMUX) -> List[str]:
         """ Generates a routing wire load SPICE deck  """
@@ -382,7 +401,7 @@ class _RoutingWireLoad:
 
 
         # Open SPICE file for appending
-        spice_file = open(spice_filename, 'a')
+        # spice_file = open(spice_filename, 'a')
         
         ###############################################################
         ## ROUTING WIRE LOAD
@@ -394,7 +413,7 @@ class _RoutingWireLoad:
         wire_id = gen_r_wire["id"]
 
         # param string suffixes
-        p_str_suffix = f"_L{wire_length}_uid{wire_id}"
+        p_str_suffix = f"_uid{self.driven_sb_mux_idx}"
         routing_wire_load_pstr = f"wire_gen_routing{p_str_suffix}"
         wire_sb_load_on_pstr = f"wire_sb_load_on{p_str_suffix}"
         wire_sb_load_partial_pstr = f"wire_sb_load_partial{p_str_suffix}"
@@ -417,39 +436,70 @@ class _RoutingWireLoad:
         # wire load sbckt name
         routing_wire_load_subckt_str = f"routing_wire_load{p_str_suffix}"
 
+        spice_file_lines = []
         # First we write the individual tile loads
         # Tiles are generated such that if you drive a wire from the left you get
         #   driver -> tile 4 -> tile 3 -> tile 2 -> tile 1 (driver) -> tile 4 -> etc.
         for i in range(wire_length):
-            spice_file.write("******************************************************************************************\n")
-            spice_file.write("* Routing wire load tile " + str(i+1) + "\n")
-            spice_file.write("******************************************************************************************\n")
+            spice_file_lines += [
+                "******************************************************************************************",
+                f"* Routing wire load tile {i+1}",
+                "******************************************************************************************",
+            ]
+            # spice_file.write("******************************************************************************************\n")
+            # spice_file.write("* Routing wire load tile " + str(i+1) + "\n")
+            # spice_file.write("******************************************************************************************\n")
             # If this is Tile 1, we need to add a nodes to which we can connect the ON sb_mux and cb_mux so that we can measure power.
             if i == 0:
-                spice_file.write(f".SUBCKT routing_wire_load_tile_{i+1}{p_str_suffix} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on\n")
+                spice_file_lines += [ f".SUBCKT routing_wire_load_tile_{i+1}{p_str_suffix} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on" ]
+                # spice_file.write(f".SUBCKT routing_wire_load_tile_{i+1}{p_str_suffix} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on\n")
             else:
-                spice_file.write(f".SUBCKT routing_wire_load_tile_{i+1}{p_str_suffix} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd\n")
-            spice_file.write(f"Xwire_gen_routing_1 n_in n_1_1 wire Rw='{routing_wire_load_pstr}_res/" + str(2*wire_length) + f"' Cw='{routing_wire_load_pstr}_cap/" + str(2*wire_length) + "'\n\n")
+                spice_file_lines += [ f".SUBCKT routing_wire_load_tile_{i+1}{p_str_suffix} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd" ]
+                # spice_file.write(f".SUBCKT routing_wire_load_tile_{i+1}{p_str_suffix} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd\n")
+            spice_file_lines += [ f"Xwire_gen_routing_1 n_in n_1_1 wire Rw='{routing_wire_load_pstr}_res/{2*wire_length}' Cw='{routing_wire_load_pstr}_cap/{2*wire_length}'\n" ]
+            # spice_file.write(f"Xwire_gen_routing_1 n_in n_1_1 wire Rw='{routing_wire_load_pstr}_res/" + str(2*wire_length) + f"' Cw='{routing_wire_load_pstr}_cap/" + str(2*wire_length) + "'\n\n")
             
             # SWITCH BLOCK LOAD
             # Write the ON switch block loads 
-            for sb_on in range(tile_sb_on[i]):
-                # Tile 1 is terminated by a on SB, if this is tile 1 and sb_on 1, we ignore it because we put that one at the end.
-                if i == 0:
-                    if sb_on != 0:
-                        spice_file.write("Xwire_sb_load_on_" + str(sb_on+1) + " n_1_1 n_1_sb_on_" + str(sb_on+1) + f" wire Rw={wire_sb_load_on_pstr}_res Cw={wire_sb_load_on_pstr}_cap\n")
-                        spice_file.write("Xsb_load_on_" + str(sb_on+1) + " n_1_sb_on_" + str(sb_on+1) + " n_sb_mux_on_" + str(sb_on+1) + f"_hang n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n\n")
-                else:
-                    spice_file.write("Xwire_sb_load_on_" + str(sb_on+1) + " n_1_1 n_1_sb_on_" + str(sb_on+1) + f" wire Rw={wire_sb_load_on_pstr}_res Cw={wire_sb_load_on_pstr}_cap\n")
-                    spice_file.write("Xsb_load_on_" + str(sb_on+1) + " n_1_sb_on_" + str(sb_on+1) + " n_sb_mux_on_" + str(sb_on+1) + f"_hang n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n\n")
+            # Loop through all SB types that can load this wire
+            for sb_mux_info in self.tile_info["sb_muxes_info"]:
+                for sb_on in range(tile_sb_on[i][sb_mux_info["id"]]):
+                    # Tile 1 is terminated by a on SB, if this is tile 1 and sb_on 1, we ignore it because we put that one at the end.
+                    if i == 0 and sb_on == 0:
+                        continue
+
+                    sb_mux_on_str = f"{sb_mux_info['sb_mux'].name}_on"
+                    spice_file_lines += [ 
+                        f"Xwire_sb_uid_{sb_mux_info['id']}_load_on_{sb_on+1} n_1_1 n_1_sb_on_{sb_on+1} wire Rw={wire_sb_load_on_pstr}_res Cw={wire_sb_load_on_pstr}_cap",
+                        f"Xsb{sb_mux_info['id']}_load_on_{sb_on+1} n_1_sb_on_{sb_on+1} n_sb_mux_on_{sb_on+1}_hang n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n"
+                    ]
+                # if i == 0:
+                #     if sb_on != 0:
+                #         spice_file.write("Xwire_sb_load_on_" + str(sb_on+1) + " n_1_1 n_1_sb_on_" + str(sb_on+1) + f" wire Rw={wire_sb_load_on_pstr}_res Cw={wire_sb_load_on_pstr}_cap\n")
+                #         spice_file.write("Xsb_load_on_" + str(sb_on+1) + " n_1_sb_on_" + str(sb_on+1) + " n_sb_mux_on_" + str(sb_on+1) + f"_hang n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n\n")
+                # else:
+                # spice_file.write("Xwire_sb_load_on_" + str(sb_on+1) + " n_1_1 n_1_sb_on_" + str(sb_on+1) + f" wire Rw={wire_sb_load_on_pstr}_res Cw={wire_sb_load_on_pstr}_cap\n")
+                # spice_file.write("Xsb_load_on_" + str(sb_on+1) + " n_1_sb_on_" + str(sb_on+1) + " n_sb_mux_on_" + str(sb_on+1) + f"_hang n_gate n_gate_n n_vdd n_gnd {sb_mux_on_str}\n\n")
             # Write partially on switch block loads
-            for sb_partial in range(tile_sb_partial[i]):
-                spice_file.write("Xwire_sb_load_partial_" + str(sb_partial+1) + " n_1_1 n_1_sb_partial_" + str(sb_partial+1) + f" wire Rw={wire_sb_load_partial_pstr}_res Cw={wire_sb_load_partial_pstr}_cap\n")
-                spice_file.write("Xsb_load_partial_" + str(sb_partial+1) + " n_1_sb_partial_" + str(sb_partial+1) + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_partial_str}\n\n")
+            for sb_mux_info in self.tile_info["sb_muxes_info"]:
+                for sb_partial in range(tile_sb_partial[i][sb_mux_info["id"]]):
+                    sb_mux_partial_str = f"{sb_mux_info['sb_mux'].name}_partial"
+                    spice_file_lines += [
+                        f"Xwire_sb{sb_mux_info['id']}_load_partial_{sb_partial+1} n_1_1 n_1_sb_partial_{sb_partial+1} wire Rw={wire_sb_load_partial_pstr}_res Cw={wire_sb_load_partial_pstr}_cap",
+                        f"Xsb{sb_mux_info['id']}_load_partial_{sb_partial+1} n_1_sb_partial_{sb_partial+1} n_gate n_gate_n n_vdd n_gnd {sb_mux_partial_str}\n"
+                    ]
+                # spice_file.write("Xwire_sb_load_partial_" + str(sb_partial+1) + " n_1_1 n_1_sb_partial_" + str(sb_partial+1) + f" wire Rw={wire_sb_load_partial_pstr}_res Cw={wire_sb_load_partial_pstr}_cap\n")
+                # spice_file.write("Xsb_load_partial_" + str(sb_partial+1) + " n_1_sb_partial_" + str(sb_partial+1) + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_partial_str}\n\n")
             # Write off switch block loads
-            for sb_off in range(tile_sb_off[i]):
-                spice_file.write("Xwire_sb_load_off_" + str(sb_off+1) + " n_1_1 n_1_sb_off_" + str(sb_off+1) + f" wire Rw={wire_sb_load_off_pstr}_res Cw={wire_sb_load_off_pstr}_cap\n")
-                spice_file.write("Xsb_load_off_" + str(sb_off+1) + " n_1_sb_off_" + str(sb_off+1) + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_off_str}\n\n")
+            for sb_mux_info in self.tile_info["sb_muxes_info"]:
+                for sb_off in range(tile_sb_off[i][sb_mux_info["id"]]):
+                    sb_mux_off_str = f"{sb_mux_info['sb_mux'].name}_off"
+                    spice_file_lines += [
+                        f"Xwire_sb{sb_mux_info['id']}_load_off_{sb_off+1} n_1_1 n_1_sb_off_{sb_off+1} wire Rw={wire_sb_load_off_pstr}_res Cw={wire_sb_load_off_pstr}_cap",
+                        f"Xsb{sb_mux_info['id']}_load_off_{sb_off+1} n_1_sb_off_{sb_off+1} n_gate n_gate_n n_vdd n_gnd {sb_mux_off_str}\n"
+                    ]
+                # spice_file.write("Xwire_sb_load_off_" + str(sb_off+1) + " n_1_1 n_1_sb_off_" + str(sb_off+1) + f" wire Rw={wire_sb_load_off_pstr}_res Cw={wire_sb_load_off_pstr}_cap\n")
+                # spice_file.write("Xsb_load_off_" + str(sb_off+1) + " n_1_sb_off_" + str(sb_off+1) + f" n_gate n_gate_n n_vdd n_gnd {sb_mux_off_str}\n\n")
             
             # CONNECTION BLOCK LOAD
             # Write the ON connection block load
@@ -459,48 +509,85 @@ class _RoutingWireLoad:
                     # We only connect one of them, so the first one in this case.
                     # This cb_mux is connected to a different power rail so that we can measure power.
                     if cb_on == 0:
-                        spice_file.write("Xwire_cb_load_on_" + str(cb_on+1) + " n_1_1 n_1_cb_on_" + str(cb_on+1) + f" wire Rw={wire_cb_load_on_pstr}_res Cw={wire_cb_load_on_pstr}_cap\n")
-                        spice_file.write("Xcb_load_on_" + str(cb_on+1) + " n_1_cb_on_" + str(cb_on+1) + f" n_cb_out n_gate n_gate_n n_vdd_cb_mux_on n_gnd {subckt_cb_mux_on_str}\n\n")
+                        spice_file_lines += [ 
+                            f"Xwire_cb_load_on_{cb_on+1} n_1_1 n_1_cb_on_{cb_on+1} wire Rw={wire_cb_load_on_pstr}_res Cw={wire_cb_load_on_pstr}_cap",
+                            f"Xcb_load_on_{cb_on+1} n_1_cb_on_{cb_on+1} n_cb_out n_gate n_gate_n n_vdd_cb_mux_on n_gnd {subckt_cb_mux_on_str}\n"
+                        ]
+                        # spice_file.write("Xwire_cb_load_on_" + str(cb_on+1) + " n_1_1 n_1_cb_on_" + str(cb_on+1) + f" wire Rw={wire_cb_load_on_pstr}_res Cw={wire_cb_load_on_pstr}_cap\n")
+                        # spice_file.write("Xcb_load_on_" + str(cb_on+1) + " n_1_cb_on_" + str(cb_on+1) + f" n_cb_out n_gate n_gate_n n_vdd_cb_mux_on n_gnd {subckt_cb_mux_on_str}\n\n")
                 else:
-                    spice_file.write("Xwire_cb_load_on_" + str(cb_on+1) + " n_1_1 n_1_cb_on_" + str(cb_on+1) + f" wire Rw={wire_cb_load_on_pstr}_res Cw={wire_cb_load_on_pstr}_cap\n")
-                    spice_file.write("Xcb_load_on_" + str(cb_on+1) + " n_1_cb_on_" + str(cb_on+1) + " n_cb_mux_on_" + str(cb_on+1) + f"_hang n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_on_str}\n\n")
+                    spice_file_lines += [
+                        f"Xwire_cb_load_on_{cb_on+1} n_1_1 n_1_cb_on_{cb_on+1} wire Rw={wire_cb_load_on_pstr}_res Cw={wire_cb_load_on_pstr}_cap",
+                        f"Xcb_load_on_{cb_on+1} n_1_cb_on_{cb_on+1} n_cb_mux_on_{cb_on+1}_hang n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_on_str}\n"
+                    ]
+                    # spice_file.write("Xwire_cb_load_on_" + str(cb_on+1) + " n_1_1 n_1_cb_on_" + str(cb_on+1) + f" wire Rw={wire_cb_load_on_pstr}_res Cw={wire_cb_load_on_pstr}_cap\n")
+                    # spice_file.write("Xcb_load_on_" + str(cb_on+1) + " n_1_cb_on_" + str(cb_on+1) + " n_cb_mux_on_" + str(cb_on+1) + f"_hang n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_on_str}\n\n")
             # Write partially on connection block loads
             for cb_partial in range(tile_cb_partial[i]):
-                spice_file.write("Xwire_cb_load_partial_" + str(cb_partial+1) + " n_1_1 n_1_cb_partial_" + str(cb_partial+1) + f" wire Rw={wire_cb_load_partial_pstr}_res Cw={wire_cb_load_partial_pstr}_cap\n")
-                spice_file.write("Xcb_load_partial_" + str(cb_partial+1) + " n_1_cb_partial_" + str(cb_partial+1) + f" n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_partial_str}\n\n")
+                spice_file_lines += [
+                    f"Xwire_cb_load_partial_{cb_partial+1} n_1_1 n_1_cb_partial_{cb_partial+1} wire Rw={wire_cb_load_partial_pstr}_res Cw={wire_cb_load_partial_pstr}_cap",
+                    f"Xcb_load_partial_{cb_partial+1} n_1_cb_partial_{cb_partial+1} n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_partial_str}\n"
+                ]
+                # spice_file.write("Xwire_cb_load_partial_" + str(cb_partial+1) + " n_1_1 n_1_cb_partial_" + str(cb_partial+1) + f" wire Rw={wire_cb_load_partial_pstr}_res Cw={wire_cb_load_partial_pstr}_cap\n")
+                # spice_file.write("Xcb_load_partial_" + str(cb_partial+1) + " n_1_cb_partial_" + str(cb_partial+1) + f" n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_partial_str}\n\n")
             # Write off connection block loads
             for cb_off in range(tile_cb_off[i]):
-                spice_file.write("Xwire_cb_load_off_" + str(cb_off+1) + " n_1_1 n_1_cb_off_" + str(cb_off+1) + f" wire Rw={wire_cb_load_off_pstr}_res Cw={wire_cb_load_off_pstr}_cap\n")
-                spice_file.write("Xcb_load_off_" + str(cb_off+1) + " n_1_cb_off_" + str(cb_off+1) + f" n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_off_str}\n\n")
+                spice_file_lines += [
+                    f"Xwire_cb_load_off_{cb_off+1} n_1_1 n_1_cb_off_{cb_off+1} wire Rw={wire_cb_load_off_pstr}_res Cw={wire_cb_load_off_pstr}_cap",
+                    f"Xcb_load_off_{cb_off+1} n_1_cb_off_{cb_off+1} n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_off_str}\n"
+                ]
+                # spice_file.write("Xwire_cb_load_off_" + str(cb_off+1) + " n_1_1 n_1_cb_off_" + str(cb_off+1) + f" wire Rw={wire_cb_load_off_pstr}_res Cw={wire_cb_load_off_pstr}_cap\n")
+                # spice_file.write("Xcb_load_off_" + str(cb_off+1) + " n_1_cb_off_" + str(cb_off+1) + f" n_gate n_gate_n n_vdd n_gnd {subckt_cb_mux_off_str}\n\n")
             
             # Tile 1 is terminated by a on switch block, other tiles just connect the wire to the output
             # Tile 1's sb_mux is connected to a different power rail so that we can measure dynamic power.
             if i == 0:
-                spice_file.write(f"Xwire_gen_routing_2 n_1_1 n_1_2 wire Rw='{routing_wire_load_pstr}_res/" + str(2*wire_length) + f"' Cw='{routing_wire_load_pstr}_cap/" + str(2*wire_length) + "'\n")
-                spice_file.write(f"Xsb_mux_on_out n_1_2 n_out n_gate n_gate_n n_vdd_sb_mux_on n_gnd {sb_mux_on_str}\n")
+                spice_file_lines += [
+                    f"Xwire_gen_routing_2 n_1_1 n_1_2 wire Rw='{routing_wire_load_pstr}_res/{2*wire_length}' Cw='{routing_wire_load_pstr}_cap/{2*wire_length}'",
+                    f"Xsb_mux_on_out n_1_2 n_out n_gate n_gate_n n_vdd_sb_mux_on n_gnd {sb_mux_on_str}"
+                ]
+                # spice_file.write(f"Xwire_gen_routing_2 n_1_1 n_1_2 wire Rw='{routing_wire_load_pstr}_res/" + str(2*wire_length) + f"' Cw='{routing_wire_load_pstr}_cap/" + str(2*wire_length) + "'\n")
+                # spice_file.write(f"Xsb_mux_on_out n_1_2 n_out n_gate n_gate_n n_vdd_sb_mux_on n_gnd {sb_mux_on_str}\n")
             else:
-                spice_file.write(f"Xwire_gen_routing_2 n_1_1 n_out wire Rw='{routing_wire_load_pstr}_res/" + str(2*wire_length) + f"' Cw='{routing_wire_load_pstr}_cap/" + str(2*wire_length) + "'\n")
+                spice_file_lines += [ f"Xwire_gen_routing_2 n_1_1 n_out wire Rw='{routing_wire_load_pstr}_res/{2*wire_length}' Cw='{routing_wire_load_pstr}_cap/{2*wire_length}'" ]
+                # spice_file.write(f"Xwire_gen_routing_2 n_1_1 n_out wire Rw='{routing_wire_load_pstr}_res/" + str(2*wire_length) + f"' Cw='{routing_wire_load_pstr}_cap/" + str(2*wire_length) + "'\n")
         
-            spice_file.write(".ENDS\n\n\n")
+            spice_file_lines += [ ".ENDS\n\n" ]
+            # spice_file.write(".ENDS\n\n\n")
         
         
         # Now write a subcircuit for the complete routing wire
-        spice_file.write("******************************************************************************************\n")
-        spice_file.write("* Routing wire load tile " + str(i+1) + "\n")
-        spice_file.write("******************************************************************************************\n")
-        # spice_file.write(".SUBCKT routing_wire_load n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on\n")
-        spice_file.write(f".SUBCKT {routing_wire_load_subckt_str} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on\n")
+        spice_file_lines += [
+            "******************************************************************************************",
+            f"* Routing wire load",
+            "******************************************************************************************",
+            f".SUBCKT {routing_wire_load_subckt_str} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on"
+        ]
+        
+        # spice_file.write("******************************************************************************************\n")
+        # spice_file.write("* Routing wire load tile " + str(i+1) + "\n")
+        # spice_file.write("******************************************************************************************\n")
+        # spice_file.write(f".SUBCKT {routing_wire_load_subckt_str} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on\n")
         # Iterate through tiles backwards
         in_node = "n_in"
-        for tile in range(wire_length,1,-1):
+        for tile in range(wire_length, 1, -1):
             out_node = "n_" + str(tile)
-            spice_file.write("Xrouting_wire_load_tile_" + str(tile) + " " + in_node + " " + out_node + " n_hang_" + str(tile) + f" n_gate n_gate_n n_vdd n_gnd routing_wire_load_tile_{tile}{p_str_suffix}\n")
+            spice_file_lines += [ f"Xrouting_wire_load_tile_{tile} {in_node} {out_node} n_hang_{tile} n_gate n_gate_n n_vdd n_gnd routing_wire_load_tile_{tile}{p_str_suffix}" ]
+            # spice_file.write("Xrouting_wire_load_tile_" + str(tile) + " " + in_node + " " + out_node + " n_hang_" + str(tile) + f" n_gate n_gate_n n_vdd n_gnd routing_wire_load_tile_{tile}{p_str_suffix}\n")
             in_node = out_node
         # Write tile 1
-        spice_file.write("Xrouting_wire_load_tile_1 " + in_node + f" n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on routing_wire_load_tile_1{p_str_suffix}\n")
-        spice_file.write(".ENDS\n\n\n")
+        spice_file_lines += [
+            f"Xrouting_wire_load_tile_1 {in_node} n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on routing_wire_load_tile_1{p_str_suffix}",
+            ".ENDS\n\n"
+        ]
+        # spice_file.write("Xrouting_wire_load_tile_1 " + in_node + f" n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on routing_wire_load_tile_1{p_str_suffix}\n")
+        # spice_file.write(".ENDS\n\n\n")
         
-        spice_file.close()
+        # spice_file.close()
+        
+        # Write out subckt to spice file
+        with open(spice_filename, 'a') as spice_file:
+            spice_file.write("\n".join(spice_file_lines))
 
         
         # Create a list of all wires used in this subcircuit
@@ -533,18 +620,34 @@ class _RoutingWireLoad:
         wire_id = self.gen_r_wire["id"]
         wire_layer = self.gen_r_wire["metal"]
 
-        key_str_suffix = f"_L{wire_length}_uid{wire_id}"
+        # key_str_suffix = f"_wire_uid{wire_id}"
         # Get get keys for wires
         # TODO remove duplication figure out somewhere to define and save these keys
-        wire_gen_routing_load_key = f"wire_gen_routing{key_str_suffix}"
-        wire_sb_load_on_key = f"wire_sb_load_on{key_str_suffix}"
-        wire_sb_load_partial_key = f"wire_sb_load_partial{key_str_suffix}"
-        wire_sb_load_off_key = f"wire_sb_load_off{key_str_suffix}"
+        wire_gen_routing_load_key = [key for key in self.wire_names if f"wire_gen_routing" in key][0]
+        wire_sb_load_on_key = [key for key in self.wire_names if f"wire_sb_load_on" in key][0]
+        wire_sb_load_partial_key = [key for key in self.wire_names if f"wire_sb_load_partial" in key][0]
+        wire_sb_load_off_key = [key for key in self.wire_names if f"wire_sb_load_off" in key][0]
 
-        wire_cb_load_on_key = f"wire_cb_load_on{key_str_suffix}"
-        wire_cb_load_partial_key = f"wire_cb_load_partial{key_str_suffix}"
-        wire_cb_load_off_key = f"wire_cb_load_off{key_str_suffix}"
+        wire_cb_load_on_key = [key for key in self.wire_names if f"wire_cb_load_on" in key][0]
+        wire_cb_load_partial_key = [key for key in self.wire_names if f"wire_cb_load_partial" in key][0]
+        wire_cb_load_off_key = [key for key in self.wire_names if f"wire_cb_load_off" in key][0]
 
+        wire_keys = [
+            wire_gen_routing_load_key, wire_sb_load_on_key, wire_sb_load_partial_key, 
+            wire_sb_load_off_key, wire_cb_load_on_key, wire_cb_load_partial_key, 
+            wire_cb_load_off_key]
+        
+        # check if there are any wires left over
+        assert wire_keys.sort() == self.wire_names.sort(), "Wire keys do not match wire names"
+
+        # wire_gen_routing_load_key = f"wire_gen_routing{key_str_suffix}"
+        # wire_sb_load_on_key = f"wire_sb_load_on{key_str_suffix}"
+        # wire_sb_load_partial_key = f"wire_sb_load_partial{key_str_suffix}"
+        # wire_sb_load_off_key = f"wire_sb_load_off{key_str_suffix}"
+
+        # wire_cb_load_on_key = f"wire_cb_load_on{key_str_suffix}"
+        # wire_cb_load_partial_key = f"wire_cb_load_partial{key_str_suffix}"
+        # wire_cb_load_off_key = f"wire_cb_load_off{key_str_suffix}"
 
 
         # This is the general routing wire that spans L tiles
@@ -631,9 +734,16 @@ class _RoutingWireLoad:
         cb_level1_size = cb_mux.level1_size
         cb_level2_size = cb_mux.level2_size
         
-        sb_muxes = [sb_mux_info["sb_mux"] for sb_mux_info in self.sb_muxes_info]
+        # List of muxes which can be use this wire as an input
+        sb_muxes = [sb_mux_info["sb_mux"] for sb_mux_info in self.tile_info["sb_muxes_info"] if sb_mux_info["sb_mux"].src_r_wire["id"] == self.gen_r_wire["id"]]
         # For each sb_mux and its respective Fs
-        for i, (sb_mux, Fs) in enumerate(zip(sb_muxes, specs.Fs_mtx)):
+        for i, sb_mux_info in enumerate(self.tile_info["sb_muxes_info"]):
+            
+            Fs = specs.Fs_mtx[sb_mux_info["id"]]["Fs"]
+            sb_mux = sb_mux_info["sb_mux"]
+            L = sb_mux.dst_r_wire["len"]
+            assert L == self.gen_r_wire["len"], "The length of the switch block mux does not match the length of the routing wire"
+            
             # init cb / sb mux size variables
             sb_mux_size = sb_mux.implemented_size
             cb_mux_size = cb_mux.implemented_size
@@ -648,35 +758,43 @@ class _RoutingWireLoad:
             
             # num sb partial loads which are loading the gen routing wire for single tile (will be assigned at the end for worst case)
             # Why is this not for every tile? If we assume channels to be turned on at X % across device there would be way more partial on muxes
-            sb_load_partial = int(round(float(sb_level2_size - 1.0) * channel_usage))
+            if i == self.driven_sb_mux_idx:
+                sb_load_partial = int(math.ceil((round(float(sb_level2_size - 1.0) * channel_usage))))
+            else:
+                sb_load_partial = int(round(float(sb_level2_size - 1.0) * channel_usage))
             
             sb_load_per_intermediate_tile = (Fs - 1)
-            sb_load_off = sb_load_per_intermediate_tile * L - sb_load_partial
+            # This rounding could result in some accuracy loss due to fragmentation, but it is a decent estimate
+            sb_load_off = int(math.ceil((sb_load_per_intermediate_tile * L - sb_load_partial) * sb_mux_info["freq_ratio"]))
 
-            
-
-
-
-
+            # The driven_sb_mux index indicates which SB mux is at the end of the gen wire load
+            sb_mux_info["on_budget"] = 1 if i == self.driven_sb_mux_idx else 0
+            sb_mux_info["partial_budget"] = int(sb_load_partial)
+            sb_mux_info["off_budget"] = sb_load_off
 
         # Calculate switch block load per tile
         # Each tile has Fs-1 switch blocks hanging off of it exept the last one which has 3 (because the wire is ending)
-        sb_load_per_intermediate_tile = (Fs - 1)
+        # sb_load_per_intermediate_tile = (Fs - 1)
         # Calculate number of on/partial/off
         # We assume that each routing wire is only driving one more routing wire (at the end)
-        self.sb_load_on = 1
+        # self.sb_load_on = 1
         # Each used routing multiplexer comes with (sb_level2_size - 1) partially on paths. 
         # If all wires were used, we'd have (sb_level2_size - 1) partially on paths per wire, TODO: Is this accurate? See ble output load
         # but since we are just using a fraction of the wires, each wire has (sb_level2_size - 1)*channel_usage partially on paths connected to it.
         
         # Stratix had around 50% channel usage, 60-70% is pushing it for most FPGAs
         # Channel usage is correction factor because we dont turn all muxes on, if we use half of our routing wires we put 0.5 for channel usage
-        self.sb_load_partial = int(round(float(sb_level2_size - 1.0) * channel_usage))
+        # self.sb_load_partial = int(round(float(sb_level2_size - 1.0) * channel_usage))
         # The number of off sb_mux is (total - partial)
         # Everything that is not partially on will be off
         # The one ON swtich was already considered so we dont include it in the load
-        self.sb_load_off = sb_load_per_intermediate_tile * L - self.sb_load_partial
+        # self.sb_load_off = sb_load_per_intermediate_tile * L - self.sb_load_partial
         
+
+        # We assume CB muxes always take in the minimal wire length type
+        # min_len_wire = fpga.min_len_wire
+        # cb_in_L = min_len_wire["len"]
+
         # Calculate connection block load per tile
         # We assume that cluster inputs are divided evenly between horizontal and vertical routing channels
         # We can get the total number of CB inputs connected to the channel segment by multiplying cluster inputs by cb_mux_size, then divide by W to get cb_inputs/wire
@@ -686,6 +804,8 @@ class _RoutingWireLoad:
         # It is logical to assume that used cluster inputs will be connected to used routing wires, so we have I/2*input_usage inputs per tile,
         # we have L tiles so, I/2*input_usage*L fully on cluster inputs connected to W*channel_usage routing wires
         # If we look at the whole wire, we are selecting I/2*input_usage*L signals from W*channel_usage wires
+        # Even though all the wires are not of minimum length, we use the same W for all wires 
+        #       because it would be innacurate to just use the portion of channel of minimum length (we are doing an estimate)
         cb_load_on_probability = float((I / 2.0 * cluster_input_usage * L)) / (W * channel_usage)
         self.cb_load_on = int(round(cb_load_on_probability))
         # If < 1, we round up to one because at least one wire will have a fully on path connected to it and we model for that case.
@@ -700,14 +820,31 @@ class _RoutingWireLoad:
         if self.cb_load_partial == 0:
             self.cb_load_partial = 1 
         # Number of off paths is just number connected to routing wire - on - partial
-        self.cb_load_off = cb_load_per_tile*L - self.cb_load_partial - self.cb_load_on
+        self.cb_load_off = cb_load_per_tile * L - self.cb_load_partial - self.cb_load_on
      
         # Now we want to figure out how to distribute this among the tiles. We have L tiles.
-        tile_sb_on_budget = self.sb_load_on
-        tile_sb_partial_budget = self.sb_load_partial
-        tile_sb_off_budget = self.sb_load_off
-        tile_sb_total_budget = tile_sb_on_budget + tile_sb_partial_budget + tile_sb_off_budget
-        tile_sb_max = math.ceil(float(tile_sb_total_budget) / L)
+        # tile_sb_on_budget = self.sb_load_on
+        # tile_sb_partial_budget = self.sb_load_partial
+        # tile_sb_off_budget = self.sb_load_off
+        # tile_sb_total_budget = tile_sb_on_budget + tile_sb_partial_budget + tile_sb_off_budget
+        
+        # tile_sb_total_budget = {}
+        tile_sb_max = {}
+
+        tile_sb_on_budget = {}
+        tile_sb_partial_budget = {}
+        tile_sb_off_budget = {}
+        for sb_mux_info in self.tile_info["sb_muxes_info"]:
+            # tile_sb_total_budget[sb_mux_info["id"]] = sb_mux_info["on_budget"] + sb_mux_info["partial_budget"] + sb_mux_info["off_budget"]
+            # tile_sb_max[sb_mux_info["id"]] = math.ceil(float(tile_sb_total_budget[sb_mux_info["id"]]) / L)
+            tile_sb_on_budget[sb_mux_info["id"]] = sb_mux_info["on_budget"]
+            tile_sb_partial_budget[sb_mux_info["id"]] = sb_mux_info["partial_budget"]
+            tile_sb_off_budget[sb_mux_info["id"]] = sb_mux_info["off_budget"]
+        
+        tile_sb_total_budget = sum([sb_mux_info["on_budget"] + sb_mux_info["partial_budget"] + sb_mux_info["off_budget"] for sb_mux_info in self.tile_info["sb_muxes_info"]])
+        tile_sb_max = math.ceil(float(tile_sb_total_budget / L))
+
+
         tile_sb_on = []
         tile_sb_partial = []
         tile_sb_off = []
@@ -717,39 +854,65 @@ class _RoutingWireLoad:
         # we start at the furthest tile from the drive point and we allocate one mux input per tile iteratively until we run out of mux inputs.
         # The result of this is that on and partial mux inputs will be spread evenly along the wire with a bias towards putting 
         # them farthest away from the driver first (simulating a worst case).
+        # while sum([tile_sb_total_budget[k] for k in tile_sb_total_budget.keys()]) != 0:
         while tile_sb_total_budget != 0:
             # For each tile distribute load
             for i in range(L):
+                sb_assignment = {
+                    sb_mux_info["id"]: 0 for sb_mux_info in self.tile_info["sb_muxes_info"]
+                }
                 # Add to lists
                 if len(tile_sb_on) < (i+1):
-                    tile_sb_on.append(0)
+                    tile_sb_on.append(copy.deepcopy(sb_assignment))
                 if len(tile_sb_partial) < (i+1):
-                    tile_sb_partial.append(0)
+                    tile_sb_partial.append(copy.deepcopy(sb_assignment))
                 if len(tile_sb_off) < (i+1):
-                    tile_sb_off.append(0)
+                    tile_sb_off.append(copy.deepcopy(sb_assignment))
                 if len(tile_sb_total) < (i+1):
                     tile_sb_total.append(0)
                 # Distribute loads
+                for sb_mux_info in self.tile_info["sb_muxes_info"]:
+                    if tile_sb_total[i] != tile_sb_max:
+                        if sb_mux_info["on_budget"] != 0:
+                            tile_sb_on[i][sb_mux_info["id"]] += 1
+                            sb_mux_info["on_budget"] -= 1
+                            tile_sb_total[i] += 1
+                            tile_sb_total_budget -= 1
+                # for sb_mux_info in self.tile_info["sb_muxes_info"]:
+                    if tile_sb_total[i] != tile_sb_max:
+                        if sb_mux_info["partial_budget"] != 0:
+                            tile_sb_partial[i][sb_mux_info["id"]] += 1
+                            sb_mux_info["partial_budget"] -= 1
+                            tile_sb_total[i] += 1
+                            tile_sb_total_budget -= 1
+                # for sb_mux_info in self.tile_info["sb_muxes_info"]:
+                    if tile_sb_total[i] != tile_sb_max:
+                        if sb_mux_info["off_budget"] != 0:
+                            tile_sb_off[i][sb_mux_info["id"]] += 1
+                            sb_mux_info["off_budget"] -= 1
+                            tile_sb_total[i] += 1
+                            tile_sb_total_budget -= 1
+                
                 # Checking if the total budget of sbs for this tile have been exhausted
-                if tile_sb_total[i] != tile_sb_max:
-                    # For each, check if on / partial / off budgets have been exhausted, if not add one of the mux types
-                    if tile_sb_on_budget != 0:
-                        tile_sb_on[i] += 1
-                        tile_sb_on_budget -= 1
-                        tile_sb_total[i] += 1
-                        tile_sb_total_budget -= 1
-                if tile_sb_total[i] != tile_sb_max:
-                    if tile_sb_partial_budget != 0:
-                        tile_sb_partial[i] += 1
-                        tile_sb_partial_budget -= 1
-                        tile_sb_total[i] += 1
-                        tile_sb_total_budget -= 1
-                if tile_sb_total[i] != tile_sb_max:
-                    if tile_sb_off_budget != 0:
-                        tile_sb_off[i] += 1
-                        tile_sb_off_budget -= 1
-                        tile_sb_total[i] += 1
-                        tile_sb_total_budget -= 1
+                # if tile_sb_total[i] != tile_sb_max:
+                #     # For each, check if on / partial / off budgets have been exhausted, if not add one of the mux types
+                #     if tile_sb_on_budget != 0:
+                #         tile_sb_on[i] += 1
+                #         tile_sb_on_budget -= 1
+                #         tile_sb_total[i] += 1
+                #         tile_sb_total_budget -= 1
+                # if tile_sb_total[i] != tile_sb_max:
+                #     if tile_sb_partial_budget != 0:
+                #         tile_sb_partial[i] += 1
+                #         tile_sb_partial_budget -= 1
+                #         tile_sb_total[i] += 1
+                #         tile_sb_total_budget -= 1
+                # if tile_sb_total[i] != tile_sb_max:
+                #     if tile_sb_off_budget != 0:
+                #         tile_sb_off[i] += 1
+                #         tile_sb_off_budget -= 1
+                #         tile_sb_total[i] += 1
+                #         tile_sb_total_budget -= 1
 
                 # if tile_sb_on_budget != 0:
                 #     if tile_sb_total[i] != tile_sb_max:
