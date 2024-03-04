@@ -146,6 +146,9 @@ def rad_gen_log(log_str: str, file: str):
         fd.close()
 
 
+def are_lists_mutually_exclusive(lists: List[List[Any]]):
+    return all(not set(lists[i]) & set(lists[j]) for i in range(len(lists)) for j in range(i + 1, len(lists)))
+
 def write_csv_file(filename, formatted_data):
     """
     Write formatted data to a CSV file.
@@ -171,16 +174,150 @@ def write_csv_file(filename, formatted_data):
         csv_writer = csv.writer(csvfile)
         csv_writer.writerows(formatted_data)
 
-def are_lists_mutually_exclusive(lists: List[List[Any]]):
-    return all(not set(lists[i]) & set(lists[j]) for i in range(len(lists)) for j in range(i + 1, len(lists)))
+def read_csv_up_to_row(file_path: str, row_index: int) -> List[Dict[str, Any]]:
+    """
+    Reads a CSV file up to a specified row index and returns the data as a list of dictionaries.
 
-def write_dict_to_csv(csv_lines,csv_fname):
+    Parameters:
+        file_path (str): The path to the CSV file.
+        row_index (int): The index of the last row to read (inclusive).
+
+    Returns:
+        list: A list of dictionaries representing the rows read from the CSV file.
+    """
+    rows = []
+    with open(file_path, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for i, row in enumerate(reader):
+            if i > row_index:
+                break
+            rows.append(dict(row))
+    return rows
+
+
+def write_dict_to_csv(csv_lines: List[Dict[str, Any]], csv_fname: str) -> None:
+    """
+        Writes a list of dictionaries to a csv file (in current directory)
+    """
     csv_fd = open(f"{csv_fname}.csv","w")
     writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
     writer.writeheader()
     for line in csv_lines:
         writer.writerow(line)
     csv_fd.close()
+
+
+def read_csv_to_list(csv_fname: str) -> List[Dict[str, Any]]:
+    """
+        Reads a csv file into a list of dictionaries
+    """
+    csv_fd = open(f"{csv_fname}","r")
+    reader = csv.DictReader(csv_fd)
+    csv_lines = []
+    for line in reader:
+        csv_lines.append(line)
+    csv_fd.close()
+    return csv_lines
+
+
+def compare_dataframe_row(df1: pd.DataFrame, df2: pd.DataFrame, row_index: int) -> pd.DataFrame:
+    # If we are comparing dataframes with similar but not the same keys (coffe ctrl vs test) we can use a regex to find the ctrl to compare the test against
+    
+    # Select the specified rows from both DataFrames
+    row1 = df1.loc[row_index]
+    row2 = df2.loc[row_index]
+    
+    # Initialize an empty dictionary to store the comparisons
+    comparisons = {}
+
+    # Iterate through the columns
+    # Assume that df1 has > cols than df2
+    # COFFE TODO remove below lines above for loop
+    params = [
+        "ble_outputs", 
+        "sb_mux",
+        "cb_load",
+        "sb_load",
+        "gen_routing",
+    ]
+    for column in df1.columns:
+        # for sb muxes TODO remove coffe specific stuff
+        value1 = row1[column]
+        if "general_ble_output_sb_mux_uid" in column:
+            col2_key = re.sub(r"_sb_mux_uid\d", "", column)
+            # col2_key = re.sub(r".*general_ble_output_sb_mux_uid\d.*", "general_ble_output", column)
+            # print("GEN BLE RE")
+        elif any(param in column for param in params):
+            col2_key = re.sub(r"_uid\d", "", column)
+            # print("UID REPLACE RE")
+        elif "general_ble_output_load" in column:
+            col2_key = re.sub(r"_load_uid\d", "", column)
+            # print("GEN BLE LOAD RE")
+        else:
+            col2_key = column
+        # print(f"Comparing {column} and {col2_key}")
+        value2 = row2[col2_key]
+
+        print(f"{column:<40} {value1:<40} -> {col2_key:<40} {value2:<40}")
+        # Check if the column values are numerical
+        if pd.api.types.is_numeric_dtype(df1[column]):
+            # Calculate the percentage difference for numerical columns
+            if pd.notna(value1) and pd.notna(value2):
+                percent_diff = ((value2 - value1) / value1) * 100
+                comparisons[column] = percent_diff
+            else:
+                # Handle cases where one or both values are missing
+                comparisons[column] = "Missing Values"
+        # elif pd.api.types.is_string_dtype(df1[column]):
+        #     if (value2 == value1):
+        #         comparisons[column] = "Different"
+        #     else
+        else:
+            # Mark string columns as different
+            if value1 != value2:
+                comparisons[column] = "Different"
+    
+    # Convert the comparisons dictionary into a DataFrame
+    comparison_df = pd.DataFrame.from_dict(comparisons, orient='index', columns=['Difference (%)'])
+    
+    return comparison_df
+
+
+def compare_dataframes(df1_name: str, df1: pd.DataFrame, df2_name: str, df2: pd.DataFrame):
+    # Ensure the dataframes have the same shape
+    # if df1.shape != df2.shape:
+    #     raise ValueError("Dataframes must have the same shape for comparison")
+
+    # Initialize an empty dataframe to store the comparisons
+    comparisons = pd.DataFrame(index=df1.index, columns=df1.columns)
+
+    params = [
+        "ble_outputs", 
+        "sb_mux",
+        "cb_load",
+        "sb_load",
+        "gen_routing",
+    ]
+    for column in df1.columns:
+        for row_id in df1.index:
+            value1 = df1.iloc[row_id].at[column]
+            value2 = df2.iloc[row_id].at[column]
+            # if pd.api.types.is_numeric_dtype(value1) and pd.api.types.is_numeric_dtype(value2):
+            if isinstance(value1, (float, int )) and isinstance(value2, (float, int)):
+                # Calculate the percentage difference for numerical columns
+                comparisons.iloc[row_id].at[column] = ((value2 - value1) / value1) * 100
+            elif not isinstance(value1, (float, int )) and isinstance(value2, (float, int)):
+                comparisons.iloc[row_id].at[column] = f"{df1_name} Missing"
+            elif isinstance(value1, (float, int )) and not isinstance(value2, (float, int )):
+                comparisons.iloc[row_id].at[column] = f"{df2_name} Missing"
+            else:
+                # Covering case where neither is numeric data type, could just be strings
+                if isinstance(value1, str) and isinstance(value2, str):
+                    if value1 != value2:
+                        comparisons.iloc[row_id].at[column] = f"{value1} != {value2}"
+                    else:
+                        comparisons.iloc[row_id].at[column] = value1
+                # If they are the same just keep the string value
 
 
 def check_for_valid_path(path):
@@ -1398,8 +1535,13 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
 
 
             elif asic_dse_conf["flow_mode"] == "hammer":
-                # search for conf tree below in our project_name dir
-                proj_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees(f"{asic_dse_conf['common'].project_name}.configs", is_hier_tag = True)[0] 
+                # TODO add global checking for valid paths all input args
+                # If we are in SRAM compiler mode, this means we are only running srams through the flow and thier configs should be at below path
+                if asic_dse_conf["sram_compiler"]:
+                    proj_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees("shared_resources.sram_lib.configs", is_hier_tag = True)[0] 
+                else:
+                    # search for conf tree below in our project_name dir
+                    proj_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees(f"{asic_dse_conf['common'].project_name}.configs", is_hier_tag = True)[0] 
                 # Before parsing asic flow config we should run them through pre processing to all input files
                 for idx, conf_path in enumerate(asic_dse_conf["flow_conf_paths"]):
                     asic_dse_conf["flow_conf_paths"][idx] = init_hammer_config(proj_conf_tree, conf_path)
@@ -1463,6 +1605,8 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 # Users can specify a specific obj directory
                 if asic_dse_conf["common"].manual_obj_dir != None:
                     obj_dir_path = os.path.realpath(os.path.expanduser(asic_dse_conf["common"].manual_obj_dir))
+                    # if this does not exist create it now
+                    os.makedirs(obj_dir_path, exist_ok = True)
                 # Or they can use the latest created obj dir
                 elif asic_dse_conf["common"].override_outputs:
                     if os.path.isdir(out_dir):

@@ -6,6 +6,8 @@ import math
 import pandas as pd
 import numpy as np
 
+import copy
+
 def truncate(f, n):
     '''Truncates/pads a float f to n decimal places without rounding'''
     s = '{}'.format(f)
@@ -81,8 +83,8 @@ def compile(hammer_tech_pdk_path: str, rw_ports: int, width: int, depth: int):
 
 
     # Get all values for num_w_macros and num_d_macros into numpy arrays
-    num_w_macros_arr = np.array([macro["num_w_macros"] for macro in macro_options])
-    num_d_macros_arr = np.array([macro["num_d_macros"] for macro in macro_options])
+    num_w_macros_arr = np.array([copy.deepcopy(macro["num_w_macros"]) for macro in macro_options])
+    num_d_macros_arr = np.array([copy.deepcopy(macro["num_d_macros"]) for macro in macro_options])
 
     for macro in macro_options:
         # We need to calculate max and mins to get the cost
@@ -99,7 +101,7 @@ def compile(hammer_tech_pdk_path: str, rw_ports: int, width: int, depth: int):
             "macro": macro["name"],
             "num_rw_ports": macro["ports"],
             "num_w_macros" : macro["num_w_macros"],
-            "num_d_macros": macro["num_w_macros"],
+            "num_d_macros": macro["num_d_macros"],
             "macro_w": macro["width"],
             "macro_d": macro["depth"],
             "depth": macro["depth"] * macro["num_d_macros"],
@@ -320,6 +322,8 @@ def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
     """ SRAM MACRO MOD DEFINITIONS"""
     macro_addr_w = int(math.log2(mapping_dict['macro_d']))
 
+    equal_map_macro_depth = (macro_addr_w == mapped_addr_w)
+
     # defines the header for the sram mapped module
     sram_map_port_lines = []
     for i in range(1,mapping_dict["num_rw_ports"]+1,1):
@@ -390,6 +394,7 @@ def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
                     f"wire mem_{x_coord}_{y_coord}_{i}_cs;",
                 ]
                 rdata_signal_lists[i-1].append(f"mem_{x_coord}_{y_coord}_{i}_rdata")
+                chip_select_line = f"assign mem_{x_coord}_{y_coord}_{i}_cs = cs_bits_{i}[{y_coord}];" if not equal_map_macro_depth else f"assign mem_{x_coord}_{y_coord}_{i}_cs = ~reg_en_{i};"
                 # Assign the bottom lsbs of address to all macro addresses
                 inst_signal_assigns_lines += [
                     f"assign mem_{x_coord}_{y_coord}_{i}_addr = reg_addr_{i}[{macro_addr_w}-1:0];",
@@ -398,7 +403,7 @@ def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
                     f"assign mem_{x_coord}_{y_coord}_{i}_wdata = reg_wdata_{i}[({mapping_dict['macro_w']}*{mapping_dict['num_w_macros']-x_coord}-1)-:{mapping_dict['macro_w']}];",
                     f"assign mem_{x_coord}_{y_coord}_{i}_we = ~(reg_mode_{i} & reg_en_{i});",
                     f"assign mem_{x_coord}_{y_coord}_{i}_re = ~(~reg_mode_{i} & reg_en_{i});",
-                    f"assign mem_{x_coord}_{y_coord}_{i}_cs = ~reg_en_{i};",
+                    chip_select_line,
                 ]
                 sram_port_lines += [
                     f"      .CE{i}(clk),",
@@ -435,6 +440,8 @@ def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
     mux_isnt_lines = []
     dec_signal_insts_lines = []
     dec_inst_lines = []
+    # Concat word read out
+    rd_concat_lines = []
     sram_map_reg_lines = []
     sram_map_ff_reg_lines = [
         f"always_ff @(posedge clk) begin",
@@ -459,7 +466,7 @@ def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
         ]
         dec_inst_lines += [
             f"cs_decoder_{mapped_addr_w-macro_addr_w}_to_{mapping_dict['num_d_macros']} u_cs_decoder_{i} (",
-            f"   .in(reg_addr_{i}[{mapped_addr_w}-1:{mapped_addr_w-1-(mapped_addr_w-macro_addr_w)}]),",
+            f"   .in(reg_addr_{i}[{mapped_addr_w}-1:{mapped_addr_w-(mapped_addr_w-macro_addr_w)}]),",
             f"   .out(cs_bits_{i})",
             f");",
         ]
@@ -471,11 +478,15 @@ def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
             f"assign mux_in_{i}[{j}] = {{{','.join(rdata_signal_lists[i-1][j*mapping_dict['num_w_macros']:(j+1)*mapping_dict['num_w_macros']])}}};"
             for j in range(len(rdata_signal_lists[i-1])//mapping_dict['num_w_macros'])
         ]
+        # Only need these if no mux exists in design
+        rd_concat_lines += [
+            f"assign reg_rdata_{i} = {{{','.join(rdata_signal_lists[i-1][0:mapping_dict['num_w_macros']])}}};"
+        ]
 
         # We need a N to 1 mux of size width
         mux_isnt_lines += [
             f"mux #(.N({mapped_addr_w-macro_addr_w})) u_mux_{i}_{mapping_dict['num_d_macros']}_to_1 (",
-            f"   .select(cs_bits_{i}),",
+            f"   .select(reg_addr_{i}[{mapped_addr_w}-1:{mapped_addr_w-(mapped_addr_w-macro_addr_w)}]),",
             f"   .in (mux_in_{i}),",
             f"   .out(reg_rdata_{i})",
             f");",
@@ -488,21 +499,28 @@ def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
     # Module Ports and Header Instantiation
     for l in sram_map_mod_lines:
         print(l,file=out_fd)
+    # Decoder Signal Instantiation (will be synthesized out if not used)
+    for l in dec_signal_insts_lines:
+        print(l,file=out_fd)
     # Register Signal Instantation
     for l in sram_map_reg_lines + sram_map_ff_reg_lines:
         print(l,file=out_fd)
     # Macro Instantiation
     for l in sram_macro_insts_lines:
         print(l,file=out_fd)
-    # Decoder Signal Instantiation
-    for l in dec_signal_insts_lines:
-        print(l,file=out_fd)
-    # Decoder Instantiation
-    for l in dec_inst_lines:
-        print(l,file=out_fd)
-    # Mux Instantiation
-    for l in mux_signal_insts_lines + mux_signal_assign_lines + mux_isnt_lines:
-        print(l,file=out_fd)
+    # Only instantiate decoders + muxes if there is a depth adjustment
+    if not equal_map_macro_depth:
+        # Decoder Instantiation
+        for l in dec_inst_lines:
+            print(l,file=out_fd)
+        # Mux Instantiation
+        for l in mux_signal_insts_lines + mux_signal_assign_lines + mux_isnt_lines:
+            print(l,file=out_fd)
+    else:
+        # If we are stitching only word width we just concat the output
+        for l in rd_concat_lines:
+            print(l,file=out_fd)
+
     print("endmodule",file=out_fd)
     # Mux + Decoder Module Definitions
     for l in two_to_N_mux_mod_lines + cs_dec_mod_lines:

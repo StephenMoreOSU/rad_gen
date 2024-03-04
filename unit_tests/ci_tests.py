@@ -259,21 +259,22 @@ class TestSuite:
             #  \__ \   / / _ \| |\/| | \__ \| || .` | (_ | |__| _|  | |\/| |/ _ \ (__|   / (_) |
             #  |___/_|_\/_/ \_\_|  |_| |___/___|_|\_|\___|____|___| |_|  |_/_/ \_\___|_|_\\___/ 
                                                                                   
-            sram_config = os.path.expanduser(f"{self.asic_dse_inputs}/sram/configs/sram_SRAM2RW128x32.yaml")
-            top_lvl_mod = "sram_wrapper"
+            sram_config = os.path.expanduser(f"{self.rad_gen_home}/shared_resources/sram_lib/configs/gen/sram_SRAM2RW128x32.json")
+            top_lvl_mod = "SRAM2RW128x32_wrapper"
             alu_asic_flow_args = AsicDseArgs(
                 # top_config_path = self.top_config_path,
-                tool_env_conf_path = tool_env_conf_path,
-                flow_config_paths = self.sys_configs + [sram_config],
-                manual_obj_dir = os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
+                tool_env_conf_paths = [tool_env_conf_path],
+                flow_conf_paths = self.sys_configs + [sram_config],
                 sram_compiler = True,
                 # Top level module Is used for logging so we don't want to pass to cli (the correct top level and other configs will be generated from previous test)
                 top_lvl_module = top_lvl_mod,
             )
             single_sram_macro_test = RadGenArgs(
-               subtools = ["asic_dse"],
-               subtool_args = alu_asic_flow_args,
-               no_use_arg_list = ["top_lvl_module"],
+                project_name = "sram",
+                subtools = ["asic_dse"],
+                manual_obj_dir = os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
+                subtool_args = alu_asic_flow_args,
+                no_use_arg_list = ["top_lvl_module"],
             )
             single_sram_macro_test = Test(rad_gen_args=single_sram_macro_test, test_name="sram_single_macro_hammer_flow")
             self.sram_tests.append(single_sram_macro_test)
@@ -284,17 +285,18 @@ class TestSuite:
             #  |___/_|_\/_/ \_\_|  |_| |___/ |_| |___| |_| \___|_||_|___|___/  |_|  |_/_/ \_\___|_|_\\___/ 
 
             top_lvl_mod = "sram_macro_map_2x256x64"
-            sram_compiled_macro_config = os.path.expanduser(f"{self.asic_dse_inputs}/sram/configs/compiler_outputs/sram_config__sram_macro_map_2x256x64.yaml" )
+            sram_compiled_macro_config = os.path.expanduser(f"{self.rad_gen_home}/shared_resources/sram_lib/configs/gen/sram_config__sram_macro_map_2x256x64.json")
             asic_dse_args = AsicDseArgs(
-                tool_env_conf_path = tool_env_conf_path,
-                flow_config_paths = self.sys_configs + [sram_compiled_macro_config],
-                manual_obj_dir = os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
+                tool_env_conf_paths = [tool_env_conf_path],
+                flow_conf_paths = self.sys_configs + [sram_compiled_macro_config],
                 sram_compiler = True,
                 top_lvl_module = top_lvl_mod,
             )
             sram_compiled_macro_test = RadGenArgs(
                 # top_config_path=self.top_config_path,
+                project_name = "sram",
                 subtools = ["asic_dse"],
+                manual_obj_dir = os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
                 subtool_args = asic_dse_args,
                 no_use_arg_list = ["top_lvl_module"],
             )
@@ -382,7 +384,7 @@ class TestSuite:
                 delay_opt_weight = 2
             )
             coffe_7nm_hb_test = RadGenArgs(
-                top_config_path = self.top_config_path,
+                # top_config_path = self.top_config_path,
                 subtools = ["coffe"],
                 subtool_args = coffe_cli_args,
             )
@@ -722,7 +724,7 @@ def main():
     #     run_tests(args, test_suite.rad_gen_home, test_suite.config_parse_init_tests, "config_parse_init", golden_ref_path = test_suite.golden_ref_path)
 
     # and not args.buff_dse_modeling
-    run_all = True if not args.asic_dse and not args.coffe and not args.ic_3d else False
+    run_all = True if not args.asic_dse and not args.coffe and not args.ic_3d and not args.alu and not args.noc else False
 
     # ASIC DSE SWEEP TESTS
     if args.asic_dse_sweeps:
@@ -754,7 +756,7 @@ def main():
     #     print("Running NoC tests\n")
     #     run_tests(args, test_suite.rad_gen_home, test_suite.noc_tests, "asic_dse")
 
-    if run_all or args.coffe:
+    if args.coffe:
         print("Running COFFE tests\n")
         run_tests(args, test_suite.rad_gen_home, test_suite.coffe_tests, "coffe")
     
@@ -762,7 +764,7 @@ def main():
     #     print("Running PDN modeling tests\n")
     #     run_tests(args, test_suite.rad_gen_home, test_suite.pdn_tests, "ic_3d")
         
-    if run_all or args.ic_3d:
+    if args.ic_3d:
         print("Running Buffer DSE tests\n")
         run_tests(args, test_suite.rad_gen_home, test_suite.buff_dse_tests, "ic_3d")
 

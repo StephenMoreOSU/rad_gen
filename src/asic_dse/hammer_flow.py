@@ -70,6 +70,10 @@ def write_pt_sdc(hammer_driver: HammerDriver):
         raise ValueError("Clock period units not recognized: us, ns, ps are supported")
     
     clk_period_ps = float(dec_re.search(period).group(0)) * clock_fac
+    if clk_period_ps == 0:
+        # Just make the clock period 1 ps if we are targeting fastest possible clk freq
+        clk_period_ps = 1
+
     # TODO below could change to timing.inputs.clocks if there is a change between those stages 
     clk_pin = hammer_driver.database.get_setting("vlsi.inputs.clocks")[0]["name"]
     file_lines = [
@@ -116,15 +120,17 @@ def write_pt_power_script(asic_dse: rg_ds.AsicDSE):
     db_dirs =  [os.path.join(asic_dse.common.rad_gen_home_path,db_lib) for db_lib in asic_dse.common_asic_flow.db_libs ]
     
     # Use FF corner for worst case power
-    corners = ["FF"]
-    tx_types = ["SLVT", "LVT"]
+    corners = ["SS", "TT", "FF"]
+    tx_types = ["SLVT", "LVT", "RVT"]
+    if asic_dse.asic_flow_settings.run_sram:
+        tx_types += ["SRAM"]
     filt_strs = [f"{tx_type}_{corner}" for corner in corners for tx_type in tx_types]
     target_libs = " ".join([
         os.path.join(db_dir, lib)\
         for db_dir in db_dirs\
         for lib in os.listdir(db_dir)\
         for filt_str in filt_strs\
-        if lib.endswith(".db") and filt_str in lib
+        if lib.endswith(".db") and ( (filt_str in lib) or ("SRAM" in lib and "sram" in db_dir) )
     ])
     
     #default switching probability (TODO) find where this is and make it come from there
@@ -214,21 +220,22 @@ def write_pt_timing_script(asic_dse: rg_ds.AsicDSE):
     
     db_dirs =  [os.path.join(asic_dse.common.rad_gen_home_path, db_lib) for db_lib in asic_dse.common_asic_flow.db_libs ]
 
-
     # corner options are ["SS", "TT", "FF"]
     # tx_type options are ["SLVT", "LVT", "RVT", "SRAM"] in order of decreasing drive strength
 
     # Designs are made up of SLVT and LVT if not including SRAMs
     # Using SS corner to show worst case timing
-    corners = ["SS"]
-    tx_types = ["SLVT", "LVT"]
+    corners = ["SS", "TT", "FF"]
+    tx_types = ["SLVT", "LVT", "RVT"]
+    if asic_dse.asic_flow_settings.run_sram:
+        tx_types += ["SRAM"]
     filt_strs = [f"{tx_type}_{corner}" for corner in corners for tx_type in tx_types]
     target_libs = " ".join([
         os.path.join(db_dir, lib)\
         for db_dir in db_dirs\
         for lib in os.listdir(db_dir)\
         for filt_str in filt_strs\
-        if lib.endswith(".db") and filt_str in lib
+        if lib.endswith(".db") and ( (filt_str in lib) or ("SRAM" in lib and "sram" in db_dir) )
     ]) 
     
     # report timing / power commands
@@ -262,8 +269,8 @@ def write_pt_timing_script(asic_dse: rg_ds.AsicDSE):
         "link",
         #set clock constraints (this can be done by defining a clock or specifying an .sdc file)
         f"read_sdc -echo {pt_outpath}/pt.sdc",
-        "check_timing -verbose > " + os.path.join(unparse_report_path,'check_timing.rpt'),
         "update_timing -full",
+        "check_timing -verbose > " + os.path.join(unparse_report_path,'check_timing.rpt'),
         #read constraints file
         *report_timing_cmds,
         "quit",
@@ -913,7 +920,8 @@ def sram_sweep_gen(asic_dse: rg_ds.AsicDSE, design_id: int):
                 
                 """ MODIFIYING SRAM RTL"""
                 # Get just the filename of the sram sv file and append the new sram dimensions to it
-                mod_rtl_fname = os.path.splitext(os.path.basename(cur_design.type_info.sram_rtl_template_fpath))[0] + f'_{mod_mem_params[0]["name"]}.sv'
+                # os.path.basename(cur_design.type_info.sram_rtl_template_fpath)
+                mod_rtl_fname = f'{mod_mem_params[0]["name"]}_wrapper.sv'
 
                 # Modify the parameters for SRAM_ADDR_W and SRAM_DATA_W and create a copy of the base sram 
                 # TODO find a better way to do this rather than just creating a ton of files, the only thing I'm changing are 2 parameters in rtl
@@ -946,7 +954,7 @@ def sram_sweep_gen(asic_dse: rg_ds.AsicDSE, design_id: int):
                 # Edit the name of the top level wrapper module to reflect the new macro instantiated in it
                 # regex does positive lookbehind for "module", then non capturing groups for leading/trailing wspace, then positive lookahead for "#(", ie should only match the "sram_wrapper"
                 edit_wrapper_module_name_re = re.compile(r"(?<=module)(?:\s+)sram_wrapper(?:\s+)(?=\#\()")
-                mod_sram_rtl = edit_wrapper_module_name_re.sub(f'{mod_mem_params[0]["name"]}_wrapper',mod_sram_rtl)
+                mod_sram_rtl = edit_wrapper_module_name_re.sub(f' {mod_mem_params[0]["name"]}_wrapper ',mod_sram_rtl)
 
                 # 
                 # base_rtl_dir = os.path.split(cur_design.type_info.base_rtl_path)[0]
@@ -997,9 +1005,10 @@ def sram_sweep_gen(asic_dse: rg_ds.AsicDSE, design_id: int):
                     # Setting HDL search paths
                     # Setting SRAM parameters to the ones we just created
                 # Find design files in newly created rtl dir
-                design_files, design_dirs = rg_utils.rec_get_flist_of_ext(asic_dse.sram_compiler_settings.rtl_out_dpath, ['.v','.sv','.vhd',".vhdl"])
-                mod_base_config["synthesis.inputs.input_files"] = design_files
-                mod_base_config["synthesis.inputs.hdl_search_paths"] = design_dirs
+                # design_files, design_dirs = rg_utils.rec_get_flist_of_ext(asic_dse.sram_compiler_settings.rtl_out_dpath, ['.v','.sv','.vhd',".vhdl"])
+                mod_base_config["synthesis.inputs.top_module"] = f"{mod_mem_params[0]['name']}_wrapper"
+                mod_base_config["synthesis.inputs.input_files"] = [modified_sram_rtl_path]
+                mod_base_config["synthesis.inputs.hdl_search_paths"] = asic_dse.sram_compiler_settings.rtl_out_dpath
                 mod_base_config["vlsi.inputs.sram_parameters"] = mem_params_fpath #os.path.splitext(base_config["vlsi.inputs.sram_parameters"])[0] + f'_{mod_mem_params[0]["name"]}.json'
                 # Write the modified base_config file to a new file
                 mod_flow_conf_fpath = os.path.join(
