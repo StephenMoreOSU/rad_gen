@@ -70,7 +70,11 @@ def get_eval_delay(fpga_inst, opt_type, subcircuit, tfall, trise, low_voltage, i
 		
 		path_delay = 0
 		
-		# Switch block
+		# Switch block(s)
+		for sb_mux in fpga_inst.sb_muxes:
+			sb_mux_ipin_freq_ratio = sb_mux.num_per_tile * sb_mux.required_size / sum([sb_mux.num_per_tile * sb_mux.required_size for sb_mux in fpga_inst.sb_muxes])
+			path_delay += sb_mux.delay * sb_mux.delay_weight * sb_mux_ipin_freq_ratio
+
 		path_delay += fpga_inst.sb_mux.delay*fpga_inst.sb_mux.delay_weight
 		# Connection block
 		path_delay += fpga_inst.cb_mux.delay*fpga_inst.cb_mux.delay_weight

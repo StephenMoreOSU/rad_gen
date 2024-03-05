@@ -137,22 +137,26 @@ class _SwitchBlockMUX(_SizableCircuit):
             []
         )
 
+        inv_names = [
+            f"inv_{self.name}_1",
+            f"inv_{self.name}_2",
+        ]
         # Get parameterized inst names from above function and manually add the nodes we want to measure from at the end
         meas_inv_sb_mux_1_in_node: str = ".".join([inst.name for inst in meas_inv_sb_mux_1_inst_path[:-1]] + ["n_in"])
         meas_inv_sb_mux_1_drv_out_node: str = ".".join([inst.name for inst in meas_inv_sb_mux_1_inst_path] + ["n_1_1"])
         meas_inv_sb_mux_1_lines: List[str] = [
             "* inv_sb_mux_1 delays",
-            f".MEASURE TRAN meas_inv_sb_mux_1_tfall TRIG V({meas_inv_sb_mux_1_in_node}) VAL='supply_v/2' RISE=1",
+            f".MEASURE TRAN meas_{inv_names[0]}_tfall TRIG V({meas_inv_sb_mux_1_in_node}) VAL='supply_v/2' RISE=1",
             f"+    TARG V({meas_inv_sb_mux_1_drv_out_node}) VAL='supply_v/2' FALL=1",
-            f".MEASURE TRAN meas_inv_sb_mux_1_trise TRIG V({meas_inv_sb_mux_1_in_node}) VAL='supply_v/2' FALL=1",
+            f".MEASURE TRAN meas_{inv_names[0]}_trise TRIG V({meas_inv_sb_mux_1_in_node}) VAL='supply_v/2' FALL=1",
             f"+    TARG V({meas_inv_sb_mux_1_drv_out_node}) VAL='supply_v/2' RISE=1\n",
         ]
         meas_inv_sb_mux_2_in_node: str = ".".join([inst.name for inst in meas_inv_sb_mux_2_inst_path] + ["n_in"])
         meas_inv_sb_mux_2_lines: List[str] = [
             "* inv_sb_mux_2 delays",
-            f".MEASURE TRAN meas_inv_sb_mux_2_tfall TRIG V({meas_inv_sb_mux_1_in_node}) VAL='supply_v/2' FALL=1",
+            f".MEASURE TRAN meas_{inv_names[1]}_tfall TRIG V({meas_inv_sb_mux_1_in_node}) VAL='supply_v/2' FALL=1",
             f"+    TARG V({meas_inv_sb_mux_2_in_node}) VAL='supply_v/2' FALL=1",
-            f".MEASURE TRAN meas_inv_sb_mux_2_trise TRIG V({meas_inv_sb_mux_1_in_node}) VAL='supply_v/2' RISE=1",
+            f".MEASURE TRAN meas_{inv_names[1]}_trise TRIG V({meas_inv_sb_mux_1_in_node}) VAL='supply_v/2' RISE=1",
             f"+    TARG V({meas_inv_sb_mux_2_in_node}) VAL='supply_v/2' RISE=1\n",
         ]
         meas_total_delays_lines: List[str] = [

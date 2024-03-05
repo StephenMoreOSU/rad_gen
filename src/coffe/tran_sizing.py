@@ -509,9 +509,10 @@ def get_current_delay(fpga_inst, is_ram_component):
 		
 	# Switch block
 	sb_mux: switch_block_mux._SwitchBlockMUX
+	# To calculate delay we assume that the number of muxes * their size is the frequency the path will be taken 
 	for sb_mux in fpga_inst.sb_muxes:
-		sb_mux_freq_ratio = sb_mux.num_per_tile / sum([sb_mux.num_per_tile for sb_mux in fpga_inst.sb_muxes])
-		path_delay += fpga_inst.sb_mux.delay * fpga_inst.sb_mux.delay_weight * sb_mux_freq_ratio
+		sb_mux_ipin_freq_ratio = sb_mux.num_per_tile * sb_mux.required_size / sum([sb_mux.num_per_tile * sb_mux.required_size for sb_mux in fpga_inst.sb_muxes])
+		path_delay += sb_mux.delay * sb_mux.delay_weight * sb_mux_ipin_freq_ratio
 	# Connection block
 	path_delay += fpga_inst.cb_mux.delay*fpga_inst.cb_mux.delay_weight
 	# Local mux
@@ -630,9 +631,10 @@ def get_final_delay(fpga_inst, opt_type, subcircuit, tfall, trise, is_ram_compon
 		
 		# Switch block
 		sb_mux: switch_block_mux._SwitchBlockMUX
+		# To calculate delay we assume that the number of muxes * their size is the frequency the path will be taken 
 		for sb_mux in fpga_inst.sb_muxes:
-			sb_mux_freq_ratio = sb_mux.num_per_tile / sum([sb_mux.num_per_tile for sb_mux in fpga_inst.sb_muxes])
-			path_delay += fpga_inst.sb_mux.delay * fpga_inst.sb_mux.delay_weight * sb_mux_freq_ratio
+			sb_mux_ipin_freq_ratio = sb_mux.num_per_tile * sb_mux.required_size / sum([sb_mux.num_per_tile * sb_mux.required_size for sb_mux in fpga_inst.sb_muxes])
+			path_delay += sb_mux.delay * sb_mux.delay_weight * sb_mux_ipin_freq_ratio
 		# Connection block
 		path_delay += fpga_inst.cb_mux.delay*fpga_inst.cb_mux.delay_weight
 		# Local mux

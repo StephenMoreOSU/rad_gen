@@ -75,7 +75,7 @@ import src.common.utils as rg_utils
 
 import src.common.spice_parser as sp_parser
 
-
+from collections import OrderedDict
 
 # ASIC DSE imports
 import src.asic_dse.asic_dse as asic_dse
@@ -5433,36 +5433,45 @@ class _hard_block(_CompoundCircuit):
         #    self.dedicated.print_details(report_file)
 
 
-def get_current_stack_trace() -> str:
+def get_current_stack_trace(max_height: int = None) -> str:
     stack = traceback.extract_stack()
-    return '/'.join([f.name for f in stack])  # Exclude the current function call itself
+    if max_height is not None:
+        # Take last N function calls from the bottom to top of call stack
+        fn_calls = [f.name for f in stack]
+        fn_calls = fn_calls[-(max_height+1):-1]
+    return '/'.join(fn_calls)  # Exclude the current function call itself
 
-def update_fpga_telemetry_csv(fpga_inst: 'FPGA', tag):
-	""" Update the FPGA telemetry CSV file with the current FPGA telemetry, Create CSV if it doesnt exist """
-	
-	out_catagories = {
-		"wire_length": fpga_inst.wire_lengths,
-		"area": fpga_inst.area_dict,
-		"tx_size": fpga_inst.transistor_sizes,
-		"delay": fpga_inst.delay_dict
-	}
-	# Check to see if any repeating keys in any of these dicts
-	# if not set(fpga_inst.wire_lengths.keys()) & set(fpga_inst.area_dict.keys()) fpga_inst.transistor_sizes.keys()
+def update_fpga_telemetry_csv(fpga_inst: 'FPGA', tag:str, exclusive_cat: str = None):
+    """ Update the FPGA telemetry CSV file with the current FPGA telemetry, Create CSV if it doesnt exist """
 
 
-	# Write a CSV for each catagory of information we want to track
-	for cat_k, cat_v in out_catagories.items():
-		row_data = { "TAG": tag, "AREA_UPDATE_ITER": fpga_inst.update_area_cnt, "WIRE_UPDATE_ITER": fpga_inst.update_wires_cnt, "DELAY_UPDATE_ITER": fpga_inst.update_delays_cnt, "COMPUTE_DISTANCE_ITER": fpga_inst.compute_distance_cnt, **cat_v}
-		# Open the CSV file
-		with open(f"{cat_k}_debug.csv", "a") as csv_file:
-			header = list(row_data.keys())
-			writer = csv.DictWriter(csv_file, fieldnames = header)
-		
-			# Check if the file is empty and write header if needed
-			if csv_file.tell() == 0:
-				writer.writeheader()
+    out_catagories = {
+        "wire_length": fpga_inst.wire_lengths,
+        "area": fpga_inst.area_dict,
+        "tx_size": fpga_inst.transistor_sizes,
+        "delay": fpga_inst.delay_dict
+    }
+    # Make sure these keys are same ones in FPGA object
+    assert set(list(out_catagories.keys())) == set(fpga_inst.log_out_catagories)
 
-			writer.writerow(row_data)
+    # Check to see if any repeating keys in any of these dicts
+    # if not set(fpga_inst.wire_lengths.keys()) & set(fpga_inst.area_dict.keys()) fpga_inst.transistor_sizes.keys()
+    # Write a CSV for each catagory of information we want to track
+    for cat_k, cat_v in out_catagories.items():
+        # cat_sorted_keys = list(cat_v.keys()).sort()
+        # sorted_cat = {k: cat_v[k] for k in cat_sorted_keys}
+        if not cat_v or (exclusive_cat and cat_k != exclusive_cat): 
+            continue
+        sorted_cat = OrderedDict(sorted(cat_v.items())) 
+        row_data = { "TAG": tag, "AREA_UPDATE_ITER": fpga_inst.update_area_cnt, "WIRE_UPDATE_ITER": fpga_inst.update_wires_cnt, "DELAY_UPDATE_ITER": fpga_inst.update_delays_cnt, "COMPUTE_DISTANCE_ITER": fpga_inst.compute_distance_cnt, **sorted_cat}
+        # Open the CSV file
+        with open(f"{cat_k}_debug.csv", "a") as csv_file:
+            header = list(row_data.keys())
+            writer = csv.DictWriter(csv_file, fieldnames = header)
+            # Check if the file is empty and write header if needed
+            if csv_file.tell() == 0:
+                writer.writeheader()
+            writer.writerow(row_data)
 
 
 
@@ -5482,6 +5491,13 @@ class FPGA:
         self.update_wires_cnt = 0
         self.compute_distance_cnt = 0
         self.update_delays_cnt = 0
+
+        self.log_out_catagories: List[str] = [
+            "wire_length",
+            "area",
+            "tx_size",
+            "delay",
+        ]
 
         # Stuff for multi wire length support
         # self.num_sb_muxes_per_tile = 0
@@ -5507,13 +5523,6 @@ class FPGA:
 
         # Initialize the specs
         self.specs = _Specs(coffe_info.fpga_arch_conf["fpga_arch_params"], run_options.quick_mode)
-
-        # data structure to store per wire information 
-        self.fpga_per_wire_data = { wire["id"]: 
-                {
-                    "num_sbs": 0
-                } for wire in self.specs.wire_types
-        }
 
 
         # From specs init
@@ -5917,6 +5926,11 @@ class FPGA:
         # |                         |                               |                     |
         # ---------------------------------------------------------------------------------
     
+        # For our logging files we want to clear them on the invocation of COFFE in the arch_out_folder
+        # Create empty file
+        for cat_k in self.log_out_catagories:
+            fd = open(f"{cat_k}_debug.csv", "w")
+            fd.close()
         
         # Generate basic subcircuit library (pass-transistor, inverter, wire, etc.).
         # This library will be used to build other netlists.
@@ -6082,10 +6096,8 @@ class FPGA:
         # Call area calculation functions of sub-blocks
         for sb_mux in self.sb_muxes:
             sb_mux.update_area(self.area_dict, self.width_dict)
-
         # Connection Block Mux
         self.cb_mux.update_area(self.area_dict, self.width_dict)
-        
         # Logic Cluster Mux
         self.logic_cluster.update_area(self.area_dict, self.width_dict)
 
@@ -6100,18 +6112,19 @@ class FPGA:
         # Calculate total area of switch block
         switch_block_area = 0
         switch_block_area_no_sram = 0
-        # weighted avg area of switch blocks based on percentage of tracks, used this for calculations looking for a single SB mux area value
-        # Seems better to provide a weighted avg corresponding to percentage of tracks used for a particular SB Mux
         switch_block_avg_area = 0
-
+        # weighted avg area of switch blocks based on percentage of SB mux occurances
         # Add up areas of all switch blocks of all types
         for i, sb_mux in enumerate(self.sb_muxes):
             # For weighted average use the number of tracks per wire length corresponding SB / total tracks as the weight 
-            switch_block_avg_area += (sb_mux.num_per_tile) * self.area_dict[sb_mux.name + "_sram"] / sum([sb_mux.num_per_tile * self.area_dict[sb_mux.name + "_sram"] for sb_mux in self.sb_muxes])
+            # Weight Factor * SB Mux Area w/ SRAM
+            switch_block_avg_area += ((sb_mux.num_per_tile) / sum([sb_mux.num_per_tile for sb_mux in self.sb_muxes])) * self.area_dict[sb_mux.name]
             switch_block_area += sb_mux.num_per_tile * self.area_dict[sb_mux.name + "_sram"]
             switch_block_area_no_sram += sb_mux.num_per_tile * self.area_dict[sb_mux.name]
 
-        self.area_dict["sb_mux_avg"] = switch_block_avg_area 
+        # SB should never have area of 0 after this point
+        assert switch_block_area != 0 and switch_block_area_no_sram != 0 and switch_block_avg_area != 0, "Switch block area is 0, error in SB area calculation"
+        self.area_dict["sb_mux_avg"] = switch_block_avg_area # avg_sb_mux area with NO SRAM 
         self.area_dict["sb_total_no_sram"] = switch_block_area_no_sram
         self.area_dict["sb_total"] = switch_block_area
         self.width_dict["sb_total"] = math.sqrt(switch_block_area)
@@ -6185,6 +6198,13 @@ class FPGA:
             if self.specs.enable_carry_chain == 1:
                 cluster_area += self.area_dict["carry_chain_inter"]
 
+            # Init these here to keep our csv dimensions consistent
+            self.area_dict["cc_area_total"] = 0
+            self.width_dict["cc_area_total"] = 0
+
+            self.area_dict["ffableout_area_total"] = 0
+            self.width_dict["ffableout_area_total"] = 0
+
         else:
 
             # lets do it assuming a given order for the wire updates and no minimum width on sram size.
@@ -6244,8 +6264,8 @@ class FPGA:
             self.area_dict["lut_total"] = lut_area + self.specs.N * (2**self.specs.K) * self.area_dict["sram"]
             self.width_dict["lut_total"] = math.sqrt(lut_area + self.specs.N * (2**self.specs.K) * self.area_dict["sram"])
 
-            # self.area_dict["ff_total"] = ff_total_area #self.specs.N*self.area_dict[self.logic_cluster.ble.ff.name]
-            # self.width_dict["ff_total"] = math.sqrt(ff_total_area) #math.sqrt(self.specs.N*self.area_dict[self.logic_cluster.ble.ff.name])
+            self.area_dict["ff_total"] = self.specs.N * self.area_dict[self.logic_cluster.ble.ff.name]
+            self.width_dict["ff_total"] = math.sqrt(self.specs.N * self.area_dict[self.logic_cluster.ble.ff.name])
 
             self.area_dict["ffableout_area_total"] = ffableout_area_total
             self.width_dict["ffableout_area_total"] = math.sqrt(ffableout_area_total)
@@ -6702,7 +6722,7 @@ class FPGA:
             self.wire_rc_dict[wire] = (resistance, capacitance)    
 
         # Debug print, this update function is almost always called after update_area and update_wires 
-        update_fpga_telemetry_csv(self, get_current_stack_trace())
+        update_fpga_telemetry_csv(self, get_current_stack_trace(max_height=5))
 
 
     #TODO: break this into different functions or form a loop out of it; it's too long
@@ -6756,8 +6776,8 @@ class FPGA:
             # sb_mux.avg_crit_path_delay += sb_mux.delay * sb_mux.delay_weight
 
             # Weighted average depending on how often we would encounter these switch blocks
-            sb_mux_freq_ratio = sb_mux.num_per_tile / sum([sb_mux.num_per_tile for sb_mux in self.sb_muxes])
-            crit_path_delay += sb_mux.delay * sb_mux.delay_weight * sb_mux_freq_ratio
+            sb_mux_ipin_freq_ratio = (sb_mux.num_per_tile * sb_mux.required_size) / sum([sb_mux.num_per_tile * sb_mux.required_size for sb_mux in self.sb_muxes])
+            crit_path_delay += sb_mux.delay * sb_mux.delay_weight * sb_mux_ipin_freq_ratio
             # append to FPGA delay
             self.delay_dict[sb_mux.name] = sb_mux.delay 
             sb_mux.power = float(spice_meas["meas_avg_power"][0])
@@ -7152,6 +7172,9 @@ class FPGA:
 
         # If there is no need for memory simulation, end here.
         if self.specs.enable_bram_block == 0:
+            # Delay Logging
+            self.update_delays_cnt += 1
+            update_fpga_telemetry_csv(self, get_current_stack_trace(max_height=5))
             return valid_delay
         # Local RAM MUX
         print("  Updating delay for " + self.RAM.RAM_local_mux.name)
@@ -7541,9 +7564,10 @@ class FPGA:
         if self.RAM.wordlinedriver.wl_repeater == 1:
             self.RAM.wordlinedriver.power *=2
 
+        # TODO put delay logging here for BRAM support
         # Delay Logging
         self.update_delays_cnt += 1
-
+        update_fpga_telemetry_csv(self, get_current_stack_trace(max_height=5))
         return valid_delay
 
 
