@@ -66,6 +66,7 @@ class TestSuite:
 
     # IC 3D TESTS
     buff_dse_tests: List[Test] = None
+    buff_sens_tests: List[Test] = None
     pdn_tests: List[Test] = None
     ic_3d_tests: List[Test] = None
 
@@ -420,15 +421,27 @@ class TestSuite:
             ic_3d_cli_args = IC3DArgs(
                 input_config_path = input_config,
                 buffer_dse = True,
-                use_latest_obj_dir = True
             )
             buffer_dse_test = RadGenArgs(
                 subtools = ["ic_3d"],
                 subtool_args = ic_3d_cli_args,
+                override_outputs = True,
             )
             buffer_dse_test = Test(rad_gen_args=buffer_dse_test, test_name="buffer_dse")
             self.buff_dse_tests.append(buffer_dse_test)
-            
+        
+        if self.buff_sens_tests is None:
+            self.buff_sens_tests = []
+            ic_3d_cli_args = IC3DArgs(
+                input_config_path = input_config,
+                buffer_sens_study = True,
+            )
+            buffer_sens_test = RadGenArgs(
+                subtools = ["ic_3d"],
+                subtool_args = ic_3d_cli_args,
+                override_outputs = True,
+            )
+            self.buff_sens_tests.append(Test(rad_gen_args = buffer_sens_test, test_name = "buff_sens_study"))
             # Sensitivity Study Test
             # ic_3d_cli_args = rg_ds.Ic3dCLI(
             #     input_config_path = input_config,
@@ -596,9 +609,10 @@ def parse_args() -> argparse.Namespace:
     top_lvl_parser.add_argument("-alu", "--alu",  help="Run ALU tests", action='store_true')
     top_lvl_parser.add_argument("-sram", "--sram",  help="Run SRAM tests", action='store_true')
     top_lvl_parser.add_argument("-noc", "--noc",  help="Run NoC tests", action='store_true')
-    top_lvl_parser.add_argument_group("Subtool Tests", "Select which subtool tests to run")
+    # top_lvl_parser.add_argument_group("Subtool Tests", "Select which subtool tests to run")
     top_lvl_parser.add_argument("-pdn", "--pdn_modeling",  help="Run PDN modeling test", action='store_true')
     top_lvl_parser.add_argument("-buff_dse", "--buff_dse_modeling",  help="Run Buff DSE test", action='store_true')
+    top_lvl_parser.add_argument("-buff_sens", "--buff_sens_study",  help="Run Buffer Sensitivity test", action='store_true')
     top_lvl_parser.add_argument("-asic_dse_sweeps", "--asic_dse_sweeps",  help="Run ASIC DSE sweeps test", action='store_true')
     return top_lvl_parser.parse_args()
 
@@ -764,9 +778,13 @@ def main():
     #     print("Running PDN modeling tests\n")
     #     run_tests(args, test_suite.rad_gen_home, test_suite.pdn_tests, "ic_3d")
         
-    if args.ic_3d:
+    if args.buff_dse_modeling:
         print("Running Buffer DSE tests\n")
         run_tests(args, test_suite.rad_gen_home, test_suite.buff_dse_tests, "ic_3d")
+    if args.buff_sens_study:
+        print("Running Buffer Sensitivity tests\n")
+        run_tests(args, test_suite.rad_gen_home, test_suite.buff_sens_tests, "ic_3d")
+
 
     # print("Running IC 3D tests\n")
     # run_tests(args, test_suite.rad_gen_home, test_suite.ic_3d_tests, "ic_3d")

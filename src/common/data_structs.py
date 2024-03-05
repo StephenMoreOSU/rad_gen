@@ -1336,6 +1336,18 @@ class SpInfo:
     # Info for process and package sensitivity analysis
     process_package_dse : SpProcess = None
     def __post_init__(self):
+        self.sp_dir = os.path.join(self.top_dir, "spice_sim")
+        self.sp_sim_file: str = os.path.join(self.top_dir, self.sp_dir, self.sp_sim_title, "ubump_ic_driver.sp")
+        self.sp_sim_outfile: str = os.path.join(self.top_dir, self.sp_dir, self.sp_sim_title, "ubump_ic_driver.lis")
+        self.subckt_lib_dir = os.path.join(self.sp_dir, "subckts")
+        self.basic_subckts_file = os.path.join(self.subckt_lib_dir, "basic_subcircuits.l")
+        self.subckts_file = os.path.join(self.subckt_lib_dir, "subcircuits.l")
+        self.includes_dir = os.path.join(self.sp_dir, "includes")
+        self.include_sp_file = os.path.join(self.includes_dir, "includes.l")
+        self.process_data_file = os.path.join(self.includes_dir, "process_data.l")
+        self.sweep_data_file = os.path.join(self.includes_dir, "sweep_data.l")
+        self.model_dir = os.path.join(self.sp_dir, "models")
+        self.model_file = os.path.join(self.model_dir, "7nm_TT.l")
         self.process_package_dse = SpProcess(title="process_package_dse", top_sp_dir=self.sp_dir)
 
 
@@ -1461,10 +1473,12 @@ class SpSubCktInst:
 
 
     # initialize the param_values to those stored in the subckt params, if the user wants to override them they will specify them at creation of SpSubCktInst object
-    # def __post_init__(self):
+    def __post_init__(self):
         # <TODO CRITICAL> FIX THIS FOR IC 3D STUFF
-        # if self.param_values == None:
-        #     self.param_values = self.subckt.params.copy()
+        if self.param_values == None and self.subckt.params:
+            self.param_values = self.subckt.params.copy()
+        elif self.param_values == None:
+            self.param_values = {}
 
 @dataclass
 class TechInfo:

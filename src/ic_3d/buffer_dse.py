@@ -265,6 +265,8 @@ def init_subckt_libs(design_info: rg_ds.DesignInfo) -> rg_ds.SpSubCktLibs:
         Atomic subckts are from spice syntax and are not defined anywhere
         This means that the parameters used are always assigned during an instantiation of atomic subckts
     """    
+    min_tx_contact_width_key = "min_tx_contact_width"
+    tx_diffusion_length_key = "tx_diffusion_length"
     sp_subckt_atomic_lib = {
         "cap" : rg_ds.SpSubCkt(
             element = "cap",
@@ -295,11 +297,11 @@ def init_subckt_libs(design_info: rg_ds.DesignInfo) -> rg_ds.SpSubCktLibs:
                 # "hfin" : "hfin",
                 "L" : "gate_length",
                 "M" : "1",
-                "nfin" : f"{nfet_width_param}",
-                "ASEO" : f"{nfet_width_param} * min_tran_width * trans_diffusion_length",
-                "ADEO" : f"{nfet_width_param} * min_tran_width * trans_diffusion_length",
-                "PSEO" : f"{nfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
-                "PDEO" : f"{nfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
+                "nfin" : f"'{nfet_width_param}'",
+                "ASEO" : f"'{nfet_width_param}*{min_tx_contact_width_key}*{tx_diffusion_length_key}'",
+                "ADEO" : f"'{nfet_width_param}*{min_tx_contact_width_key}*{tx_diffusion_length_key}'",
+                "PSEO" : f"'{nfet_width_param}*({min_tx_contact_width_key}+2*{tx_diffusion_length_key})'",
+                "PDEO" : f"'{nfet_width_param}*({min_tx_contact_width_key}+2*{tx_diffusion_length_key})'",
             }
         ),
         "mpfet" : rg_ds.SpSubCkt(
@@ -310,11 +312,11 @@ def init_subckt_libs(design_info: rg_ds.DesignInfo) -> rg_ds.SpSubCktLibs:
                 # "hfin" : "hfin",
                 "L" : "gate_length",
                 "M" : "1",
-                "nfin" : f"{pfet_width_param}",
-                "ASEO" : f"{pfet_width_param} * min_tran_width * trans_diffusion_length",
-                "ADEO" : f"{pfet_width_param} * min_tran_width * trans_diffusion_length",
-                "PSEO" : f"{pfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
-                "PDEO" : f"{pfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
+                "nfin" : f"'{pfet_width_param}'",
+                "ASEO" : f"'{pfet_width_param}*{min_tx_contact_width_key}*{tx_diffusion_length_key}'",
+                "ADEO" : f"'{pfet_width_param}*{min_tx_contact_width_key}*{tx_diffusion_length_key}'",
+                "PSEO" : f"'{pfet_width_param}*({min_tx_contact_width_key}+2*{tx_diffusion_length_key})'",
+                "PDEO" : f"'{pfet_width_param}*({min_tx_contact_width_key}+2*{tx_diffusion_length_key})'",
             }
         )
     }
@@ -346,11 +348,11 @@ def init_subckt_libs(design_info: rg_ds.DesignInfo) -> rg_ds.SpSubCktLibs:
                         # "hfin" : "hfin",
                         "L" : "gate_length",
                         "M" : "fanout",
-                        "nfin" : f"{nfet_width_param}",
-                        "ASEO" : f"{nfet_width_param}*min_tran_width*trans_diffusion_length",
-                        "ADEO" : f"{nfet_width_param}*min_tran_width*trans_diffusion_length",
-                        "PSEO" : f"{nfet_width_param}*(min_tran_width+2*trans_diffusion_length)",
-                        "PDEO" : f"{nfet_width_param}*(min_tran_width+2*trans_diffusion_length)",
+                        "nfin" : f"'{nfet_width_param}'",
+                        "ASEO" : f"'{nfet_width_param}*{min_tx_contact_width_key}*{tx_diffusion_length_key}'",
+                        "ADEO" : f"'{nfet_width_param}*{min_tx_contact_width_key}*{tx_diffusion_length_key}'",
+                        "PSEO" : f"'{nfet_width_param}*({min_tx_contact_width_key}+2*{tx_diffusion_length_key})'",
+                        "PDEO" : f"'{nfet_width_param}*({min_tx_contact_width_key}+2*{tx_diffusion_length_key})'",
                     }
                     # if param values are not defined they are set to default
                 ),
@@ -369,11 +371,11 @@ def init_subckt_libs(design_info: rg_ds.DesignInfo) -> rg_ds.SpSubCktLibs:
                         # "hfin" : "hfin",
                         "L" : "gate_length",
                         "M" : "fanout",
-                        "nfin" : f"{pfet_width_param}",
-                        "ASEO" : f"{pfet_width_param}*min_tran_width*trans_diffusion_length",
-                        "ADEO" : f"{pfet_width_param}*min_tran_width*trans_diffusion_length",
-                        "PSEO" : f"{pfet_width_param}*(min_tran_width+2*trans_diffusion_length)",
-                        "PDEO" : f"{pfet_width_param}*(min_tran_width+2*trans_diffusion_length)",
+                        "nfin" : f"'{pfet_width_param}'",
+                        "ASEO" : f"'{pfet_width_param}*{min_tx_contact_width_key}*{tx_diffusion_length_key}'",
+                        "ADEO" : f"'{pfet_width_param}*{min_tx_contact_width_key}*{tx_diffusion_length_key}'",
+                        "PSEO" : f"'{pfet_width_param}*({min_tx_contact_width_key}+2*{tx_diffusion_length_key})'",
+                        "PDEO" : f"'{pfet_width_param}*({min_tx_contact_width_key}+2*{tx_diffusion_length_key})'",
                     }
                     # if param values are not defined they are set to default
                 ),
@@ -1037,7 +1039,7 @@ def write_sp_buffer_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any]
 
     sp_title = f"buffer-{title}-{rg_ds.create_timestamp()}"
 
-    if ic_3d_info.common.use_latest_obj_dir:
+    if ic_3d_info.common.override_outputs:
         obj_dir_path = rg_utils.find_newest_obj_dir(search_dir = ic_3d_info.spice_info.sp_dir, obj_dir_fmt = f"buffer-{title}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
         if obj_dir_path != None:
             sp_title = os.path.basename(obj_dir_path)
@@ -1079,7 +1081,7 @@ def buffer_sim_setup_updated(ic_3d_info: rg_ds.Ic3d, sweep_params: Dict[str, Any
     # ... ]
 
 
-    # Metal Distance for top and bottom metal layers
+    # Metal Distance for top metal layer for each die, assuming it has to travel half the distance of largest SRAM Macro + User defined additional wire length if any
     routing_mlayer_params = {
         "Rw" : f"'{ic_3d_info.design_info.process_info.mlayers[ic_3d_info.design_info.buffer_routing_mlayer_idx].sp_params['wire_res_per_um'].name}*({ic_3d_info.design_info.max_macro_dist} + {sweep_params['add_wlen']})'",
         "Cw" : f"'{ic_3d_info.design_info.process_info.mlayers[ic_3d_info.design_info.buffer_routing_mlayer_idx].sp_params['wire_cap_per_um'].name}*({ic_3d_info.design_info.max_macro_dist} + {sweep_params['add_wlen']})'",
@@ -1596,6 +1598,7 @@ def sens_study_run(ic_3d_info: rg_ds.Ic3d, process_package_params: dict, metal_d
     assert abs(process_package_params["load_params"]["mlayer_idx"]) < len(ic_3d_info.design_info.process_info.mlayers)
     assert len(process_package_params["buffer_params"]["pn_ratios"]) == 1 + process_package_params["buffer_params"]["num_stages"] + ic_3d_info.design_info.bot_die_nstages
     sim_success = False
+    print(f"Running sim with params: {load_params}")
     while not sim_success:
         ####################### SETUP FOR SWEEPING DSE #######################
         write_sp_process_package_dse(ic_3d_info, process_package_params)

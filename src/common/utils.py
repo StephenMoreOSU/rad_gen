@@ -872,6 +872,9 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
     else:
         parsed_args, remaining_args = parser.parse_known_args(args = arg_list, namespace = in_args)
 
+    # Raise error if no subtool is specified
+    if parsed_args.subtools is None:
+        raise ValueError("No subtool specified, please specify a subtool to run, possible subtools are: 'coffe', 'asic-dse', '3d-ic'")
 
     #     _   ___ ___ ___   ___  ___ ___     _   ___  ___ ___ 
     #    /_\ / __|_ _/ __| |   \/ __| __|   /_\ | _ \/ __/ __|
@@ -1273,7 +1276,7 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
                     [  
                         rg_ds.Tree("hammer", scan_dir = True, tag = "hammer"),
                         rg_ds.Tree("pdks", scan_dir = True, tag = "pdks"),
-                    ],tag = "third_party"
+                    ], tag = "third_party"
                 ),
             ],
             tag = "top"
@@ -1291,7 +1294,7 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
                     [  
                         rg_ds.Tree("hammer", scan_dir = True, tag = "hammer"),
                         rg_ds.Tree("pdks", scan_dir = True, tag = "pdks"),
-                    ],tag = "third_party"
+                    ], tag = "third_party"
                 ),
             ],
             tag = "top"
@@ -1804,17 +1807,19 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
     # for output_subtree in output_subtrees:
     #     ic_3d_conf["common"].project_tree.append_tagged_subtree("output", output_subtree)
 
-    arg_inputs = {}
-    for k, v in ic_3d_conf.items():
-        if k in rg_ds.IC3DArgs.__dataclass_fields__:
-            arg_inputs[k] = v
-    args = init_dataclass(rg_ds.IC3DArgs, arg_inputs)
+    # arg_inputs = {}
+    # for k, v in ic_3d_conf.items():
+    #     if k in rg_ds.IC3DArgs.__dataclass_fields__:
+    #         arg_inputs[k] = v
 
+    args = init_dataclass(rg_ds.IC3DArgs, ic_3d_conf)
+    
     # TODO update almost all the parsing in this function
     ic_3d_conf = { 
         **ic_3d_conf,
         **parse_yml_config(ic_3d_conf["input_config_path"])
     }
+
     # check that inputs are in proper format (all metal layer lists are of same length)
     for process_info in ic_3d_conf["process_infos"]:
         if not (all(length == process_info["mlayers"] for length in [len(v) for v in process_info["mlayer_lists"].values()])\
@@ -2034,6 +2039,10 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
         nmos_sz= ic_3d_conf["d2d_buffer_dse"]["tx_sizing"]["nmos_sz"],
     )    
 
+    # Directory structure info
+    sp_info = rg_ds.SpInfo(
+        top_dir = ic_3d_conf["common"].rad_gen_home_path
+    )
 
     ic3d_inputs = {
         "common": ic_3d_conf["common"],
@@ -2053,7 +2062,7 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any]):
         
         # previous globals from 3D IC TODO fix this to take required params from top conf
         # remove all these bs dataclasses I don't need
-        "spice_info": rg_ds.SpInfo(),
+        "spice_info": sp_info,
         "process_data": process_data,
         "driver_model_info": rg_ds.DriverSpModel(),
         "pn_opt_model": rg_ds.SpPNOptModel(),
