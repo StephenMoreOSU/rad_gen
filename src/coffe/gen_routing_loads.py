@@ -274,6 +274,8 @@ class _GeneralBLEOutputLoad:
         # list of all sbs
         sb_muxes = [sb_mux_info["sb_mux"] for sb_mux_info in self.sb_muxes_info]
 
+        # most frequent SB mux in SBs connected to BLE output
+        most_freq_sb_mux_idx = max(range(len(sb_muxes)), key=lambda i: sb_muxes[i].num_per_tile)
         #   ___ ___   ___ ___ ___ ___ ___ ___ ___ ___ 
         #  / __| _ ) / __| _ \ __/ __|_ _| __|_ _/ __|
         #  \__ \ _ \ \__ \  _/ _| (__ | || _| | | (__ 
@@ -322,7 +324,9 @@ class _GeneralBLEOutputLoad:
             # And we divide by the number of cluster outputs (for this switch block) to get partial paths per output
             # We want to have at least 1 partial path per output so we'll ceil it, but only for the sb mux type in question
             # This is a choice we make, and could be done differently, open to exploration
-            if i == self.sb_on_idx:
+
+            # Determine which sb_mux_type should be partially ON BLE output based on the most frequent one
+            if i == most_freq_sb_mux_idx:
                 cluster_output_partial_paths = int(math.ceil(float(total_cluster_output_partial_paths) / num_cluster_outputs_per_sb))
             else:
                 cluster_output_partial_paths = int(total_cluster_output_partial_paths / num_cluster_outputs_per_sb)
@@ -417,7 +421,7 @@ class _RoutingWireLoad:
         wire_id = gen_r_wire["id"]
 
         # param string suffixes
-        p_str_suffix = f"_uid{self.driven_sb_mux_idx}"
+        p_str_suffix = f"{self.sb_mux_on.param_str}"
         routing_wire_load_pstr = f"wire_gen_routing{p_str_suffix}"
         wire_sb_load_on_pstr = f"wire_sb_load_on{p_str_suffix}"
         wire_sb_load_partial_pstr = f"wire_sb_load_partial{p_str_suffix}"
@@ -734,25 +738,29 @@ class _RoutingWireLoad:
         L = self.gen_r_wire["len"]
         I = specs.I
         Fs = specs.Fs
-        sb_mux_size = sb_mux.implemented_size
-        cb_mux_size = cb_mux.implemented_size
-        sb_level1_size = sb_mux.level1_size
-        sb_level2_size = sb_mux.level2_size
-        cb_level1_size = cb_mux.level1_size
-        cb_level2_size = cb_mux.level2_size
+
+        # sb_mux_size = sb_mux.implemented_size
+        # cb_mux_size = cb_mux.implemented_size
+        # sb_level1_size = sb_mux.level1_size
+        # sb_level2_size = sb_mux.level2_size
+        # cb_level1_size = cb_mux.level1_size
+        # cb_level2_size = cb_mux.level2_size
         
         # List of muxes which can be use this wire as an input
         sb_muxes = [sb_mux_info["sb_mux"] for sb_mux_info in self.tile_info["sb_muxes_info"] if sb_mux_info["sb_mux"].src_r_wire["id"] == self.gen_r_wire["id"]]
+        # Find the most frequently used SB mux
+        most_freq_sb_mux_idx = max(range(len(sb_muxes)), key=lambda i: sb_muxes[i].num_per_tile)
         # For each sb_mux and its respective Fs
         for i, sb_mux_info in enumerate(self.tile_info["sb_muxes_info"]):
             
             Fs = specs.Fs_mtx[sb_mux_info["id"]]["Fs"]
             sb_mux = sb_mux_info["sb_mux"]
-            L = sb_mux.dst_r_wire["len"]
-            assert L == self.gen_r_wire["len"], "The length of the switch block mux does not match the length of the routing wire"
+            # The wire in this load is the source wire of all attached SBS
+            L = sb_mux.src_r_wire["len"]
+            assert L == self.gen_r_wire["len"], f"The length of the switch block mux src wire does not match the length of the routing wire {L} != {self.gen_r_wire['len']}"
             
             # init cb / sb mux size variables
-            sb_mux_size = sb_mux.implemented_size
+            # sb_mux_size = sb_mux.implemented_size
             cb_mux_size = cb_mux.implemented_size
             sb_level2_size = sb_mux.level2_size
             cb_level2_size = cb_mux.level2_size
@@ -766,7 +774,7 @@ class _RoutingWireLoad:
             # num sb partial loads which are loading the gen routing wire for single tile (will be assigned at the end for worst case)
             # Why is this not for every tile? If we assume channels to be turned on at X % across device there would be way more partial on muxes
             # TODO change this from just choosing a random SB idx to a weighted round robin
-            if i == 0:
+            if i == most_freq_sb_mux_idx:
                 sb_load_partial = int(math.ceil((round(float(sb_level2_size - 1.0) * channel_usage))))
             else:
                 sb_load_partial = int(round(float(sb_level2_size - 1.0) * channel_usage))
@@ -783,12 +791,29 @@ class _RoutingWireLoad:
 
         # TODO add weighted round robin to assign most frequent SB if the numbers from prev calculations are off
         # Don't include the ON as its accounted for in below calculation
-        tile_off_path_sb_budget = sum([sb_mux_info["on_budget"] + sb_mux_info["partial_budget"] + sb_mux_info["off_budget"] for sb_mux_info in self.tile_info["sb_muxes_info"]])
+        tiles_off_path_sb_budget = sum([sb_mux_info["on_budget"] + sb_mux_info["partial_budget"] + sb_mux_info["off_budget"] for sb_mux_info in self.tile_info["sb_muxes_info"]])
         # Now we are just going to do some adjustment to make sure that each tile has at least (Fs - 1) SB loads
-        if tile_off_path_sb_budget < sb_load_per_intermediate_tile * L:
+        if tiles_off_path_sb_budget < sb_load_per_intermediate_tile * L:
+            remaining_sb_assignments = sb_load_per_intermediate_tile * L - tiles_off_path_sb_budget
+            while remaining_sb_assignments != 0:
+                # cur_total_budget = sum([sb_mux_info["on_budget"] + sb_mux_info["partial_budget"] + sb_mux_info["off_budget"] for sb_mux_info in self.tile_info["sb_muxes_info"]])
+                # Going from 
+                for i, sb_mux_info in enumerate(self.tile_info["sb_muxes_info"]):
+                    tile_cur_total_budget = sb_mux_info["on_budget"] + sb_mux_info["partial_budget"] + sb_mux_info["off_budget"]
+                    # Adjustment of a particular SB type would be how different is from the desired freq_ratio, if > 0 too many muxes assigned, if < 0 too few
+                    adjustment = sb_mux_info["freq_ratio"] - (tile_cur_total_budget / sb_load_per_intermediate_tile)
+                    if adjustment < 0:
+                        # If we have too few, we can add one to the off budget
+                        sb_mux_info["off_budget"] += 1
+                        remaining_sb_assignments -= 1
+                        if remaining_sb_assignments == 0:
+                            break
+                tiles_off_path_sb_budget = sum([sb_mux_info["on_budget"] + sb_mux_info["partial_budget"] + sb_mux_info["off_budget"] for sb_mux_info in self.tile_info["sb_muxes_info"]])
+            assert tiles_off_path_sb_budget == sb_load_per_intermediate_tile * L, f"Tile {i} has {tiles_off_path_sb_budget} SB loads, expected {sb_load_per_intermediate_tile * L}"
+
             # If we have less than (Fs - 1) loads, we need to add some off loads
             # TODO change the mux type to be weighted round robin
-            self.tile_info["sb_muxes_info"][0]["off_budget"] += sb_load_per_intermediate_tile * L - tile_off_path_sb_budget
+            # self.tile_info["sb_muxes_info"][0]["off_budget"] += sb_load_per_intermediate_tile * L - tile_off_path_sb_budget
 
         # Calculate switch block load per tile
         # Each tile has Fs-1 switch blocks hanging off of it exept the last one which has 3 (because the wire is ending)

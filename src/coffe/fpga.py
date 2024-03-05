@@ -190,45 +190,34 @@ class _Specs:
         self.gen_routing_metal_layers = arch_params_dict['gen_routing_metal_layers']
 
         # Specs post init
-        wire_ids = {}
-        for layer_id, wire in enumerate(self.wire_types):
-            # Adding 1 for now as we migrate from using old wire definitions with RC so we can just start at 1 (which is global routing) instead of 0 (local routing still using old stuff)
-            wire_ids[wire["len"]] = layer_id + 1 
-        # This is used to correlate wire lengths to legacy metal layer definitions
-        # self.wire_ids = wire_ids
 
-        # For multi wire length support
-        # Made this into a dict of lists so we can have multiple entries of same wire length
+        # If the user directly provides the freq of each wire type, then don't manually calculate the num_tracks
+        if all(wire.get("freq") is not None for wire in self.wire_types):
+            for i, wire in enumerate(self.wire_types):
+                wire["num_tracks"] = wire["freq"]
+                wire["id"] = i
+        else:
+            tracks = []
+            for id, wire in enumerate(self.wire_types):
+                tracks.append( int(self.W * wire["perc"]) )
 
-        tracks = []
-        for id, wire in enumerate(self.wire_types):
-            tracks.append( int(self.W * wire["perc"]) )
-
-
-
-        # calculate the rounded number of wires of each type in channel
-        # wire_counts = {wire_length : int(math.floor(self.W * wire_perc)) for wire_length, wire_perc in zip(*self.wire_types)}
-
-        remaining_wires = self.W - sum(tracks)
-        # Adjust tracks to distribute remaining wires proportionally
-        while remaining_wires != 0:
-            for idx, wire in enumerate(self.wire_types):
-                # Calculate the adjustment based on the remaining wires
-                adjustment = round((self.W * wire["perc"] - tracks[idx]) * remaining_wires / sum(tracks))
-                # if we are reducing wires flip the sign of adjustment
-                if remaining_wires < 0:
-                    adjustment = -adjustment
-                tracks[idx] += adjustment
-                remaining_wires -= adjustment
-                if remaining_wires == 0:
-                    break
-        # set it back in wire types
-        for i, (wire, num_tracks) in enumerate(zip(self.wire_types, tracks)):
-            wire["num_tracks"] = num_tracks
-            wire["id"] = i
-
-        # Get our switch block connectivity params
-        self.sb_conn = arch_params_dict['sb_conn']
+            remaining_wires = self.W - sum(tracks)
+            # Adjust tracks to distribute remaining wires proportionally
+            while remaining_wires != 0:
+                for idx, wire in enumerate(self.wire_types):
+                    # Calculate the adjustment based on the remaining wires & freq of wire types
+                    adjustment = round((self.W * wire["perc"] - tracks[idx]) * remaining_wires / sum(tracks))
+                    # if we are reducing wires flip the sign of adjustment
+                    if remaining_wires < 0:
+                        adjustment = -adjustment
+                    tracks[idx] += adjustment
+                    remaining_wires -= adjustment
+                    if remaining_wires == 0:
+                        break
+            # set it back in wire types
+            for i, (wire, num_tracks) in enumerate(zip(self.wire_types, tracks)):
+                wire["num_tracks"] = num_tracks
+                wire["id"] = i
 
         
         
@@ -5558,6 +5547,9 @@ class FPGA:
                 No = self.specs.num_cluster_outputs
                 # Calculate Mux size for each combination of wire types
                 for i, Fs_ele in enumerate(self.specs.Fs_mtx):
+                    # If the Fs is 0, it means we don't have a SB for this wire to wire connection type, ie don't create an SB mux 
+                    if Fs_ele["Fs"] == 0:
+                        continue
                     # use wire index of source wire for wire length
                     # This determines number of starting / non starting connections 
                     src_wire_length = self.specs.wire_types[Fs_ele["src"]]["len"] # wire going into SB
