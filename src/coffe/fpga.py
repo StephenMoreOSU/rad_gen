@@ -6468,12 +6468,12 @@ class FPGA:
         self.dict_real_widths["ffble"] = self.w_ffble
 
         # what distances do we need?
-        self.d_cb_to_ic = 0.0
-        self.d_ic_to_lut = 0.0
-        self.d_lut_to_cc = 0.0
-        self.d_cc_to_ffble = 0.0
-        self.d_ffble_to_sb = 0.0
-        self.d_ffble_to_ic = 0.0
+        self.d_cb_to_ic = 0.0 # Used in Logic Cluster update_wires
+        self.d_ic_to_lut = 0.0 # Unused
+        self.d_lut_to_cc = 0.0 # Unused
+        self.d_cc_to_ffble = 0.0 # Unused
+        self.d_ffble_to_sb = 0.0 # Used in Cluster Output Load
+        self.d_ffble_to_ic = 0.0 # Used in Logic Cluster 
 
         # worst-case distance between two stripes:
         for index1, item1 in enumerate(self.stripe_order):

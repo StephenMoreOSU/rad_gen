@@ -257,7 +257,7 @@ class _LocalRoutingWireLoad:
 
         # Update wire lengths
         wire_lengths["wire_local_routing"] = width_dict["logic_cluster"]
-        if local_routing_wire_load_length !=0:
+        if local_routing_wire_load_length != 0:
             wire_lengths["wire_local_routing"] = local_routing_wire_load_length
         # Update wire layers
         wire_layers["wire_local_routing"] = fpga.LOCAL_WIRE_LAYER

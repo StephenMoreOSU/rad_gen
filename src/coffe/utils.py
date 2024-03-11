@@ -113,13 +113,19 @@ def print_area_and_delay(report_file, fpga_inst):
     print_and_write(report_file, "  Subcircuit".ljust(32) + "Area (um^2)".ljust(MIDL_COL_WIDTH) + "Delay (ps)".ljust(MIDL_COL_WIDTH) + "tfall (ps)".ljust(MIDL_COL_WIDTH) + "trise (ps)".ljust(MIDL_COL_WIDTH) + "Power at 250MHz (uW)".ljust(LAST_COL_WIDTH)) 
     
     # Switch block mux
-    print_and_write(report_file, "  " + fpga_inst.sb_mux.name.ljust(FIRS_COL_WIDTH) + str(round(area_dict[fpga_inst.sb_mux.name]/1e6,3)).ljust(MIDL_COL_WIDTH) + str(round(fpga_inst.sb_mux.delay/1e-12,4)).ljust(MIDL_COL_WIDTH) + 
-        str(round(fpga_inst.sb_mux.tfall/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(round(fpga_inst.sb_mux.trise/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(fpga_inst.sb_mux.power/1e-6).ljust(LAST_COL_WIDTH))
+    for sb_mux in fpga_inst.sb_muxes:
+        print_and_write(report_file, "  " + sb_mux.name.ljust(FIRS_COL_WIDTH) + str(round(area_dict[sb_mux.name]/1e6,3)).ljust(MIDL_COL_WIDTH) + str(round(sb_mux.delay/1e-12,4)).ljust(MIDL_COL_WIDTH) + 
+            str(round(sb_mux.tfall/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(round(sb_mux.trise/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(sb_mux.power/1e-6).ljust(LAST_COL_WIDTH))
+    # print_and_write(report_file, "  " + fpga_inst.sb_mux.name.ljust(FIRS_COL_WIDTH) + str(round(area_dict[fpga_inst.sb_mux.name]/1e6,3)).ljust(MIDL_COL_WIDTH) + str(round(fpga_inst.sb_mux.delay/1e-12,4)).ljust(MIDL_COL_WIDTH) + 
+    #     str(round(fpga_inst.sb_mux.tfall/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(round(fpga_inst.sb_mux.trise/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(fpga_inst.sb_mux.power/1e-6).ljust(LAST_COL_WIDTH))
 
     # Switch block mux (with sram)
-    print_and_write(report_file, "  " + (fpga_inst.sb_mux.name + "(with_sram)").ljust(FIRS_COL_WIDTH) + str(round(area_dict[fpga_inst.sb_mux.name +"_sram"]/1e6,3)).ljust(MIDL_COL_WIDTH) + 
-        str(round(fpga_inst.sb_mux.delay/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(round(fpga_inst.sb_mux.tfall/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(round(fpga_inst.sb_mux.trise/1e-12,4)).ljust(MIDL_COL_WIDTH) + 
-        str(fpga_inst.sb_mux.power/1e-6).ljust(LAST_COL_WIDTH))
+        print_and_write(report_file, "  " + (sb_mux.name + "(with_sram)").ljust(FIRS_COL_WIDTH) + str(round(area_dict[sb_mux.name +"_sram"]/1e6,3)).ljust(MIDL_COL_WIDTH) +
+            str(round(sb_mux.delay/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(round(sb_mux.tfall/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(round(sb_mux.trise/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(sb_mux.power/1e-6).ljust(LAST_COL_WIDTH))
+        
+    # print_and_write(report_file, "  " + (fpga_inst.sb_mux.name + "(with_sram)").ljust(FIRS_COL_WIDTH) + str(round(area_dict[fpga_inst.sb_mux.name +"_sram"]/1e6,3)).ljust(MIDL_COL_WIDTH) + 
+    #     str(round(fpga_inst.sb_mux.delay/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(round(fpga_inst.sb_mux.tfall/1e-12,4)).ljust(MIDL_COL_WIDTH) + str(round(fpga_inst.sb_mux.trise/1e-12,4)).ljust(MIDL_COL_WIDTH) + 
+    #     str(fpga_inst.sb_mux.power/1e-6).ljust(LAST_COL_WIDTH)) 
     
     # Connection block mux
     print_and_write(report_file, "  " + fpga_inst.cb_mux.name.ljust(FIRS_COL_WIDTH) + str(round(area_dict[fpga_inst.cb_mux.name]/1e6,3)).ljust(MIDL_COL_WIDTH) + str(round(fpga_inst.cb_mux.delay/1e-12,4)).ljust(MIDL_COL_WIDTH) + 
@@ -336,7 +342,9 @@ def print_power(report_file, fpga_inst):
     print("  SUBCIRCUIT POWER AT 250MHz (uW)")
     print("  --------------------------")
 
-    print("  " + fpga_inst.sb_mux.name.ljust(22) + str(fpga_inst.sb_mux.power/1e-6)) 
+    for sb_mux in fpga_inst.sb_muxes:
+        print("  " + sb_mux.name.ljust(22) + str(sb_mux.power/1e-6))
+    # print("  " + fpga_inst.sb_mux.name.ljust(22) + str(fpga_inst.sb_mux.power/1e-6)) 
     print("  " + fpga_inst.cb_mux.name.ljust(22) + str(fpga_inst.cb_mux.power/1e-6)) 
     print("  " + fpga_inst.logic_cluster.local_mux.name.ljust(22) + str(fpga_inst.logic_cluster.local_mux.power/1e-6)) 
     print("  " + fpga_inst.logic_cluster.ble.local_output.name.ljust(22) + str(fpga_inst.logic_cluster.ble.local_output.power/1e-6)) 
@@ -501,7 +509,12 @@ def print_vpr_delays(report_file, fpga_inst):
     print_and_write(report_file, "  VPR DELAYS")
     print_and_write(report_file, "  ----------")
     print_and_write(report_file, "  Path".ljust(50) + "Delay (ps)")
-    print_and_write(report_file, "  Tdel (routing switch)".ljust(50) + str(fpga_inst.sb_mux.delay))
+
+    sb_mux_delays = [ f" {sb_mux.name} Tdel (routing switch)".ljust(50) + f"{sb_mux.delay}" for sb_mux in fpga_inst.sb_muxes]
+    for sb_mux_delay in sb_mux_delays:
+        print_and_write(report_file, sb_mux_delay)
+    # print_and_write(report_file, "  Tdel (routing switch)".ljust(50) + str(fpga_inst.sb_mux.delay))
+
     print_and_write(report_file, "  T_ipin_cblock (connection block mux)".ljust(50) + str(fpga_inst.cb_mux.delay))
     print_and_write(report_file, "  CLB input -> BLE input (local CLB routing)".ljust(50) + str(fpga_inst.logic_cluster.local_mux.delay))
     print_and_write(report_file, "  LUT output -> BLE input (local feedback)".ljust(50) + str(fpga_inst.logic_cluster.ble.local_output.delay))
