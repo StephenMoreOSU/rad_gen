@@ -1202,6 +1202,8 @@ class CoffeCLI(ParentCLI):
         GeneralCLI(key = "size_hb_interfaces", shortcut = "-sh", datatype = float, default_val = 0.0, help_msg = "perform transistor sizing only for hard block interfaces"),
         GeneralCLI(key = "quick_mode", shortcut = "-q", datatype = float, default_val = -1.0, help_msg = "minimum cost function improvement for resizing, Ex. could try 0.03 for 3% improvement"),
         GeneralCLI(key = "ctrl_comp_telemetry_fpath", shortcut = "-ct", datatype = str, help_msg = "path to control compare telemetry file"),
+        # Additional Args for FPL'24
+        GeneralCLI(key = "rrg_data_dpath", shortcut = "-rrg", datatype = str, help_msg = "Path to directory containing parsed RRG output csvs")
     ])
     arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [
         # FPGA ARCH CONFIG PATH
@@ -1237,6 +1239,10 @@ class CoffeCLI(ParentCLI):
 
         {"key" : "quick_mode", "default_val": -1.0, 
          "shortcut" : "-q",  "help_msg" : "minimum cost function improvement for resizing, Ex. could try 0.03 for 3% improvement", "datatype" : float},
+
+        {"key" : "rrg_data_dpath", 
+         "shortcut" : "-rrg", "help_msg" : "Path to directory containing parsed RRG output csvs", "action": "store_true"},
+        
     ])
 
 
@@ -1282,10 +1288,14 @@ class Coffe:
     quick_mode : float # minimum cost function improvement for resizing, could try 0.03 for 3% improvement
     fpga_arch_conf: Dict[str, Any] # FPGA architecture configuration dictionary TODO define as dataclass
     ctrl_comp_telemetry_fpath: str # path to control compare telemetry file 
+    # Args for COFFE updates FPL'24
+    rrg_data_dpath: str # Path to directory containing parsed RRG output csvs
 
     # NON cli args are below:
     arch_name: str # name of FPGA architecture
     hardblocks: List[Hardblock] = None # Hard block flows configuration dictionary
+
+
 
 
 # ██╗ ██████╗    ██████╗ ██████╗ 
@@ -2256,7 +2266,7 @@ class SpTestingModel:
     vsrcs: List[SpVoltageSrc]  = None # We create a basic voltage source for each instantiation to measure their power
 
     # Node definitions
-    dut_in_node: str = "n_in" # input node (connected to non inst stimulus
+    dut_in_node: str = "n_in" # input node (connected to non inst stimulus)
     dut_out_node: str = "n_out" # output node (hanging or connected to non inst stimulus)
     
     # Simulation Info
