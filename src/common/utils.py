@@ -1,5 +1,5 @@
 
-from typing import List, Dict, Tuple, Set, Union, Any, Type, Callable
+from typing import List, Dict, Tuple, Set, Union, Any, Type, Callable, cast
 import os, sys, yaml
 import argparse
 import datetime
@@ -77,6 +77,33 @@ def log_format_list(*args : Tuple[str]) -> str:
 # ██║   ██║██╔══╝  ██║╚██╗██║██╔══╝  ██╔══██╗██╔══██║██║         ██║   ██║   ██║   ██║██║     ╚════██║
 # ╚██████╔╝███████╗██║ ╚████║███████╗██║  ██║██║  ██║███████╗    ╚██████╔╝   ██║   ██║███████╗███████║
 #  ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
+
+def typecast_input_to_dataclass(input_value: dict, dataclass_type: Any) -> Any:
+    """
+    Typecasts input_value to the corresponding dataclass_type.
+    """
+    dc_fields = fields(dataclass_type)
+    output = {}
+
+    for dc_field in dc_fields:
+        field_name = dc_field.name
+        field_type = dc_field.type
+        # print(f"Field Name: {field_name}, Field Type: {field_type}, Input Value: {input_value.get(field_name)}")
+
+        if input_value.get(field_name) is None:
+            output[field_name] = None
+            continue
+        # Perform typecasting based on field type
+        elif isinstance(input_value.get(field_name), eval(field_type)):
+            output[field_name] = input_value.get(field_name)
+        else:
+            try:
+                output[field_name] = eval(field_type)(input_value.get(field_name))
+            except (ValueError, TypeError):
+                output[field_name] = None  # If typecasting fails, set to None
+    
+    return dataclass_type(**output)
+
 
 def format_csv_data(data: List[List[Any]]) -> List[List[str]]:
     # Specify the width for each column
@@ -2106,8 +2133,10 @@ def load_arch_params(filename): #,run_options):
         'W': -1,
         'L': -1,
         'wire_types': [],
-        'sb_conn' : {},
+        'rr_graph_fpath': "",
+        # 'sb_conn' : {},
         'Fs_mtx' : {},
+        'sb_muxes': {},
         'Fs': -1,
         'N': -1,
         'K': -1,
@@ -2204,9 +2233,14 @@ def load_arch_params(filename): #,run_options):
                     wire_type
                 )
             param_dict["fpga_arch_params"]["wire_types"] = tmp_list
-        elif param == 'sb_conn':
-            # Dict of sb connectivity params
-            param_dict["fpga_arch_params"]["sb_conn"] = value
+        elif param == 'rr_graph_fpath':
+            param_dict["fpga_arch_params"]['rr_graph_fpath'] = str(value)
+        # elif param == 'sb_conn':
+        #     # Dict of sb connectivity params
+        #     param_dict["fpga_arch_params"]["sb_conn"] = value
+        elif param == "sb_muxes":
+            # list of dicts
+            param_dict["fpga_arch_params"]["sb_muxes"] = value
         elif param == "Fs_mtx":
             # list of dicts
             param_dict["fpga_arch_params"]["Fs_mtx"] = value

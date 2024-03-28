@@ -1,3 +1,4 @@
+
 import os, sys
 import time
 import xmltodict 
@@ -9,6 +10,8 @@ import statistics as stats
 import csv
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 import copy
@@ -184,10 +187,10 @@ def rec_clean_dict_keys(input_dict: Dict[str, Any]) -> Dict[str, Any]:
     return output_dict
 
 
-VIRTUAL_PIN_ID = 0
-CB_IPIN_SW_ID = 1
-L4_SW_ID = 2
-L16_SW_ID = 3
+# VIRTUAL_PIN_ID = 0
+# CB_IPIN_SW_ID = 1
+# L4_SW_ID = 2
+# L16_SW_ID = 3
 
 
 def parse_cli_args(argv: List[str] = []) -> argparse.Namespace:
@@ -262,7 +265,12 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
             for node in v["node"]:
                 conv_node = rec_clean_dict_keys(node)
                 # hash nodes by node id
+                # out_node: Node = typecast_input_to_dataclass(conv_node, Node)
+                # print(out_node.segment)
+                # if out_node.segment is not None:
+                #     out_node.segment.segment_id = int(out_node.segment.get("segment_id")) 
                 nodes[int(conv_node['id'])] = typecast_input_to_dataclass(conv_node, Node)
+
             
         # Check if this describes a wire inst
         elif k == "rr_edges":
@@ -340,6 +348,25 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
         sw_id: (switch.name.upper() if switch.name != "__vpr_delayless_switch__" else "LB_OPIN") for sw_id, switch in switches.items()      
     }
 
+    # Create lookups to find a switch ID from a segment ID
+    # To do this I think we have to iterate over all nodes and find thier corresponding segment ids (if they have them)
+    # Then we can iterate over all sink edges with that segment id and find thier switch id, then we can make a dict of segment id to switch id
+    seg_2_sw_ids_lookup = {
+        seg_id: set([edge.switch_id for edge in common_sink_edges[node_id] if edge.switch_id != 0])
+            for node_id, node in nodes.items() if node.segment
+                for seg_id in set(segment.id for segment in segments.values()) if int(node.segment.get("segment_id")) == seg_id
+    }
+    # now get int -> int mapping
+    seg_2_sw_ids_lookup = {
+        seg_id: sw_ids.pop() for seg_id, sw_ids in seg_2_sw_ids_lookup.items()
+    }
+
+    # Create a list of nodes which are ignored PRE pruning because of thier strangeness
+    error_nodes: Dict[int, Node] = {}
+    error_no_fanin_edges: Dict[int, Edge] = {}
+    error_no_fanout_edges: Dict[int, Edge] = {}
+
+
     # Routing wire driving switches
     # gen_r_wire_sw_ids = set([node. for node in nodes.values() if node.type in ["CHANX", "CHANY"] and node.segment]
     # gen_r_drv_switches = {
@@ -358,14 +385,19 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
         edges: List[Edge] = v
         node_id: int = k 
 
+        # Some nodes have no fanin or fanout, because of them being difficult to deal with we're gonna skip them for now TODO print these to another file to debug
+        if not edges:
+            continue
+
         # Make sure that all edges are driving a node with type L4 or L16 
         # all([edge.switch_id in [L4_SW_ID, L16_SW_ID] for edge in edges])
 
         # Make sure that all edges are driving a node with a type in our segment types (representing general programmable routing)
         # AND Make sure that there exists a common src for the same sink -> Basically is this a non terminal SINK node
-        wire_segment_id: int = int(nodes[edges[0].sink_node].segment.get("segment_id")) if nodes[edges[0].sink_node].segment else None
-
-        if (wire_segment_id in list(segments.keys()) ) and edges[0].sink_node in common_src_edges.keys():
+        # wire_segment_id: int = int(nodes[edges[0].sink_node].segment.get("segment_id")) if nodes[edges[0].sink_node].segment else None
+        wire_segment_id: int = int(nodes[node_id].segment.get("segment_id")) if nodes[node_id].segment else None
+        # (wire_segment_id in list(segments.keys()) ) and
+        if (wire_segment_id in list(segments.keys()) ) and node_id in common_src_edges.keys():
 
             # Make sure that all edges have the same switch id
             # In unidirectional routing, all edges which have the same sink should have the same Switch id in most cases
@@ -377,9 +409,17 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
             # Once its been initialized put fanin for each switch id and total
             for edge in edges:
                 # Find the the switch type of each src going into our common sink
-                src_sw_id = common_sink_edges[edge.src_node][0].switch_id
-                # Make sure that all nodes in the common_sink_edges[edge.src_node] have the same switch id, again meaning they all are inputs to the same SB mux 
-                assert all(common_sink_edges[edge.src_node][0].switch_id == sw_edge.switch_id for sw_edge in common_sink_edges[edge.src_node]), f"Switch ID Mismatch: {common_sink_edges[edge.src_node]}"
+                # print(f"Edge: {edge}")
+                # print(f"Common Sink Edges: {common_sink_edges[edge.src_node]}")
+                
+                # This condition is happening with a fanin 1 wire, seems weird but is edge case so we will skip for now 
+                if not common_sink_edges.get(edge.src_node):
+                    # If we can't find the src node driving the edge, we can fall back on assuming that there is a single driver per wire type
+                    src_sw_id = seg_2_sw_ids_lookup[int(nodes[edge.sink_node].segment.get("segment_id"))]
+                else:
+                    src_sw_id = common_sink_edges[edge.src_node][0].switch_id
+                    # Make sure that all nodes in the common_sink_edges[edge.src_node] have the same switch id, again meaning they all are inputs to the same SB mux 
+                    assert all(common_sink_edges[edge.src_node][0].switch_id == sw_edge.switch_id for sw_edge in common_sink_edges[edge.src_node]), f"Switch ID Mismatch: {common_sink_edges[edge.src_node]}"
                 
                 # Just making sure above is correct
                 # assert all(common_sink_edges[edge.src_node][0].switch_id == edge.switch_id for edge in common_sink_edges[edge.src_node]), f"Switch ID Mismatch: {common_sink_edges[edge.src_node]}" 
@@ -401,9 +441,11 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
             
             # Assert that this type is NOT in our segment types
             try:
-                assert wire_segment_id not in list(segments.keys()), f"Node: {nodes[edges[0].sink_node]} Edge: {edges[0]} is in Segment types"
+                assert wire_segment_id not in list(segments.keys()), f"Node: {nodes[node_id]} Edge: {edges[0]} is in Segment types with NO Fanout"
             except AssertionError:
-                print(f"Node: {nodes[edges[0].sink_node]} Edge: {edges[0]} is in Segment types and has NO fanin")
+                error_nodes[node_id] = (nodes[node_id])
+                error_no_fanout_edges[node_id] = edges\
+                # print(f"Node: {nodes[edges[0].sink_node]} Edge: {edges[0]} is in Segment types and has NO fanout")
 
 
     # switch_lookups = {
@@ -418,10 +460,15 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
         node_id: int = k
         # any([edge.switch_id in [L4_SW_ID, L16_SW_ID, ] for edge in edges])
 
+        # print(f"Node: {nodes[node_id]}")
+        # print(f"Edges: {edges}")
+
         # Make sure that all src edges are a node with a type in our segment types (representing general programmable routing)
-        wire_segment_id: int = int(nodes[edges[0].src_node].segment.get("segment_id")) if nodes[edges[0].src_node].segment else None
+        # wire_segment_id: int = int(nodes[edges[0].src_node].segment.get("segment_id")) if nodes[edges[0].src_node].segment else None
+        
+        wire_segment_id: int = int(nodes[node_id].segment.get("segment_id")) if nodes[node_id].segment else None
         # Make sure that our source nodes correspond to a SB mux (filtered in fanins)
-        if (wire_segment_id in list(segments.keys()) ) and edges[0].src_node in common_sink_edges.keys():
+        if (wire_segment_id in list(segments.keys()) ) and node_id in common_sink_edges.keys():
             # Init to empty dict
             mux_infos[node_id]['fanout'] = {}
             # Once its been initialized put fanin for each switch id and total
@@ -434,8 +481,12 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
             # Assert that the sum of all fanout values is equal to the total fanout
             assert len(edges) == sum(mux_infos[node_id]['fanout'][sw_id] for sw_id in mux_infos[node_id]['fanout'] if sw_id != 'total'), f"Fanout Mismatch: {edges}"
             
-            # Make sure that these common src edges have the same sw id, and the same wire type if not there's a bug in vpr
-            mux_infos[node_id]['drv_mux_type'] = switch_lookups[common_sink_edges[edges[0].src_node][0].switch_id]
+            # If we can't find the src node in common sinks then it has no fanin and we use our segment 2 switch lookup to find the right value
+            if not common_sink_edges.get(node_id):
+                mux_infos[node_id]['drv_mux_type'] = switch_lookups[seg_2_sw_ids_lookup[wire_segment_id]]
+            else:
+                # Make sure that these common src edges have the same sw id, and the same wire type if not there's a bug in vpr
+                mux_infos[node_id]['drv_mux_type'] = switch_lookups[common_sink_edges[node_id][0].switch_id]
             
             # assert all(edge.switch_id == edges[0].switch_id for edge in edges)
         else: 
@@ -446,9 +497,11 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
             # This assertion is failing with some nets not sure why
             try:
                  # Assert that this type is NOT in our segment types
-                assert wire_segment_id not in list(segments.keys()), f"Node: {nodes[edges[0].src_node]} Edge: {edges[0]} is in Segment types"
+                assert wire_segment_id not in list(segments.keys()), f"Node: {nodes[node_id]} Edge: {edges[0]} is in Segment types"
             except AssertionError:
-                print(f"Node: {nodes[edges[0].src_node]} Edge: {edges[0]} is in Segment types and has NO fanin")
+                error_nodes[node_id] = (nodes[node_id])
+                error_no_fanin_edges[node_id] = edges
+                # print(f"Node: {nodes[edges[0].src_node]} Edge: {edges[0]} is in Segment types and has NO fanin")
 
 
     # Uncommented below as filtering switch_ids should take care of this
@@ -459,6 +512,24 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
         # Condition which probably means this is an I/O or something thats not represented as either a SRC or SINK 
         if not fanout or not fanin:
             del mux_infos[k]
+
+
+        
+        # If Mux is Driving general programmable routing
+        # if nodes[node_id].segment:
+        #     # Get the segment id for the node
+        #     # seg_id = int(nodes[node_id].segment.get("segment_id"))
+        #     # # Get the switch id for the node
+        #     # sw_id = seg_2_sw_ids_lookup[seg_id]
+        #     # sw_type = switch_lookups[sw_id]
+        #     # Sanity Assertion
+        #     # assert sw_type == switch_lookups[common_sink_edges[nodes[node_id]].switch_id]
+
+        # # If its not we should only look for connection block ipins 
+        # elif common_sink_edges.get(nodes[node_id]) and switch_lookups[ common_sink_edges[nodes[node_id]].switch_id] == "ipin_cblock":
+        #     mux_freq_info["ipin_cblock"]
+            
+
 
     # Get list of gen wire segment ids
     seg_ids = list(segments.keys())
@@ -493,6 +564,7 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
         ]
     )
 
+    # Delete any mux infos from list that are on or have input / output on the boundary
     node_coord_xkeys = ['xlow', 'xhigh']
     node_coord_ykeys = ['ylow', 'yhigh']
     for k in sorted(mux_infos):
@@ -509,6 +581,21 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
                     del mux_infos[k]
                     continue
     
+    device_num_tiles_no_bounds = ((xmax-1) - (xmin + 1)) * ((ymax - 1) - (ymin + 1) )
+
+    mux_freq_info = defaultdict(dict)
+    # Use the common sink edges to find the number of muxes of each type (filtered with bounds)
+    for node_id in mux_infos.keys():
+        # Get the switch type for the node
+        sw_type = switch_lookups[common_sink_edges[node_id][0].switch_id]
+        # Count the number of Muxes of this  
+        mux_freq_info[sw_type]["FREQ"] = mux_freq_info[sw_type].get("FREQ", 0) + 1
+
+    # This calculates the frequency of Switches per tile but does not account for Hardblocks ie 
+    #   Assumes that the same number of switches exist in a hard block + a regular tile (could over estimate)
+    for sw_type in mux_freq_info.keys():
+        mux_freq_info[sw_type]["FREQ_PER_TILE"] = mux_freq_info[sw_type]["FREQ"] / device_num_tiles_no_bounds
+
 
     # Getting fanout fanin freq information
     for k in mux_infos.keys():
@@ -539,6 +626,9 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
     plot_dpath = os.path.join(result_dpath, "plots")
     os.makedirs(plot_dpath, exist_ok=True)
     print(f"Writing results to {result_dpath}")
+
+    # Output results for frequency of muxes
+    write_dict_to_csv([{"SWITCH_TYPE": k, "FREQ": v["FREQ"], "FREQ_PER_TILE": v["FREQ_PER_TILE"]} for k, v in mux_freq_info.items()], os.path.join(result_dpath, "rr_mux_freqs"))
 
     # We need to get fanin / fanout catagories for each switch type that exists in device
     fanin_label_sw_pairs = list(set([
@@ -688,7 +778,6 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
     ]
     # Plotting & Analysis
     wire_analysis_stats: Dict[str, Dict[str, dict]] = {} # Statistics that apply to an entire df column
-    wire_analysis_dfs: List[pd.DataFrame] = []
 
     for wire_df in wire_specific_dfs:
         if not wire_df.empty:

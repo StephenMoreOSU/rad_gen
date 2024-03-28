@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field, fields
 
+
 from typing import List, Dict, Any, Tuple, Union, Type
 
 
@@ -8,6 +9,61 @@ import logging
 # Rad Gen data structures
 import src.common.data_structs as rg_ds
 # import src.common.rr_parse as rrg_parse
+
+
+
+# def common_hash(obj):
+#     field_values = []
+
+#     for field in fields(obj):
+#         value = getattr(obj, field.name)
+
+#         # Check if the field is mutable
+#         if not dataclasses._is_classvar(field) and not dataclasses._is_initvar(field):
+#             # If the field is another dataclass, call custom_hash recursively
+#             if dataclasses.is_dataclass(value):
+#                 field_values.append(custom_hash(value))
+#             else:
+#                 field_values.append(value)
+
+#     # Combine the values of mutable fields to calculate the hash
+#     return hash(tuple(field_values))
+
+@dataclass
+class LoadCircuit():
+    id: int                                       = None                                   # Unique identifier for this sizeable circuit
+    name: str = None
+    sp_name: str = None
+    wire_names: List[str]                          = field(default_factory= lambda: []) 
+    # SizeableCircuits that are dependancies to create this loading circuit
+    dep_ckts: List[Type[SizeableCircuit]]           = field(default_factory= lambda: [])
+
+    def __post_init__(self):
+        self.sp_name = self.get_sp_name()    
+
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]):
+        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+        msg = "Function 'update_wires' must be overridden in class _SizableCircuit."
+        raise NotImplementedError(msg)
+
+    def generate(self):
+        """ Generate SPICE subcircuits.
+            Generate method for base class must be overridden by child. """
+        msg = "Function 'generate' must be overridden in class _SizableCircuit."
+        raise NotImplementedError(msg)
+
+    def get_sp_name(self) -> str:
+        """ 
+            Get the string used in spice for this subckt name
+        """
+        return f"{self.name}_id_{self.id}"
+
+    def get_param_str(self) -> str:
+        """ 
+            Get the spice string for this subckt parameter
+            Ex. "gen_routing_wire_L4" | "intra_tile_ble_2_sb"
+        """
+        return f"id_{self.id}"
 
 
 @dataclass
@@ -28,14 +84,33 @@ class SizeableCircuit():
     delay_weight: int | float                          = 1      # Delay weight in a representative critical path
     power: int | float                                 = 1      # Dynamic power for this subcircuit
 
-    basename: str 
+    name: str                                          = None
+    sp_name: str                                       = None
+    id: int                                            = None   # Unique identifier for this sizeable circuit
+
     num_per_tile: int                                  = None   # Number of this circuit in a tile
     circuit: rg_ds.SpSubCkt                            = None   # SpCircuit for this particular sizeable circuit
-    uid: int                                           = None   # Unique identifier for this sizeable circuit
     # circuit: SwitchBlockMux(_SizeableCircuit) <
     #     child of _SizableCircuit or _CompoundCircuit or whatever class we use to represent
     #     a circuit having a .subckt, top_level, update_area/wires, (generate_top?) and works with transistor sizing function
     # >
+
+    def __post_init__(self):
+        self.sp_name = self.get_sp_name()
+
+    def get_param_str(self) -> str:
+        """ 
+            Get the spice string for this subckt parameter
+            Ex. "gen_routing_wire_L4" | "intra_tile_ble_2_sb"
+        """
+        return f"id_{self.id}"
+
+    def get_sp_name(self) -> str:
+        """ 
+            Get the string used in spice for this subckt name
+        """
+        return f"{self.name}_id_{self.id}"
+
     def generate(self):
         """ Generate SPICE subcircuits.
             Generate method for base class must be overridden by child. """
@@ -59,6 +134,35 @@ class SizeableCircuit():
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         msg = "Function 'update_wires' must be overridden in class _SizableCircuit."
         raise NotImplementedError(msg)
+    
+
+@dataclass
+class CompoundCircuit():
+    """
+        Non sizable circuit containing sizeable circuits, has update_area + update_wire functions, however, they simlply call those functions for each sizeable circuit
+    """
+    
+    name: str = None
+    sp_name: str = None
+    id: int                                       = None                                   # Unique identifier for this sizeable circuit
+    
+    def __post_init__(self):
+        self.sp_name = self.get_sp_name() 
+
+    def get_sp_name(self) -> str:
+        """ 
+            Get the string used in spice for this subckt name
+        """
+        return f"{self.name}_id_{self.id}"
+
+    def generate(self):
+        """ Generate SPICE subcircuits.
+            Generate method for base class must be overridden by child. """
+        msg = "Function 'generate' must be overridden in class _SizableCircuit."
+        raise NotImplementedError(msg)
+
+
+
 
 
 @dataclass
@@ -229,19 +333,19 @@ class SpMeasure():
 #     id: int                        # Unique identifier for this wire, used to generate the wire name Ex. "gen_routing_wire_L4_0"
 #     length
 
-@dataclass
-class SpParam:
-    name: str                       # Name of the parameter, either tx
+# @dataclass
+# class SpParam:
+#     name: str                       # Name of the parameter, either tx
 
-@dataclass
-class SpWire:
-    # Describes a wire type in the FPGA
-    name: str                       # Name of the wire type, used for the SpParameter globally across circuits Ex. "gen_routing_wire_L4", "intra_tile_ble_2_sb"    
-    layer: int          # What RC index do we use for this wire (what metal layer does this corresond to?)
-    id: int                        # Unique identifier for this wire type, used to generate the wire name Ex. "gen_routing_wire_L4_0", "intra_tile_ble_2_sb_0"
-    def __post_init__(self):
-        # Struct verif checks
-        assert self.id >= 0, "uid must be a non-negative integer"
+# @dataclass
+# class SpWire:
+#     # Describes a wire type in the FPGA
+#     name: str                       # Name of the wire type, used for the SpParameter globally across circuits Ex. "gen_routing_wire_L4", "intra_tile_ble_2_sb"    
+#     layer: int          # What RC index do we use for this wire (what metal layer does this corresond to?)
+#     id: int                        # Unique identifier for this wire type, used to generate the wire name Ex. "gen_routing_wire_L4_0", "intra_tile_ble_2_sb_0"
+#     def __post_init__(self):
+#         # Struct verif checks
+#         assert self.id >= 0, "uid must be a non-negative integer"
 
 @dataclass
 class SimTB():
@@ -253,7 +357,10 @@ class SimTB():
     # Structs to generate .MEAS statements
     meas_points: List[SpMeasure]                                = None 
     # List of sizable circuits require definitions to be used in this simulation
-    ckt_def_deps: List[Type[SizeableCircuit]]                   = field(default_factory= lambda: [])
+    # ckt_def_deps: List[Type[SizeableCircuit]]                   = field(default_factory= lambda: [])
+    
+    # Instead of a list of ckt dependancies I'd rather just have pure definitions of the circuit objects in child clases
+
 
     # dep_wire_names: List[str] = []
     # dep_tx_names: List[str] = []
@@ -274,7 +381,7 @@ class Model:
                                                 #       Ex. "sb"
     # num_per_tile: int                           # Number of subckt instances per tile in the FPGA
     
-    sim_tb: SimTB                  = None   # Test Bench to be created to simulate this model with a set of parameters
+    sim_tb: Type[SimTB]                  = None   # Test Bench to be created to simulate this model with a set of parameters
     ckt_def: Type[SizeableCircuit] = None   # The Sizeable Circuit which we are modeling
     # Fields that should apply to all circuits globally on a device for a particular run
     # use_tgate: bool # Use tgate or pass transistor
@@ -284,6 +391,95 @@ class Model:
         # Struct verif checks
         # Assert that the ckt_def is in the isnts of SimTB.top_insts
         pass
+
+
+
+# RRG data structures are taken from csvs generated via the rr_parse script
+@dataclass
+class SegmentRRG():
+    """ 
+        This class describes a segment in the routing resource graph (RRG). 
+    """
+    # Required fields
+    name: str            # Name of the segment
+    id: int               
+    length: int          # Length of the segment in number of tiles
+    C_per_meter: float  # Capacitance per meter of the segment (FROM VTR)
+    R_per_meter: float  # Resistance per meter of the segment (FROM VTR)
+
+@dataclass
+class SwitchRRG():
+    name: str
+    id: int
+    type: str
+    R: float        = None 
+    Cin: float      = None 
+    Cout: float     = None 
+    Tdel: float     = None 
+
+
+@dataclass
+class MuxLoadRRG():
+    wire_type: str  # What is the wire type being driven by this mux load?
+    mux_type: str   # What loading mux are we referring to?
+    freq: int       # How many of these muxes are attached?
+
+@dataclass
+class MuxIPIN():
+    wire_type: str      # What is the wire type going into this mux IPIN?
+    drv_type: str       # What is the driver type of the wire going into this mux IPIN?
+    freq: int          # How many of these muxes are attached?
+
+@dataclass
+class MuxWireStatRRG():
+    wire_type: str                # What wire are we referring to?
+    drv_type: str                 # What mux is driving this wire?
+    mux_ipins: List[MuxIPIN]      # What are the mux types / frequency attached to this wire?
+    mux_loads: List[MuxLoadRRG]   # What are mux types / frequency attached to this wire?
+    total_mux_inputs: int         = None  # How many mux inputs for mux driving this wire?
+    total_wire_loads: int         = None  # How many wires are loading this mux in total of all types?
+    num_mux_per_tile: int         = None # How many of these muxes are in a tile?
+    num_mux_per_device: int       = None # How many of these muxes are in a device?
+    def __post_init__(self):
+        self.total_mux_inputs = sum([mux_ipin.freq for mux_ipin in self.mux_ipins])
+        self.total_wire_loads = sum([mux_load.freq for mux_load in self.mux_loads])
+
+@dataclass
+class Wire:
+    # Describes a wire type in the FPGA
+    name: str           = None            # Name of the wire type, used for the SpParameter globally across circuits Ex. "gen_routing_wire_L4", "intra_tile_ble_2_sb"    
+    layer: int          = None            # What RC index do we use for this wire (what metal layer does this corresond to?)
+    id: int             = None            # Unique identifier for this wire type, used to generate the wire name Ex. "gen_routing_wire_L4_0", "intra_tile_ble_2_sb_0"
+    def __post_init__(self):
+        # Struct verif checks
+        assert self.id >= 0, "uid must be a non-negative integer"
+
+    def get_sp_param_str(self) -> str:
+        """ 
+            Get the spice string for this wire type
+            Ex. "gen_routing_wire_L4" | "intra_tile_ble_2_sb"
+        """
+        return f"{self.name}_id_{self.id}"
+    
+    def __hash__(self):
+        # Returns a unique id for this class, easier to think of like a pointer or reference
+        return id(self)
+
+
+@dataclass
+class GenRoutingWire(Wire):
+    """ 
+        This class describes a general routing wire in an FPGA. 
+    """
+    name: str                = "wire_gen_routing"
+    type: str                = None # The string associated with "WIRE_TYPE" column in rr_parse.py output rr_wire_stats.csv
+    num_starting_per_tile: int  = None # Avg number of these wires starting in a tile, from RRG
+    freq: int                = None # How many of these wires are in a channel?
+    # Required fields
+    length: int              = None # Length of the general routing wire in number of tiles
+
+    def __hash__(self):
+        return id(self)
 
 
 @dataclass
@@ -323,7 +519,7 @@ class Specs:
         self.Fclocal                 = arch_params_dict['Fclocal']
         self.num_ble_general_outputs = arch_params_dict['Or']
         self.num_ble_local_outputs   = arch_params_dict['Ofb']
-        self.num_cluster_outputs     = self.N*self.num_ble_general_outputs
+        self.num_cluster_outputs     = self.N * self.num_ble_general_outputs
         self.Rsel                    = arch_params_dict['Rsel']
         self.Rfb                     = arch_params_dict['Rfb']
         self.use_fluts               = arch_params_dict['use_fluts']
