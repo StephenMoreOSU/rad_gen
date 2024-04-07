@@ -6,20 +6,20 @@ from typing import List, Dict, Any, Tuple, Union, Type
 
 import src.coffe.data_structs as c_ds
 import src.coffe.utils as utils
-
 import src.coffe.mux as mux
 
-import src.coffe.new_fpga as fpga
+import src.coffe.new_ble as ble_lib
+import src.coffe.new_lut as lut_lib
 
+import src.coffe.constants as consts
 
 @dataclass
-class LocalMux(mux.Mux):
+class LocalMux(mux.Mux2Lvl):
     name: str                                       = "local_mux"
 
     def __post_init__(self):
         super().__post_init__()
-        self.sp_name = self.get_sp_name()
-        self.delay_weight = fpga.DELAY_WEIGHT_LOCAL_MUX
+        self.delay_weight = consts.DELAY_WEIGHT_LOCAL_MUX
 
     def __hash__(self):
         return id(self)
@@ -58,8 +58,8 @@ class LocalMux(mux.Mux):
         wire_lengths["wire_" + self.sp_name + "_L1"] = width_dict[self.sp_name] * ratio
         wire_lengths["wire_" + self.sp_name + "_L2"] = width_dict[self.sp_name] * ratio
         # Update wire layers
-        wire_layers["wire_" + self.sp_name + "_L1"] = fpga.LOCAL_WIRE_LAYER
-        wire_layers["wire_" + self.sp_name + "_L2"] = fpga.LOCAL_WIRE_LAYER
+        wire_layers["wire_" + self.sp_name + "_L1"] = consts.LOCAL_WIRE_LAYER
+        wire_layers["wire_" + self.sp_name + "_L2"] = consts.LOCAL_WIRE_LAYER
 
 
 
@@ -81,8 +81,14 @@ class LocalRoutingWireLoad(c_ds.LoadCircuit):
     partial_inputs_per_wire: int = None # Number of partially on inputs connected to each wire
     off_inputs_per_wire: int = None     # Number of off inputs connected to each wire
 
+    def __post_init__(self):
+        super().__post_init__()
+
     def local_routing_load_generate(self, spice_filename: str) -> List[str]:
         """ """
+
+        subckt_local_mux: str = self.local_mux.sp_name
+
         num_on: int = self.on_inputs_per_wire
         num_partial: int = self.partial_inputs_per_wire
         num_off: int = self.off_inputs_per_wire
@@ -99,7 +105,7 @@ class LocalRoutingWireLoad(c_ds.LoadCircuit):
         spice_file.write("******************************************************************************************\n")
         spice_file.write("* Local routing wire load\n")
         spice_file.write("******************************************************************************************\n")
-        spice_file.write(".SUBCKT local_routing_wire_load n_in n_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_mux_on\n")
+        spice_file.write(f".SUBCKT {self.sp_name} n_in n_out n_gate n_gate_n n_vdd n_gnd n_vdd_local_mux_on\n")
         
         num_total = int(num_on + num_partial + num_off)
         interval_counter_partial = 0
@@ -112,6 +118,9 @@ class LocalRoutingWireLoad(c_ds.LoadCircuit):
         current_node = "n_in"
         next_node = "n_1"
         
+        # Wire defintions
+        wire_local_routing: str = f"wire_local_routing_{self.get_param_str()}"
+
         # Write SPICE file while keeping correct intervals between partial and on muxes
         for i in range(num_total):
             if interval_counter_partial == interval_partial and on_counter < num_on:
@@ -119,25 +128,25 @@ class LocalRoutingWireLoad(c_ds.LoadCircuit):
                     interval_counter_partial = 0
                     on_counter = on_counter + 1
                     if on_counter == num_on:
-                        spice_file.write("Xwire_local_routing_" + str(i+1) + " " + current_node + " " + next_node + " wire Rw='wire_local_routing_res/" + str(num_total) + "' Cw='wire_local_routing_cap/" + str(num_total) + "'\n")
-                        spice_file.write("Xlocal_mux_on_" + str(on_counter) + " " + next_node + " n_out n_gate n_gate_n n_vdd_local_mux_on n_gnd local_mux_on\n")
+                        spice_file.write(f"X{wire_local_routing}_" + str(i+1) + " " + current_node + " " + next_node + f" wire Rw='{wire_local_routing}_res/" + str(num_total) + f"' Cw='{wire_local_routing}_cap/" + str(num_total) + "'\n")
+                        spice_file.write(f"X{subckt_local_mux}_on_" + str(on_counter) + " " + next_node + f" n_out n_gate n_gate_n n_vdd_local_mux_on n_gnd {subckt_local_mux}_on\n")
                     else:
-                        spice_file.write("Xwire_local_routing_" + str(i+1) + " " + current_node + " " + next_node + " wire Rw='wire_local_routing_res/" + str(num_total) + "' Cw='wire_local_routing_cap/" + str(num_total) + "'\n")
-                        spice_file.write("Xlocal_mux_on_" + str(on_counter) + " " + next_node + " n_hang_" + str(on_counter) + " n_gate n_gate_n n_vdd n_gnd local_mux_on\n")    
+                        spice_file.write(f"X{wire_local_routing}_" + str(i+1) + " " + current_node + " " + next_node + f" wire Rw='{wire_local_routing}_res/" + str(num_total) + f"' Cw='{wire_local_routing}_cap/" + str(num_total) + "'\n")
+                        spice_file.write(f"X{subckt_local_mux}_on_" + str(on_counter) + " " + next_node + " n_hang_" + str(on_counter) + f" n_gate n_gate_n n_vdd n_gnd {subckt_local_mux}_on\n")    
             else:
                 if interval_counter_off == interval_off and partial_counter < num_partial:
                     # Add a partially on mux
                     interval_counter_off = 0
                     interval_counter_partial = interval_counter_partial + 1
                     partial_counter = partial_counter + 1
-                    spice_file.write("Xwire_local_routing_" + str(i+1) + " " + current_node + " " + next_node + " wire Rw='wire_local_routing_res/" + str(num_total) + "' Cw='wire_local_routing_cap/" + str(num_total) + "'\n")
-                    spice_file.write("Xlocal_mux_partial_" + str(partial_counter) + " " + next_node + " n_gate n_gate_n n_vdd n_gnd local_mux_partial\n")
+                    spice_file.write(f"X{wire_local_routing}_" + str(i+1) + " " + current_node + " " + next_node + f" wire Rw='{wire_local_routing}_res/" + str(num_total) + f"' Cw='{wire_local_routing}_cap/" + str(num_total) + "'\n")
+                    spice_file.write(f"X{subckt_local_mux}_partial_" + str(partial_counter) + " " + next_node + f" n_gate n_gate_n n_vdd n_gnd {subckt_local_mux}_partial\n")
                 else:
                     # Add an off mux
                     interval_counter_off = interval_counter_off + 1
                     off_counter = off_counter + 1
-                    spice_file.write("Xwire_local_routing_" + str(i+1) + " " + current_node + " " + next_node + " wire Rw='wire_local_routing_res/" + str(num_total) + "' Cw='wire_local_routing_cap/" + str(num_total) + "'\n")
-                    spice_file.write("Xlocal_mux_off_" + str(off_counter) + " " + next_node + " n_gate n_gate_n n_vdd n_gnd local_mux_off\n")
+                    spice_file.write(f"X{wire_local_routing}_" + str(i+1) + " " + current_node + " " + next_node + f" wire Rw='{wire_local_routing}_res/" + str(num_total) + f"' Cw='{wire_local_routing}_cap/" + str(num_total) + "'\n")
+                    spice_file.write(f"X{subckt_local_mux}_off_" + str(off_counter) + " " + next_node + f" n_gate n_gate_n n_vdd n_gnd {subckt_local_mux}_off\n")
             # Update current and next nodes        
             current_node = next_node
             next_node = "n_" + str(i+2)
@@ -148,15 +157,14 @@ class LocalRoutingWireLoad(c_ds.LoadCircuit):
     
         # Create a list of all wires used in this subcircuit
         wire_names_list = []
-        wire_names_list.append("wire_local_routing")
+        wire_names_list.append(wire_local_routing)
         
         return wire_names_list
 
-    def generate(self, subcircuit_filename, specs, local_mux):
+    def generate(self, subcircuit_filename: str, specs: c_ds.Specs):
         print("Generating local routing wire load")
         # Compute load (number of on/partial/off per wire)
-        self._compute_load(specs, local_mux)
-        #print(self.off_inputs_per_wire)
+        self._compute_load(specs)
         # Generate SPICE deck
         self.wire_names = self.local_routing_load_generate(subcircuit_filename)
 
@@ -201,25 +209,33 @@ class LocalRoutingWireLoad(c_ds.LoadCircuit):
         if local_routing_wire_load_length != 0:
             wire_lengths["wire_local_routing"] = local_routing_wire_load_length
         # Update wire layers
-        wire_layers["wire_local_routing"] = fpga.LOCAL_WIRE_LAYER
+        wire_layers["wire_local_routing"] = consts.LOCAL_WIRE_LAYER
 
 
 @dataclass
 class LocalBLEOutputLoad(c_ds.LoadCircuit):
     name: str = "local_ble_output_load"
 
+    # Child Subckts
+    local_routing_wire_load: LocalRoutingWireLoad = None
+    lut_input_driver: lut_lib.LUTInputDriver = None
+
+    def __post_init__(self):
+        super().__post_init__()
+
     def generate_local_ble_output_load(self, spice_filename: str) -> List[str]:
         # Open SPICE file for appending
         spice_file = open(spice_filename, 'a')
         
-        
+        wire_loc_ble_out_fb = f"wire_local_ble_output_{self.get_param_str()}_feedback"
+
         spice_file.write("******************************************************************************************\n")
         spice_file.write("* Local BLE output load\n")
         spice_file.write("******************************************************************************************\n")
-        spice_file.write(".SUBCKT local_ble_output_load n_in n_gate n_gate_n n_vdd n_gnd\n")
-        spice_file.write("Xwire_local_ble_output_feedback n_in n_1_1 wire Rw='wire_local_ble_output_feedback_res' Cw='wire_local_ble_output_feedback_cap'\n")
-        spice_file.write("Xlocal_routing_wire_load_1 n_1_1 n_1_2 n_gate n_gate_n n_vdd n_gnd n_vdd local_routing_wire_load\n")
-        spice_file.write("Xlut_a_driver_1 n_1_2 n_hang1 vsram vsram_n n_hang2 n_hang3 n_vdd n_gnd lut_a_driver\n\n")
+        spice_file.write(f".SUBCKT {self.sp_name} n_in n_gate n_gate_n n_vdd n_gnd\n")
+        spice_file.write(f"X{wire_loc_ble_out_fb} n_in n_1_1 wire Rw='{wire_loc_ble_out_fb}_res' Cw='{wire_loc_ble_out_fb}_cap'\n")
+        spice_file.write(f"X{self.local_routing_wire_load.sp_name}_1 n_1_1 n_1_2 n_gate n_gate_n n_vdd n_gnd n_vdd {self.local_routing_wire_load.sp_name}\n")
+        spice_file.write(f"X{self.lut_input_driver.sp_name}_1 n_1_2 n_hang1 vsram vsram_n n_hang2 n_hang3 n_vdd n_gnd {self.lut_input_driver.sp_name}\n\n")
         spice_file.write(".ENDS\n\n\n")
         
         spice_file.close()
@@ -242,8 +258,7 @@ class LocalBLEOutputLoad(c_ds.LoadCircuit):
         if ble_ic_dis != 0:
             wire_lengths["wire_local_ble_output_feedback"] = ble_ic_dis
         # Update wire layers
-        wire_layers["wire_local_ble_output_feedback"] = fpga.LOCAL_WIRE_LAYER
-
+        wire_layers["wire_local_ble_output_feedback"] = consts.LOCAL_WIRE_LAYER
 
 
 @dataclass
@@ -256,8 +271,6 @@ class LogicCluster(c_ds.CompoundCircuit):
     # General FPGA Parameters relevant to the logic cluster
     num_lc_inputs: int = None # Number of total inputs to the logic cluster (I)
     cluster_size: int = None # cluster size (N)
-    num_ble_inputs: int = None # Number of inputs per BLE in cluster (K)
-    num_ble_feedback_outputs: int = None #Number of outputs per BLE that feed back to local muxes (Ofb)
     
     # General Circuit Params
     use_tgate: bool = None
@@ -268,10 +281,17 @@ class LogicCluster(c_ds.CompoundCircuit):
     local_mux_size_required: int = None
     num_local_mux_per_tile: int = None
     
-    # Logic Cluster / BLE specific Params
-    enable_carry_chain: bool = None
-    FAs_per_flut: int = None
-    carry_skip_periphery_count: int = None
+    # BLE specific Params   
+    enable_carry_chain: bool = None     # Enable carry chain in BLEs
+    FAs_per_flut: int = None            # Hard Adders per fracturable LUT
+    carry_skip_periphery_count: int = None # TODO figure out 
+    
+    num_inputs_per_ble: int = None # Number of inputs per BLE in cluster (K)
+    num_fb_outputs_per_ble: int = None #Number of outputs per BLE that feed back to local muxes (Ofb)
+    num_gen_outputs_per_ble: int = None # Number of general outputs sent to SBs per BLE (Or)
+    Rsel: str = None # Rsel value for the BLEs in this logic cluster
+    Rfb: str = None # Rfb value for the BLEs in this logic cluster
+
 
     # SizeableCircuits (created in __post_init__) in rough order of input -> outputs
     local_mux: LocalMux = None # Local Mux
@@ -279,7 +299,65 @@ class LogicCluster(c_ds.CompoundCircuit):
     ble: ble_lib.BLE = None # BLE sizeable circuit
     local_ble_output_load: LocalBLEOutputLoad = None # Output load of BLE load circuit
 
+    def __post_init__(self):
+        # Create BLE
+        self.ble = ble_lib.BLE(
+            id = 0,
+            cluster_size = self.cluster_size,
+            # Per BLE Params
+            num_lut_inputs = self.num_inputs_per_ble,
+            num_local_outputs = self.num_fb_outputs_per_ble,
+            num_general_outputs = self.num_gen_outputs_per_ble,
+            Rsel = self.Rsel,
+            Rfb = self.Rfb,
+            enable_carry_chain = self.enable_carry_chain,
+            FAs_per_flut = self.FAs_per_flut,
+            carry_skip_periphery_count = self.carry_skip_periphery_count,
+            # Transistor Parameters
+            use_tgate = self.use_tgate,
+            use_finfet = self.use_finfet,
+            use_fluts = self.use_fluts,
+        )
+        # Create Local Mux
+        self.local_mux = LocalMux(
+            id = 0,
+            required_size = self.local_mux_size_required,
+        )
+        # Create Local Routing Wire Load (load on a single wire going into local muxes)
+        self.local_routing_wire_load = LocalRoutingWireLoad(
+            id = 0,
+            lut_input_usage_assumption = consts.LUT_INPUT_USAGE_ASSUMPTION,
+            local_mux = self.local_mux,
+        )
+        self.local_ble_output_load = LocalBLEOutputLoad(
+            id = 0,
+            local_routing_wire_load = self.local_routing_wire_load,
+            lut_input_driver = self.ble.lut.input_drivers["a"].driver, # Pass in the LUT input driver for "a" input
+        )
+        # OLD BLE
+        # self.ble = _BLE(
+        #     K, Or, Ofb, Rsel, Rfb, use_tgate, use_finfet, use_fluts, enable_carry_chain,
+        #     FAs_per_flut, carry_skip_periphery_count, N,
+        #     gen_r_wire,
+        #     self.local_ble_output_load,
+        #     self.gen_ble_output_load
+        # )
 
 
+
+    def generate(self, subcircuits_filename: str, min_tran_width, specs: c_ds.Specs) -> Dict[str, int | float]:
+        print("Generating logic cluster")
+        init_tran_sizes = {}
+        init_tran_sizes.update(
+            self.ble.generate(subcircuits_filename, min_tran_width)
+        )
+        init_tran_sizes.update(
+            self.local_mux.generate(subcircuits_filename)
+        )
+        # Don't pass these into init_tran sizes as they are only load circuits
+        self.local_routing_wire_load.generate(subcircuits_filename, specs)
+        self.local_ble_output_load.generate(subcircuits_filename)
+        
+        return init_tran_sizes
 
 

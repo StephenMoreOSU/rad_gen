@@ -78,6 +78,24 @@ def log_format_list(*args : Tuple[str]) -> str:
 # ╚██████╔╝███████╗██║ ╚████║███████╗██║  ██║██║  ██║███████╗    ╚██████╔╝   ██║   ██║███████╗███████║
 #  ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
 
+
+def get_unique_obj(objects: List[Any], condition: Callable) -> Any:
+    """
+        Returns an object from a list that satisfies the callable condition
+            if no objects satisfy this condition we throw error as it should exist
+            if multiple objects satisfy this condition, we throw error as it should be unique
+    """
+    matching_objs: List[Any] = [obj for obj in objects if condition(obj)]
+    if len(matching_objs) == 0:
+        raise ValueError("ERROR: No matching object found")
+    elif len(matching_objs) > 1:
+        raise ValueError("ERROR: Multiple matching objects found")
+    elif len(matching_objs) == 1:
+        return matching_objs[0]
+    else:
+        raise ValueError("ERROR: No matching object found")    
+
+
 def typecast_input_to_dataclass(input_value: dict, dataclass_type: Any) -> Any:
     """
     Typecasts input_value to the corresponding dataclass_type.

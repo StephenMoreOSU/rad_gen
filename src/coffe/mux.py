@@ -6,7 +6,8 @@ from typing import List, Dict, Any, Tuple, Union, Type
 
 import src.coffe.mux_subcircuits as mux_subcircuits
 import src.coffe.data_structs as c_ds
-import src.coffe.fpga as fpga
+# import src.coffe.fpga as fpga
+import src.coffe.constants as consts
 
 
 @dataclass
@@ -159,7 +160,7 @@ class Mux2Lvl(c_ds.SizeableCircuit):
         
         # Write out the spice netlist for this SubCkt definition
         if not self.use_tgate:
-            self.transistor_names, self.wire_names = self.generate_tgate_2lvl_mux(subckt_lib_fpath)
+            self.transistor_names, self.wire_names = self.generate_ptran_2lvl_mux(subckt_lib_fpath)
             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
             self.initial_transistor_sizes["ptran_" + sp_name + "_L1_nmos"] = 3
             self.initial_transistor_sizes["ptran_" + sp_name + "_L2_nmos"] = 4
@@ -170,7 +171,7 @@ class Mux2Lvl(c_ds.SizeableCircuit):
             self.initial_transistor_sizes["inv_" + sp_name + "_2_pmos"] = 20
 
         else:
-            self.transistor_names, self.wire_names = self.generate_ptran_2lvl_mux(subckt_lib_fpath)
+            self.transistor_names, self.wire_names = self.generate_tgate_2lvl_mux(subckt_lib_fpath)
             # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
             self.initial_transistor_sizes["tgate_" + sp_name + "_L1_nmos"] = 3
             self.initial_transistor_sizes["tgate_" + sp_name + "_L1_pmos"] = 3
@@ -261,9 +262,9 @@ class Mux2Lvl(c_ds.SizeableCircuit):
         wire_lengths[l2_wire_key] = width_dict[sp_name] * ratio
         
         # Update set wire layers
-        wire_layers[drv_wire_key] = fpga.LOCAL_WIRE_LAYER
-        wire_layers[l1_wire_key] = fpga.LOCAL_WIRE_LAYER
-        wire_layers[l2_wire_key] = fpga.LOCAL_WIRE_LAYER
+        wire_layers[drv_wire_key] = consts.consts.LOCAL_WIRE_LAYER
+        wire_layers[l1_wire_key] = consts.consts.LOCAL_WIRE_LAYER
+        wire_layers[l2_wire_key] = consts.consts.LOCAL_WIRE_LAYER
 
 
 
@@ -271,6 +272,9 @@ class Mux2Lvl(c_ds.SizeableCircuit):
 class Mux2to1(c_ds.SizeableCircuit):
     # Describes a simple 2:1 Mux circuit
     use_tgate: bool                 = None # use pass transistor or transmission gates -> coming from Model class
+
+    def __post_init__(self):
+        super().__post_init__()
 
     def generate_ptran_2_to_1_mux(self, spice_filename: str) -> Tuple[ List[str], List[str] ]:
         """ Generate a 2:1 pass-transistor MUX with shared SRAM """
@@ -404,5 +408,5 @@ class Mux2to1(c_ds.SizeableCircuit):
         wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_1"])/4
         
         # Update wire layers
-        wire_layers["wire_" + self.name] = fpga.LOCAL_WIRE_LAYER
-        wire_layers["wire_" + self.name + "_driver"] = fpga.LOCAL_WIRE_LAYER
+        wire_layers["wire_" + self.name] = consts.LOCAL_WIRE_LAYER
+        wire_layers["wire_" + self.name + "_driver"] = consts.LOCAL_WIRE_LAYER

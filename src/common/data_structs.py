@@ -1482,6 +1482,36 @@ class SpSubCktInst:
                 print(f"{key:<10} = {val:>10}")
 
 
+    def get_sp_str(self) -> str:
+        """ Generates the instance line for a spice subckt """
+        # TODO FIX to make work for BUFFER DSE currently only used in COFFE
+        subckt_inst_sublines = [
+            f"{self.name}",
+        ]
+        # create list of connections of length of inst ports
+        port_conns = [None]*len(self.subckt.ports)
+        # iterate over connections and top level subckt io ports
+        assert set(list(self.conns.keys())) == set(list(self.subckt.ports.keys())), print("Connections and ports do not match for subckt instantiation")
+        for conn_key, conn_val in self.conns.items():
+            for port_key, port_val in self.subckt.ports.items():
+                if conn_key == port_key:
+                    # create a connection at the right idx
+                    # subckt_inst_sublines.append(conn_val)
+                    # TODO FIXME this is a discrepency in definition of SpSubCkt.ports between what is done in BUFFER_DSE
+                    # CRITICAL FIX
+                    port_conns[port_val] = conn_val
+                    break
+        subckt_inst_sublines.extend(port_conns)
+        param_strs = [f"{param}={val}" for param, val in self.param_values.items()]
+        assert None not in subckt_inst_sublines, print("Not all connections made in instantiation:", *subckt_inst_sublines)
+        
+        # subckt or mfet
+        if self.subckt.prefix == "X" or self.subckt.prefix == "M":
+            subckt_inst_sublines = [*subckt_inst_sublines, self.subckt.name, *param_strs]
+        else:
+            subckt_inst_sublines = [*subckt_inst_sublines, *param_strs]
+        return " ".join(subckt_inst_sublines)
+
     # initialize the param_values to those stored in the subckt params, if the user wants to override them they will specify them at creation of SpSubCktInst object
     def __post_init__(self):
         # <TODO CRITICAL> FIX THIS FOR IC 3D STUFF

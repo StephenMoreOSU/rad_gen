@@ -1,7 +1,7 @@
 import src.coffe.utils as utils
 
 from typing import Dict, List, Tuple, Union, Any, Set
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import copy
 import math, os
 import src.coffe.data_structs as c_ds
@@ -34,6 +34,9 @@ class GeneralBLEOutputLoad(c_ds.LoadCircuit):
     def __post_init__(self):
         self.sp_name = self.get_sp_name()
         self.sb_load_types = defaultdict(lambda: {"num_on": 0, "num_partial": 0, "num_off": 0})
+    
+    def __hash__(self) -> int:
+        return id(self)
 
     def generate(self, subcircuit_filename: str, specs: c_ds.Specs):
         """ Compute cluster output load load and generate SPICE netlist. """
@@ -57,7 +60,7 @@ class GeneralBLEOutputLoad(c_ds.LoadCircuit):
         
         # Calculate the number of on, partial, and off SB Mux paths for each SB mux type in sb_mux_load_dist keys
         for sb_mux_load in self.sb_mux_load_dist.keys():
-            self.sb_load_types[sb_mux_load]["num_on"] = self.sb_mux_on_assumption_freqs[sb_mux_load]
+            self.sb_load_types[sb_mux_load]["num_on"] = self.sb_mux_on_assumption_freqs.get(sb_mux_load, 0)
             self.sb_load_types[sb_mux_load]["num_partial"] = int(
                 total_load * self.channel_usage_assumption \
                     * self.sb_mux_load_dist[sb_mux_load] * (1 / sb_mux_load.level1_size)
@@ -182,9 +185,14 @@ class RoutingWireLoad(c_ds.LoadCircuit):
     # sb_mux_isbd: Dict[sb_mux_lib.SwitchBlockMux, int] = None  # For each SB mux how frequently does it branch out to 
     terminal_sb_mux: sb_mux_lib.SwitchBlockMux = None                       # What SB mux is driven at the end of this wire load?
     sb_mux_load_freqs: Dict[sb_mux_lib.SwitchBlockMux, int] = None               # W.r.t the SB muxes loading this wire, how many of each type are there?
-    sb_mux_on_assumption_freqs: Dict[sb_mux_lib.SwitchBlockMux, int] = None  # Which SB muxes (and how many of each) are driving an ON mux in this load?
+    sb_mux_on_assumption_freqs: Dict[sb_mux_lib.SwitchBlockMux, int] = field(
+        default_factory = lambda: {}
+    )  # Which SB muxes (and how many of each) are driving an ON mux in this load?
+    terminal_cb_mux: cb_mux_lib.ConnectionBlockMux = None # What is the terminal CB mux driven
     cb_mux_load_freqs: Dict[cb_mux_lib.ConnectionBlockMux, int] = None # W.r.t the SB muxes loading this wire, how many of each type are there?
-    cb_mux_on_assumption_freqs: Dict[cb_mux_lib.ConnectionBlockMux, int] = None  # Which SB muxes (and how many of each) are driving an ON mux in this load?
+    cb_mux_on_assumption_freqs: Dict[cb_mux_lib.ConnectionBlockMux, int] = field(
+        default_factory = lambda: {}
+    )  # Which SB muxes (and how many of each) are driving an ON mux in this load?
 
     # Used as inputs to compute_load, Initialized in __post_init__
     # Calculated in compute_load
@@ -199,6 +207,9 @@ class RoutingWireLoad(c_ds.LoadCircuit):
     def __post_init__(self):
         self.sp_name = self.get_sp_name()
 
+    def __hash__(self) -> int:
+        return id(self)
+
     def _compute_load(self, specs: c_ds.Specs):
         # Local variables
         W: int = specs.W
@@ -210,31 +221,57 @@ class RoutingWireLoad(c_ds.LoadCircuit):
         self.sb_load_budgets = defaultdict(lambda: {"num_on": 0, "num_partial": 0, "num_off": 0})
         sb_load: sb_mux_lib.SwitchBlockMux
         for sb_load, freq in self.sb_mux_load_freqs.items():
-            self.sb_load_budgets[sb_load]["num_on"] = self.sb_mux_on_assumption_freqs[sb_load]
+            self.sb_load_budgets[sb_load]["num_on"] = self.sb_mux_on_assumption_freqs.get(sb_load, 0)
             self.sb_load_budgets[sb_load]["num_partial"] = int(freq * self.channel_usage_assumption * (1 / sb_load.level1_size))
             self.sb_load_budgets[sb_load]["num_off"] = freq - (self.sb_load_budgets[sb_load]["num_on"] + self.sb_load_budgets[sb_load]["num_partial"])
-        
-        # Total budget in ON, OFF, PARTIALs across all SB types
-        sb_load_state_budget_totals = {
-            "num_on": sum([sb_info["num_on"] for sb_info in self.sb_load_budgets.values()]),
-            "num_partial": sum([sb_info["num_partial"] for sb_info in self.sb_load_budgets.values()]),
-            "num_off": sum([sb_info["num_off"] for sb_info in self.sb_load_budgets.values()])
+
+        # Create dict for the target frequency we'd like to achieve for each type of SB mux
+        sb_mux_load_targ_dist: Dict[sb_mux_lib.SwitchBlockMux, float] = {
+            sb_load: freq / sum(self.sb_mux_load_freqs.values()) 
+                for sb_load, freq in self.sb_mux_load_freqs.items()
         }
+        # Total budget in ON, OFF, PARTIALs across all SB types
+        # sb_load_state_budget_totals = {
+        #     "num_on": sum([sb_info["num_on"] for sb_info in self.sb_load_budgets.values()]),
+        #     "num_partial": sum([sb_info["num_partial"] for sb_info in self.sb_load_budgets.values()]),
+        #     "num_off": sum([sb_info["num_off"] for sb_info in self.sb_load_budgets.values()])
+        # }
         # Total budget for each type of SB mux, not broken down by ON, OFF, PARTIAL
         sb_load_type_budget_totals = {
             sb_load: sb_info["num_on"] + sb_info["num_partial"] + sb_info["num_off"]
                 for sb_load, sb_info in self.sb_load_budgets.items()
         }
+        # If the number of partial muxes is 0, we round up to 1 to model a worst case
+        # Choose the highest freq sb mux to round up partial load
+        most_freq_sb_mux = max(self.sb_load_budgets, key=sb_load_type_budget_totals.get)
+        if self.sb_load_budgets[most_freq_sb_mux]["num_partial"] == 0:
+            self.sb_load_budgets[most_freq_sb_mux]["num_partial"] = 1
 
         self.cb_load_budgets = defaultdict(lambda: {"num_on": 0, "num_partial": 0, "num_off": 0})
         # CB Mux Budget Calc
         cb_load: cb_mux_lib.ConnectionBlockMux
         # TODO update to take an inputted freq rather than calculating it ourselves 
         for cb_load, freq in self.cb_mux_load_freqs.items():
-            # Calculate connection block load per tile
-            # We assume that cluster inputs are divided evenly between horizontal and vertical routing channels
-            # We can get the total number of CB inputs connected to the channel segment by multiplying cluster inputs by cb_mux_size, then divide by W to get cb_inputs/wire
-            cb_load_per_tile = int(round(float(I / 2 * cb_load.implemented_size) / W))
+
+            cb_load_on_probability = float((I / 2.0 * self.cluster_input_usage_assumption * L)) / (W * self.channel_usage_assumption)
+            cb_load_on = int(round(cb_load_on_probability))
+
+            cb_load_partial_probability = (I / 2 * self.cluster_input_usage_assumption * (cb_load.level2_size - 1) * L) / W
+            cb_load_partial = int(round(cb_load_partial_probability))
+
+            if freq == 0:
+                for cb_state in self.cb_load_budgets.keys():
+                    self.cb_load_budgets[cb_load][cb_state] = 0
+            else:
+                self.cb_load_budgets[cb_load]["num_on"] = cb_load_on
+                self.cb_load_budgets[cb_load]["num_partial"] = cb_load_partial
+                self.cb_load_budgets[cb_load]["num_off"] = freq - (self.cb_load_budgets[cb_load]["num_on"] + self.cb_load_budgets[cb_load]["num_partial"])
+
+            # # Calculate connection block load per tile
+            # # We assume that cluster inputs are divided evenly between horizontal and vertical routing channels
+            # # We can get the total number of CB inputs connected to the channel segment by multiplying cluster inputs by cb_mux_size, then divide by W to get cb_inputs/wire
+            # cb_load_per_tile = int(round(float(I / 2 * cb_load.implemented_size) / W))
+
             # Now we got to find out how many are on, how many are partially on and how many are off
             # For each tile, we have half of the cluster inputs connecting to a routing channel and only a fraction of these inputs are actually used
             # It is logical to assume that used cluster inputs will be connected to used routing wires, so we have I/2*input_usage inputs per tile,
@@ -242,56 +279,88 @@ class RoutingWireLoad(c_ds.LoadCircuit):
             # If we look at the whole wire, we are selecting I/2*input_usage*L signals from W*channel_usage wires
             # Even though all the wires are not of minimum length, we use the same W for all wires 
             #       because it would be innacurate to just use the portion of channel of minimum length (we are doing an estimate)
-            cb_load_on_probability = float((I / 2.0 * self.cluster_input_usage_assumption * L)) / (W * self.channel_usage_assumption)
-            cb_load_on = int(round(cb_load_on_probability))
-            # If < 1, we round up to one because at least one wire will have a fully on path connected to it and we model for that case.
-            if cb_load_on == 0:
-                self.cb_load_budgets[cb_load]["num_on"] = 1
-            # Each fully turned on cb_mux comes with (cb_level2_size - 1) partially on paths
-            # The number of partially on paths per tile is I/2*input_usage * (cb_level2_size - 1) 
-            # Number of partially on paths per wire is (I/2*input_usage * (cb_level2_size - 1) * L) / W
-            cb_load_partial_probability = (I / 2 * self.cluster_input_usage_assumption * (cb_load.level2_size - 1) * L) / W
-            cb_load_partial = int(round(cb_load_partial_probability))
-            # If < 1, we round up to one because at least one wire will have a partially on path connected to it and we model for that case.
-            if cb_load_partial == 0:
-                self.cb_load_budgets[cb_load]["num_partial"] = 1
-            # Number of off paths is just number connected to routing wire - on - partial
-            self.cb_load_budgets[sb_load]["num_off"] = cb_load_per_tile * L - (self.sb_load_budgets[sb_load]["num_on"] + self.sb_load_budgets[sb_load]["num_partial"])
+
+            # cb_load_on_probability = float((I / 2.0 * self.cluster_input_usage_assumption * L)) / (W * self.channel_usage_assumption)
+            # cb_load_on = int(round(cb_load_on_probability))
+            # # If < 1, we round up to one because at least one wire will have a fully on path connected to it and we model for that case.
+            # if cb_load_on == 0:
+            #     self.cb_load_budgets[cb_load]["num_on"] = 1
+            # # Each fully turned on cb_mux comes with (cb_level2_size - 1) partially on paths
+            # # The number of partially on paths per tile is I/2*input_usage * (cb_level2_size - 1) 
+            # # Number of partially on paths per wire is (I/2*input_usage * (cb_level2_size - 1) * L) / W
+            # cb_load_partial_probability = (I / 2 * self.cluster_input_usage_assumption * (cb_load.level2_size - 1) * L) / W
+            # cb_load_partial = int(round(cb_load_partial_probability))
+            # # If < 1, we round up to one because at least one wire will have a partially on path connected to it and we model for that case.
+            # if cb_load_partial == 0:
+            #     self.cb_load_budgets[cb_load]["num_partial"] = 1
+            # # Number of off paths is just number connected to routing wire - on - partial
+            # self.cb_load_budgets[sb_load]["num_off"] = cb_load_per_tile * L - (self.sb_load_budgets[sb_load]["num_on"] + self.sb_load_budgets[sb_load]["num_partial"])
 
 
         # From calculated budget assign the loads to each tile
         # We take the total number of sb loads of all types and divide by the number of tiles to get the max number of sb muxes per tile
-        tile_sb_total_budget = sum([sb_info["num_off"] + sb_info["num_partial"] + sb_info["num_on"] for sb_info in self.sb_load_budgets.values()])
-        tile_sb_max = math.ceil(float(tile_sb_total_budget) / L)
+        # tile_sb_total_budget = sum([sb_info["num_off"] + sb_info["num_partial"] + sb_info["num_on"] for sb_info in self.sb_load_budgets.values()])
+        # tile_sb_max = math.ceil(float(tile_sb_total_budget) / L)
+        
+        # Max of each type of sb per tile
+        tile_sb_type_maxes = {
+            sb_load: math.ceil(total_freq / L)
+            for sb_load, total_freq in sb_load_type_budget_totals.items()
+        }
+        tile_cb_type_maxes = {
+            cb_load: math.ceil(total_freq / L)
+            for cb_load, total_freq in self.cb_mux_load_freqs.items()
+        }
 
         # Initialize assigments for each tile
         self.tile_sb_load_assignments = [
             defaultdict(lambda: {"num_on": 0, "num_partial": 0, "num_off": 0})
             for i in range(self.gen_r_wire.length)
-        ]       
-        self.tile_cb_load_assignments = {
+        ]
+
+        self.tile_cb_load_assignments = [
             defaultdict(lambda: {"num_on": 0, "num_partial": 0, "num_off": 0})
             for i in range(self.gen_r_wire.length)
-        }
+        ]
 
-        sb_loads_state_assigned_totals = {
-            "num_on": 0,
-            "num_partial": 0,
-            "num_off": 0
-        }
+        # sb_loads_state_assigned_totals = {
+        #     "num_on": 0,
+        #     "num_partial": 0,
+        #     "num_off": 0
+        # }
+
         # Create assignment totals which will be compared with budget
-        sb_loads_type_assigned_totals = {
+        sb_loads_type_state_assigned_totals = {
             sb_load: {"num_on": 0, "num_partial": 0, "num_off": 0}
             for sb_load in self.sb_load_budgets.keys()
         }
+        cb_loads_type_state_assigned_totals = {
+            cb_load: {"num_on": 0, "num_partial": 0, "num_off": 0}
+            for cb_load in self.cb_load_budgets.keys()
+        }
+        # Create assigment totals by sb type
+        sb_loads_type_assigned_totals = {
+            sb_load: 0
+            for sb_load in self.sb_load_budgets.keys()
+        }
+        cb_loads_type_assigned_totals = {
+            cb_load: 0
+            for cb_load in self.cb_load_budgets.keys()
+        }
+        # Total assignment
+        # tile_sb_mux_total_assignment = 0
 
         # Distribute SB Mux Loads across tiles
         for i in range(self.gen_r_wire.length):
+            # tile @ index 0 will be driving the terminal SB mux so we account for it before other calculations
+            if i == 0:
+                self.tile_sb_load_assignments[i][self.terminal_sb_mux]["num_on"] = 1
             # Distribute loads in priority ON -> PARTIAL -> OFF, starting from furthest to closest tile
             for sb_load in self.sb_load_budgets.keys():
                 for mux_state in ["num_on", "num_partial", "num_off"]:
-                    # If the budget has not been met
-                    if sb_loads_type_assigned_totals[sb_load][mux_state] < self.sb_load_budgets[sb_load][mux_state]:
+                    # If the budget has not been met, and we can still fit more SB muxes of this type in a tile
+                    while sb_loads_type_state_assigned_totals[sb_load][mux_state] < self.sb_load_budgets[sb_load][mux_state] and\
+                        sum(list(self.tile_sb_load_assignments[i][sb_load].values())) < tile_sb_type_maxes[sb_load]:
                         # Assign ON loads
                         num_assignments = int(float(self.sb_load_budgets[sb_load][mux_state]) / L)
                         # Basically if the int rounded avg number of ON sb muxes is 0 OR the number of ON sb muxes in this assignment would go over budget AND we can still fit one more ON sb mux in the tile, then we set on_assignment to 1
@@ -302,177 +371,220 @@ class RoutingWireLoad(c_ds.LoadCircuit):
                         # assign loads
                         self.tile_sb_load_assignments[i][sb_load][mux_state] += num_assignments
                         # update assignment totals
-                        sb_loads_type_assigned_totals[sb_load][mux_state] += num_assignments
+                        sb_loads_type_state_assigned_totals[sb_load][mux_state] += num_assignments
+                        sb_loads_type_assigned_totals[sb_load] += num_assignments
+                # If there are less total SB Muxes than the tile_sb_max, we assign the remaining muxes based on reaching the desired distribution of each SB mux type
+                # while sb_loads_type_state_assigned_totals[sb_load][mux_state] < self.sb_load_budgets[sb_load][mux_state] and\
+                #         sum(list(self.tile_sb_load_assignments[i][sb_load].values())) < tile_sb_type_maxes[sb_load]:
+                #     # Check current assignments and compare against desired distribution
+                #     # cur_dist = (sb_loads_type_assigned_totals[sb_load] / tile_sb_total_budget)
+                #     # if cur_dist < sb_mux_load_targ_dist[sb_load]:
+                #     # assign loads
+                #     self.tile_sb_load_assignments[i][sb_load]["num_off"] += 1
+                #     # update assignment totals
+                #     sb_loads_type_state_assigned_totals[sb_load]["num_off"] += 1
+                #     sb_loads_type_assigned_totals[sb_load] += 1
 
 
-
-        cb_loads_type_assigned_totals = {
-            cb_load: {"num_on": 0, "num_partial": 0, "num_off": 0}
-            for cb_load in self.cb_load_budgets.keys()
-        }
+        # cb_loads_type_assigned_totals = {
+        #     cb_load: {"num_on": 0, "num_partial": 0, "num_off": 0}
+        #     for cb_load in self.cb_load_budgets.keys()
+        # }
 
         # Distribute CB Mux Loads across tiles
         for i in range(self.gen_r_wire.length):
             # Distribute loads in priority ON -> PARTIAL -> OFF, starting from furthest to closest tile
             for cb_load in self.cb_load_budgets.keys():
                 for mux_state in ["num_on", "num_partial", "num_off"]:
-                    # If the budget has not been met
-                    if cb_loads_type_assigned_totals[cb_load][mux_state] < self.cb_load_budgets[cb_load][mux_state]:
+                    # If the budget has not been met, and we can still fit more cb muxes of this type in a tile
+                    while cb_loads_type_state_assigned_totals[cb_load][mux_state] < self.cb_load_budgets[cb_load][mux_state] and\
+                        sum(list(self.tile_cb_load_assignments[i][cb_load].values())) < tile_cb_type_maxes[cb_load]:
                         # Assign ON loads
                         num_assignments = int(float(self.cb_load_budgets[cb_load][mux_state]) / L)
-                        # Basically if the int rounded avg number of ON sb muxes is 0 OR the number of ON sb muxes in this assignment would go over budget AND we can still fit one more ON sb mux in the tile, then we set on_assignment to 1
+                        # Basically if the int rounded avg number of ON cb muxes is 0 OR the number of ON cb muxes in this assignment would go over budget AND we can still fit one more ON cb mux in the tile, then we set on_assignment to 1
                         if (num_assignments == 0 or \
-                            (num_assignments + self.tile_cb_load_assignments[i][cb_load][mux_state] > self.cb_load_budgets[cb_load][mux_state])) and \
+                            (num_assignments + self.tile_cb_load_assignments[i][cb_load][mux_state] > self.cb_load_budgets[cb_load][mux_state]) or \
+                            (num_assignments + sum(list(self.tile_cb_load_assignments[i][cb_load].values())) > tile_cb_type_maxes[cb_load])) and \
                             (1 + self.tile_cb_load_assignments[i][cb_load][mux_state] <= self.cb_load_budgets[cb_load][mux_state]):
                                 num_assignments = 1
                         # assign loads
                         self.tile_cb_load_assignments[i][cb_load][mux_state] += num_assignments
                         # update assignment totals
-                        cb_loads_type_assigned_totals[cb_load][mux_state] += num_assignments
+                        cb_loads_type_state_assigned_totals[cb_load][mux_state] += num_assignments
+                        cb_loads_type_assigned_totals[cb_load] += num_assignments
+
+        pass
+        # # Distribute CB Mux Loads across tiles
+        # for i in range(self.gen_r_wire.length):
+        #     # Distribute loads in priority ON -> PARTIAL -> OFF, starting from furthest to closest tile
+        #     for cb_load in self.cb_load_budgets.keys():
+        #         for mux_state in ["num_on", "num_partial", "num_off"]:
+        #             # If the budget has not been met
+        #             if cb_loads_type_assigned_totals[cb_load][mux_state] < self.cb_load_budgets[cb_load][mux_state]:
+        #                 # Assign ON loads
+        #                 num_assignments = int(float(self.cb_load_budgets[cb_load][mux_state]) / L)
+        #                 # Basically if the int rounded avg number of ON sb muxes is 0 OR the number of ON sb muxes in this assignment would go over budget AND we can still fit one more ON sb mux in the tile, then we set on_assignment to 1
+        #                 if (num_assignments == 0 or \
+        #                     (num_assignments + self.tile_cb_load_assignments[i][cb_load][mux_state] > self.cb_load_budgets[cb_load][mux_state])) and \
+        #                     (1 + self.tile_cb_load_assignments[i][cb_load][mux_state] <= self.cb_load_budgets[cb_load][mux_state]):
+        #                         num_assignments = 1
+        #                 # assign loads
+        #                 self.tile_cb_load_assignments[i][cb_load][mux_state] += num_assignments
+        #                 # update assignment totals
+        #                 cb_loads_type_assigned_totals[cb_load][mux_state] += num_assignments
 
                 
     def general_routing_load_generate(self, spice_filename: str) -> List[str]:
-            """ Generates a routing wire load SPICE deck  """
+        """ Generates a routing wire load SPICE deck  """
+        
+
+        # First make sure that the terminal_mux driven by this wire load is valid
+        # Check the src_wires to see if self.gen_r_wire is in there
+        assert any(src_wire == self.gen_r_wire for src_wire in self.terminal_sb_mux.src_wires.keys()), "Terminal SB mux cannot be driven by this wire type!"
+
+        ###############################################################
+        ## ROUTING WIRE LOAD
+        ###############################################################
+
+        # Get gen routing wire information
+        wire_length = self.gen_r_wire.length
+
+        # Set containing all wire params used in this circuit
+        wire_param_strs: Set[str] = set()
+        wire_routing_load_param_str: str = f"wire_routing_wire_load_{self.get_param_str()}"
+
+        # wire load sbckt name
+        routing_wire_load_subckt_str = f"{self.sp_name}"
+
+        spice_file_lines = []
+        # First we write the individual tile loads
+        # Tiles are generated such that if you drive a wire from the left you get
+        #   driver -> tile 4 -> tile 3 -> tile 2 -> tile 1 (driver) -> tile 4 -> etc.
+        for i in range(wire_length):
+            spice_file_lines += [
+                "******************************************************************************************",
+                f"* Routing wire load tile {i+1}",
+                "******************************************************************************************",
+            ]
+            # If this is Tile 1 (LAST TILE IN LOAD), we need to add a nodes to which we can connect the ON sb_mux and cb_mux so that we can measure power.
+            if i == 0:
+                spice_file_lines += [ f".SUBCKT routing_wire_load_tile_{i+1}_{self.get_param_str()} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on" ]
+            else:
+                spice_file_lines += [ f".SUBCKT routing_wire_load_tile_{i+1}_{self.get_param_str()} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd" ]
+            # Wire to first SB Load
+            spice_file_lines += [ f"Xwire_gen_routing_1 n_in n_1_1 wire Rw='{wire_routing_load_param_str}_res/{2*wire_length}' Cw='{wire_routing_load_param_str}_cap/{2*wire_length}'\n" ]
             
+            # Add the parameter name of routing_wire_load to our wire_param set as we used it in above line
+            wire_param_strs.add(wire_routing_load_param_str)
 
-            # First make sure that the terminal_mux driven by this wire load is valid
-            # Check the src_wires to see if self.gen_r_wire is in there
-            assert any(src_wire == self.gen_r_wire for src_wire in self.terminal_sb_mux.src_wires.keys()), "Terminal SB mux cannot be driven by this wire type!"
+            # SWITCH BLOCK LOAD
+            # Write SB Loads in netlist connectivity order of ON -> PARTIAL -> OFF 
+            sb_load: sb_mux_lib.SwitchBlockMux
+            for mux_state in ["num_on", "num_partial", "num_off"]:
+                for sb_load, assignments in self.tile_sb_load_assignments[i].items():
+                    # We write this one out at the end of the file so we skip it here
+                    # Assumes without this if statement an ON SB mux would be written out
+                    if i == 0 and mux_state == "num_on":
+                        continue
+                    # Iterate over mux states (ON, PARTIAL, OFF)
+                    for sb_state_idx in range(assignments[mux_state]):
+                        state_str: str = mux_state.replace("num_","")
+                        sb_mux_str: str = f"{sb_load.sp_name}_{state_str}"
+                        wire_param_str: str = f"wire_sb_load_{state_str}_{self.get_param_str()}"
+                        spice_file_lines += [
+                            f"Xwire_sb_{sb_load.get_param_str()}_load_{state_str}_{sb_state_idx + 1} n_1_1 n_1_sb_{state_str}_{sb_state_idx + 1} wire Rw={wire_param_str}_res Cw={wire_param_str}_cap",
+                            f"Xsb_{sb_load.get_param_str()}_load_{state_str}_{sb_state_idx + 1} n_1_sb_{state_str}_{sb_state_idx + 1} n_sb_mux_{state_str}_{sb_state_idx + 1}_hang n_gate n_gate_n n_vdd n_gnd {sb_mux_str}\n"
+                        ]
+                        wire_param_strs.add(wire_param_str)
 
-            ###############################################################
-            ## ROUTING WIRE LOAD
-            ###############################################################
-
-            # Get gen routing wire information
-            wire_length = self.gen_r_wire.length
-
-            # Set containing all wire params used in this circuit
-            wire_param_strs: Set[str] = set()
-            wire_routing_load_param_str: str = f"wire_routing_wire_load_{self.get_param_str()}"
-
-            # wire load sbckt name
-            routing_wire_load_subckt_str = f"{self.sp_name}"
-
-            spice_file_lines = []
-            # First we write the individual tile loads
-            # Tiles are generated such that if you drive a wire from the left you get
-            #   driver -> tile 4 -> tile 3 -> tile 2 -> tile 1 (driver) -> tile 4 -> etc.
-            for i in range(wire_length):
-                spice_file_lines += [
-                    "******************************************************************************************",
-                    f"* Routing wire load tile {i+1}",
-                    "******************************************************************************************",
+            # CONNECTION BLOCK LOAD
+            # Write CB Loads in netlist connectivity order of ON -> PARTIAL -> OFF 
+            
+            # Terminal CB Mux, this is in the tile at the end of the load and would be driving the input to a logic cluster
+            # This cb_mux is connected to a different power rail so that we can measure power.
+            # TODO update this to accomodate multiple types of connection blocks
+            cb_load: cb_mux_lib.ConnectionBlockMux = self.terminal_cb_mux
+            wire_cb_load_on_param_str: str = f"wire_cb_load_on_{self.get_param_str()}"
+            cb_mux_on_str: str = f"{cb_load.sp_name}_on"
+            if i == 0 and self.tile_cb_load_assignments[i][cb_load]["num_on"] > 0:
+                spice_file_lines += [ 
+                    f"Xwire_cb_load_on_{1} n_1_1 n_1_cb_on_{1} wire Rw={wire_cb_load_on_param_str}_res Cw={wire_cb_load_on_param_str}_cap",
+                    f"Xcb_load_on_{1} n_1_cb_on_{1} n_cb_out n_gate n_gate_n n_vdd_cb_mux_on n_gnd {cb_mux_on_str}\n"
                 ]
-                # If this is Tile 1 (LAST TILE IN LOAD), we need to add a nodes to which we can connect the ON sb_mux and cb_mux so that we can measure power.
-                if i == 0:
-                    spice_file_lines += [ f".SUBCKT routing_wire_load_tile_{i+1}_{self.get_param_str()} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on" ]
-                else:
-                    spice_file_lines += [ f".SUBCKT routing_wire_load_tile_{i+1}_{self.get_param_str()} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd" ]
-                # Wire to first SB Load
-                spice_file_lines += [ f"Xwire_gen_routing_1 n_in n_1_1 wire Rw='{wire_routing_load_param_str}_res/{2*wire_length}' Cw='{wire_routing_load_param_str}_cap/{2*wire_length}'\n" ]
-                
-                # Add the parameter name of routing_wire_load to our wire_param set as we used it in above line
+                wire_param_strs.add(wire_cb_load_on_param_str)
+            cb_load: cb_mux_lib.ConnectionBlockMux
+            for mux_state in ["num_on", "num_partial", "num_off"]:
+                for cb_load, assignments in self.tile_cb_load_assignments[i].items():
+                    # Iterate over mux states (ON, PARTIAL, OFF)
+                    for cb_state_idx in range(assignments[mux_state]):
+                        # If its the non starting tile
+                        state_str: str = mux_state.replace("num_","")
+                        cb_mux_str: str = f"{cb_load.sp_name}_{state_str}"
+                        wire_param_str: str = f"wire_cb_load_{state_str}_{self.get_param_str()}"
+                        # We already wrote out Tile 1, so we skip it here
+                        if i == 0 and mux_state == "num_on":
+                            continue
+                        # if i != 0 and mux_state != "num_on":
+                        spice_file_lines += [
+                            f"Xwire_cb_load_{state_str}_{cb_state_idx+1} n_1_1 n_1_cb_{state_str}_{cb_state_idx+1} wire Rw={wire_param_str}_res Cw={wire_param_str}_cap",
+                            f"Xcb_load_{state_str}_{cb_state_idx+1} n_1_cb_{state_str}_{cb_state_idx+1} n_cb_mux_{state_str}_{cb_state_idx+1}_hang n_gate n_gate_n n_vdd n_gnd {cb_mux_str}\n"
+                        ]
+                        wire_param_strs.add(wire_param_str)
+                        
+            
+            # Tile 1 is terminated by a on switch block, other tiles just connect the wire to the output
+            # Tile 1's sb_mux is connected to a different power rail so that we can measure dynamic power.
+            driven_sb_mux_str = f"{self.terminal_sb_mux.sp_name}_on"
+            if i == 0:
+                spice_file_lines += [
+                    f"Xwire_gen_routing_2 n_1_1 n_1_2 wire Rw='{wire_routing_load_param_str}_res/{2*wire_length}' Cw='{wire_routing_load_param_str}_cap/{2*wire_length}'",
+                    f"Xsb_mux_on_out n_1_2 n_out n_gate n_gate_n n_vdd_sb_mux_on n_gnd {driven_sb_mux_str}"
+                ]
+                # Some of these are not necessary but its good practice to make sure we don't miss any wire params
+                wire_param_strs.add(wire_routing_load_param_str)
+            else:
+                spice_file_lines += [ f"Xwire_gen_routing_2 n_1_1 n_out wire Rw='{wire_routing_load_param_str}_res/{2*wire_length}' Cw='{wire_routing_load_param_str}_cap/{2*wire_length}'" ]
                 wire_param_strs.add(wire_routing_load_param_str)
 
-                # SWITCH BLOCK LOAD
-                # Write SB Loads in netlist connectivity order of ON -> PARTIAL -> OFF 
-                sb_load: sb_mux_lib.SwitchBlockMux
-                for mux_state in ["num_on", "num_partial", "num_off"]:
-                    for sb_load, assignments in self.tile_sb_load_assignments[i].items():
-                        # We write this one out at the end of the file so we skip it here
-                        # Assumes without this if statement an ON SB mux would be written out
-                        # if i == 0 and mux_state == "num_on":
-                        #     continue
-                        # Iterate over mux states (ON, PARTIAL, OFF)
-                        for sb_state_idx in range(assignments[mux_state]):
-                            state_str: str = mux_state.replace("num_","")
-                            sb_mux_str: str = f"{sb_load.sp_name}_{state_str}"
-                            wire_param_str: str = f"wire_sb_load_{state_str}_{self.get_param_str()}"
-                            spice_file_lines += [
-                                f"Xwire_sb_{sb_load.get_param_str()}_load_{state_str}_{sb_state_idx + 1} n_1_1 n_1_sb_{state_str}_{sb_state_idx + 1} wire Rw={wire_param_str}_res Cw={wire_param_str}_cap",
-                                f"Xsb_{sb_load.get_param_str()}_load_{state_str}_{sb_state_idx + 1} n_1_sb_{state_str}_{sb_state_idx + 1} n_sb_mux_{state_str}_{sb_state_idx + 1}_hang n_gate n_gate_n n_vdd n_gnd {sb_mux_str}\n"
-                            ]
-                            wire_param_strs.add(wire_param_str)
+            spice_file_lines += [ ".ENDS\n\n" ]
+        
+        
+        # Now write a subcircuit for the complete routing wire
+        spice_file_lines += [
+            "******************************************************************************************",
+            f"* Routing wire load {str(i+1)}",
+            "******************************************************************************************",
+            f".SUBCKT {routing_wire_load_subckt_str} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on"
+        ]
+        
+        # Iterate through tiles backwards
+        in_node = "n_in"
+        for tile in range(wire_length, 1, -1):
+            out_node = "n_" + str(tile)
+            spice_file_lines += [ f"Xrouting_wire_load_tile_{tile} {in_node} {out_node} n_hang_{tile} n_gate n_gate_n n_vdd n_gnd routing_wire_load_tile_{tile}_{self.get_param_str()}" ]
+            in_node = out_node
+        # Write tile 1
+        spice_file_lines += [
+            f"Xrouting_wire_load_tile_1 {in_node} n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on routing_wire_load_tile_1_{self.get_param_str()}",
+            ".ENDS\n\n"
+        ]
+        
+        # Write out subckt to spice file
+        with open(spice_filename, 'a') as spice_file:
+            spice_file.write("\n".join(spice_file_lines))
 
-                # CONNECTION BLOCK LOAD
-                # Write CB Loads in netlist connectivity order of ON -> PARTIAL -> OFF 
-                
-                # We only connect one of them, so the first one in this case.
-                # This cb_mux is connected to a different power rail so that we can measure power.
-                wire_cb_load_on_param_str: str = f"wire_cb_load_on_{self.get_param_str()}"
-                cb_mux_on_str: str = f"{cb_load.sp_name}_on"
-                if i == 0:
-                    spice_file_lines += [ 
-                        f"Xwire_cb_load_on_{1} n_1_1 n_1_cb_on_{1} wire Rw={wire_cb_load_on_param_str}_res Cw={wire_cb_load_on_param_str}_cap",
-                        f"Xcb_load_on_{1} n_1_cb_on_{1} n_cb_out n_gate n_gate_n n_vdd_cb_mux_on n_gnd {cb_mux_on_str}\n"
-                    ]
-                    wire_param_strs.add(wire_cb_load_on_param_str)
-                cb_load: cb_mux_lib.ConnectionBlockMux
-                for mux_state in ["num_on", "num_partial", "num_off"]:
-                    for cb_load, assignments in self.tile_cb_load_assignments[i].items():
-                        # Iterate over mux states (ON, PARTIAL, OFF)
-                        for cb_state_idx in range(assignments[mux_state]):
-                            # If its the non starting tile
-                            state_str: str = mux_state.replace("num_","")
-                            cb_mux_str: str = f"{cb_load.sp_name}_{state_str}"
-                            wire_param_str: str = f"wire_cb_load_{state_str}_{self.get_param_str()}"
-                            # We already wrote out Tile 1, so we skip it here
-                            if i != 0:
-                                spice_file_lines += [
-                                    f"Xwire_cb_load_{state_str}_{cb_state_idx+1} n_1_1 n_1_cb_{state_str}_{cb_state_idx+1} wire Rw={wire_param_str}_res Cw={wire_param_str}_cap",
-                                    f"Xcb_load_{state_str}_{cb_state_idx+1} n_1_cb_{state_str}_{cb_state_idx+1} n_cb_mux_{state_str}_{cb_state_idx+1}_hang n_gate n_gate_n n_vdd n_gnd {cb_mux_str}\n"
-                                ]
-                                wire_param_strs.add(wire_param_str)
-                            
-                
-                # Tile 1 is terminated by a on switch block, other tiles just connect the wire to the output
-                # Tile 1's sb_mux is connected to a different power rail so that we can measure dynamic power.
-                driven_sb_mux_str = f"{self.terminal_sb_mux.sp_name}_on"
-                if i == 0:
-                    spice_file_lines += [
-                        f"Xwire_gen_routing_2 n_1_1 n_1_2 wire Rw='{wire_routing_load_param_str}_res/{2*wire_length}' Cw='{wire_routing_load_param_str}_cap/{2*wire_length}'",
-                        f"Xsb_mux_on_out n_1_2 n_out n_gate n_gate_n n_vdd_sb_mux_on n_gnd {driven_sb_mux_str}"
-                    ]
-                    # Some of these are not necessary but its good practice to make sure we don't miss any wire params
-                    wire_param_strs.add(wire_routing_load_param_str)
-                else:
-                    spice_file_lines += [ f"Xwire_gen_routing_2 n_1_1 n_out wire Rw='{wire_routing_load_param_str}_res/{2*wire_length}' Cw='{wire_routing_load_param_str}_cap/{2*wire_length}'" ]
-                    wire_param_strs.add(wire_routing_load_param_str)
-
-                spice_file_lines += [ ".ENDS\n\n" ]
-            
-            
-            # Now write a subcircuit for the complete routing wire
-            spice_file_lines += [
-                "******************************************************************************************",
-                f"* Routing wire load {str(i+1)}",
-                "******************************************************************************************",
-                f".SUBCKT {routing_wire_load_subckt_str} n_in n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on"
-            ]
-            
-            # Iterate through tiles backwards
-            in_node = "n_in"
-            for tile in range(wire_length, 1, -1):
-                out_node = "n_" + str(tile)
-                spice_file_lines += [ f"Xrouting_wire_load_tile_{tile} {in_node} {out_node} n_hang_{tile} n_gate n_gate_n n_vdd n_gnd routing_wire_load_tile_{tile}_{self.get_param_str()}" ]
-                in_node = out_node
-            # Write tile 1
-            spice_file_lines += [
-                f"Xrouting_wire_load_tile_1 {in_node} n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on routing_wire_load_tile_1_{self.get_param_str()}",
-                ".ENDS\n\n"
-            ]
-            
-            # Write out subckt to spice file
-            with open(spice_filename, 'a') as spice_file:
-                spice_file.write("\n".join(spice_file_lines))
-
-            
-            # Create a list of all wires used in this subcircuit
-            wire_names_list = []
-            for wire_param_str in wire_param_strs:
-                wire_names_list.append(wire_param_str)
-            
-            return wire_names_list
+        
+        # Create a list of all wires used in this subcircuit
+        wire_names_list = []
+        for wire_param_str in wire_param_strs:
+            wire_names_list.append(wire_param_str)
+        
+        return wire_names_list
                 
 
+    def generate(self, subcircuit_filename: str, specs: c_ds.Specs):
+        """ Compute routing wire load and generate SPICE netlist. """
+        print("Generating routing wire load")
+        self._compute_load(specs)
+        self.wire_names = self.general_routing_load_generate(subcircuit_filename)
 

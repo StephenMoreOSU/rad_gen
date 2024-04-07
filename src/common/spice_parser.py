@@ -14,24 +14,15 @@ from dataclasses import dataclass
 
 
 def rec_find_inst(search_insts: List[rg_ds.SpSubCktInst], name_res: List[re.Pattern], found_insts: List[rg_ds.SpSubCktInst] = []):
-    # The recursive function keeps traversing down insts tree until it finds the inst that matches names at [0], pops names, and calls itself until names is empty
-    # if not name_res:
-    #     return found_insts
+    # The recursive function keeps traversing down insts tree until it finds the inst that matches names at [0],
+    #    pops names, and calls itself until names is empty
     for inst in search_insts:
         if name_res:
             if name_res[0].search(inst.name):
                 found_insts.append(inst)
                 name_res.pop(0)
-                # if not name_res:
-                #     return found_insts
-                # elif inst.subckt.insts and inst.subckt.element == "subckt":
-                    # Go down into the insts of this inst's subckt
                 rec_find_inst(inst.subckt.insts, name_res, found_insts)
     return found_insts
-        #         else:
-        #             return found_insts
-        # else:
-        #     return found_insts
 
 
 def init_atomic_libs() -> Dict[str, rg_ds.SpSubCkt]:

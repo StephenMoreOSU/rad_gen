@@ -5,6 +5,8 @@ from dataclasses import dataclass, field, fields
 from typing import List, Dict, Any, Tuple, Union, Type
 
 
+
+import os
 import logging
 # Rad Gen data structures
 import src.common.data_structs as rg_ds
@@ -154,6 +156,13 @@ class CompoundCircuit():
             Get the string used in spice for this subckt name
         """
         return f"{self.name}_id_{self.id}"
+    
+    def get_param_str(self) -> str:
+        """ 
+            Get the spice string for this subckt parameter
+            Ex. "gen_routing_wire_L4" | "intra_tile_ble_2_sb"
+        """
+        return f"id_{self.id}"
 
     def generate(self):
         """ Generate SPICE subcircuits.
@@ -173,21 +182,21 @@ class Units:
     factor: int | float             = None # Factor to multiply the value by to get it into the base unit Ex. for nano = 1e-12
     factor_suffix: str              = None # For stdout or value conversion Ex. "n" = 1e-12, "p" = 1e-15, "m" = 1e-3, "u" = 1e-6
     # Dict of unit lookups for this unit type
-    type_lookups: dict              = field(default_factory = lambda: {
+    type_2_suff_lookup: dict      = field(default_factory = lambda: {
         # type -> suffix lookups
-        'time': 'S',
+        'time': 's',
         'voltage': 'V',
         'current': 'A',
     }) 
-    type_suffix_lookups: dict      = field(default_factory = lambda: {
+    suff_2_type_lookup: dict      = field(default_factory = lambda: {
         # suffix -> type lookups
-        'S': 'time',
+        's': 'time',
         'V': 'voltage',
         'A': 'current',
     })
     # These factor lookups are for spice write out
     # TODO verif write out functionality for each tool being used for
-    factor_lookups: dict           = field(default_factory = lambda: {
+    suff_2_fac_lookup: dict           = field(default_factory = lambda: {
         '' : 1,
         'm': 1e-3,
         'u': 1e-6,
@@ -196,7 +205,7 @@ class Units:
         'f': 1e-15,
         'a': 1e-18,
     })
-    factor_suffix_lookups: dict    = field(default_factory = lambda: {
+    fac_2_suff_lookup: dict    = field(default_factory = lambda: {
         # suffix -> factor lookups
         1: '',
         1e-3: 'm',
@@ -213,33 +222,47 @@ class Units:
         assert self.type != None or self.type_suffix != None, "type or type_suffix must be set"
         # Setting unit type
         if self.type:
-            self.type_suffix = self.type_lookups[self.type]
+            self.type_suffix = self.type_2_suff_lookup[self.type]
         elif self.type_suffix:
-            self.type = self.type_lookups[self.type_suffix]
+            self.type = self.suff_2_type_lookup[self.type_suffix]
         # Setting factor 
         if self.factor:
-            self.factor_suffix = self.factor_lookups[self.factor]
+            self.factor_suffix = self.fac_2_suff_lookup[self.factor]
         elif self.factor_suffix:
-            self.factor = self.factor_lookups[self.factor_suffix]
+            self.factor = self.suff_2_fac_lookup[self.factor_suffix]
 
 @dataclass
 class Value:
     # Params used to affect generation of a subckt or netlist. Ex. for a mux params could be "mux_type" : "on" | "off" | "partial"
     # Key used to hash this struct and find it in other data structs & write out the "parameter" name to various tools
-    name: str                       # Name of the parameter Ex. "mux_type"
-    units: Units                    # Units of the value Ex. "time" | "voltage" | "current"
-    value: int | float              = None # If string, its referencing another parameter with a hash_name
+    value: int | float              = None # Base value, if units are set this value is multiplied by the unit.factor to get the true value
+    name: str                       = None # Name of the parameter Ex. "mux_type"
+    units: Units                    = None # Units of the value Ex. "time" | "voltage" | "current"
 
+    def get_sp_val(self) -> str:
+        # Get the value for use in spice
+        if self.name:
+            sp_str: str = self.name
+        elif isinstance(self.value, (float, int)) and self.units:
+            sp_str: str = self.get_sp_val_w_suffix()
+        else:
+            raise ValueError("Either name or value and units must be set")
+        return sp_str
 
-
+    def get_sp_val_w_suffix(self) -> str:
+        """ 
+            Get the spice string for this value with suffix
+            Ex. "0.1n" | "1.0u" | "0.5m"
+        """
+        return f"{self.value}{self.units.factor_suffix}"
 
 
 
 @dataclass
-class SpNodeProbe():
+class SpNodeProbe:
     # Information to create an evaluation of a spice node used in .MEAS, .PRINT, etc statements
-    node: str   # Name of node being evaluated Ex. "n_1_1" or "x_top_inst.x_sub_inst.n_1_1"
-    type: str   # 'voltage' | 'current'
+    node: str  = None # Name of node being evaluated Ex. "n_1_1" or "x_top_inst.x_sub_inst.n_1_1"
+    type: str  = None # 'voltage' | 'current'
 
     def get_sp_str(self) -> str:
         """ 
@@ -249,21 +272,25 @@ class SpNodeProbe():
         return f"{self.type}({self.node})"
 
 @dataclass
-class SpEvalFn():
+class SpEvalFn:
     # Represents a function to be evaluted in spice. TODO implement assertions and checks to make sure they are valid
-    fn: str     # Ex. "max(abs(rising_prop_delay_0),abs(falling_prop_delay_0))"
+    fn: str  = None # Ex. "max(abs(rising_prop_delay_0),abs(falling_prop_delay_0))"
 
 @dataclass
-class SpDelayBound():
+class SpDelayBound:
     # Information to create a "TRIG" or "TARG" portion of delay measure statement
-    probe: SpNodeProbe          # Node probe measured, compared to eval_cond to trigger bound
-    eval_cond: SpEvalFn        # Evaluation condition to trigger bound                         Ex. "0.2*supply_v"
+    probe: SpNodeProbe  = None        # Node probe measured, compared to eval_cond to trigger bound
+    eval_cond: SpEvalFn = None       # Evaluation condition to trigger bound                         Ex. "0.2*supply_v"
     td: str = None              # Optional Time delay delay bound can be triggered
     rise: bool = None           # If true, we are measuring a rising edge, if false, falling edge
     fall: bool = None                # If true, we are measuring a falling edge, if false, rising edge
     def __post_init__(self):
-        # Struct verif checks
-        assert self.rise != self.fall and (self.rise or self.fall), "Both rise and fall cannot be true or false at the same time"
+        if not self.rise:
+            self.fall = True
+        if not self.fall:
+            self.rise = True
+    #     # Struct verif checks
+    #     assert self.rise != self.fall and (self.rise or self.fall), "Both rise and fall cannot be true or false at the same time"
 
     def get_sp_str(self) -> str:
         """ 
@@ -280,12 +307,16 @@ class SpDelayBound():
         return sp_str 
 
 @dataclass
-class SpMeasure():
+class SpMeasure:
+    # name : str # The string which is assigned to this measure statement
     # Contains information to generate a measure statement in a SPICE simulation
-    type: str                            # "DC" / "AC" / "TRAN"
-    value: Value                                  # Value to measure
-    trig: SpDelayBound      = None            # On what evaluation condition do we start trig
-    targ: SpDelayBound      = None            # On what evaluation condition do we stop trig
+    type: str               = "TRAN"             # "DC" / "AC" / "TRAN"
+    # TODO verify this spice expr exists
+    # expr: SpNodeProbe               = None               # Ex. "FIND" | "INTEGRAL" | "PARAM" (None if using targ / trig)
+    # probe: str              = None               # Node probe measured, in place to delay bound  
+    value: Value            = None               # Variable to store the value of the measure statement
+    trig: SpDelayBound      = None               # On what evaluation condition do we start trig
+    targ: SpDelayBound      = None               # On what evaluation condition do we stop trig
     eval_fn: SpEvalFn       = None               # Raw spice which is evaluated to get meas statement value Ex. "max(abs(rising_prop_delay_0),abs(falling_prop_delay_0))"
 
     def __post_init__(self):
@@ -299,7 +330,7 @@ class SpMeasure():
         else: 
             assert self.eval_fn == None, "If trig or targ is set, eval_fn must not be set"
 
-    def get_meas_lines(self) -> List[str]:
+    def get_sp_lines(self) -> List[str]:
         """ 
             Get the spice lines for this measure statement
             Ex. returns [".MEAS TRAN delay_0 TRIG v(n_1_1) VAL=0.2*supply_v TARG v(n_1_1) VAL=0.8*supply_v"]
@@ -324,6 +355,141 @@ class SpMeasure():
             meas_lines += [trig_line, targ_line]
         return meas_lines
 
+
+@dataclass
+class SpLib:
+    # Contains information to generate an include statement in a SPICE simulation
+    path: str     = None                       # Path to the library file
+    inc_libs: List[str] = None                       # Name of library to include from the file
+    def get_sp_str(self) -> str:
+        """ 
+            Get the spice line for this include statement
+            Ex. returns .LIB \"/path/to/file\" LIB_NAME
+        """
+        return f".LIB \"{self.path}\" {' '.join(self.inc_libs)}"
+@dataclass
+class SpSimMode:
+    # TODO support DC | AC
+    analysis: str = None # TRAN | AC | DC
+    sim_prec: Value = None # Precision of simulation
+    sim_time: Value = None # Duration of simulation
+    # TODO define legal options for each analysis type
+    args: Dict[str, str] = None # Additional Options following analysis directive
+    def __post_init__(self):
+        if not self.sim_prec.units:
+            self.sim_prec.units = Units(type="time", factor_suffix='p')
+        if not self.sim_time.units:
+            self.sim_time.units = Units(type="time", factor_suffix='n')
+    def get_sp_str(self) -> str:
+        """ 
+            Get the spice line for this analysis statement
+            Ex. returns [".TRAN 0.1ns 10ns"]
+        """
+        opt_str: str = ' '.join([f"{k}={v}" if v else f"{k}" for k, v in self.args.items()])
+        return f".{self.analysis} {self.sim_prec.get_sp_val()} {self.sim_time.get_sp_val()} {opt_str}"
+
+
+# @dataclass
+# class SpVoltageSrcFactory:
+#     # Contains information to generate a voltage source in a SPICE simulation
+#     def get_pulse(self, nam)
+
+@dataclass
+class SpVoltageSrc:
+    """
+        Data structure for specifying a voltage source 
+        Only supportive of a pulse voltage source
+    """
+    name: str = None # name of voltage source, ex. if name = "IN" -> will be written as "VIN"
+    out_node: str = None # node connecting to output of voltage source
+    gnd_node: str = None # node connected to gnd, set to global defined gnd in __post_init__
+    type: str = None # Type of voltage source Ex. PULSE, SINE, PWL, etc
+    # All relevant params for pulse voltage src
+    init_volt: Value = field(
+        default_factory = lambda: Value(
+            units = Units(type="voltage", factor=1),
+        )
+    ) # Initial voltage OR constant voltage for DC voltage src
+    peak_volt: Value = field(
+        default_factory = lambda: Value(
+            units = Units(type="voltage", factor=1),
+        )
+    )
+    # These times in ps
+    delay_time: Value = field(
+        default_factory = lambda: Value(
+            value = 0,
+            units = Units(type="time", factor_suffix='p'),
+        )
+    )
+    rise_time: Value = field(
+        default_factory = lambda: Value(
+            value = 0,
+            units = Units(type="time", factor_suffix='p'),
+        )
+    )
+    fall_time: Value = field(
+        default_factory = lambda: Value(
+            value = 0,
+            units = Units(type="time", factor_suffix='p'),
+        )
+    )
+    # These times in ns
+    pulse_width: Value = field(
+        default_factory = lambda: Value(
+            units = Units(type="time", factor_suffix='n'),
+        )
+    )
+    period: Value = field(
+        default_factory = lambda: Value(
+            units = Units(type="time", factor_suffix='n'),
+        )
+    )
+    def __post_init__(self):
+        # Struct verif checks
+        # assert self.type in ["PULSE", "SINE", "PWL", "DC"], "type must be one of 'PULSE', 'SINE', 'PWL', 'DC'"
+        # Set gnd_node to global gnd if not set
+        if not self.gnd_node:
+            # TODO get this from some defined location
+            self.gnd_node = "gnd"
+        # Set default units
+        for volt_val in [self.init_volt, self.peak_volt]:
+            if not volt_val.units:
+                volt_val.units = Units(type="voltage", factor=1)
+        for pico_time_val in [self.delay_time, self.rise_time, self.fall_time]:
+            if not pico_time_val.units:
+                pico_time_val.units = Units(type="time", factor_suffix='p')
+        for nano_time_val in [self.pulse_width, self.period]:
+            if not nano_time_val.units:
+                nano_time_val.units = Units(type="time", factor_suffix='n')
+
+
+    def get_sp_str(self) -> str:
+        """ 
+            Get the spice line for this voltage source
+            Ex. returns "VIN n_1_1 0 PULSE(0 1 0 0 0 0.1 0.2)"
+        """
+        if self.type:
+            # This is literal string concat (just another way to concat strings)
+            sp_str: str = " ".join([
+                f"V{self.name}", f"{self.out_node}", f"{self.gnd_node}",
+                f"{self.type}({self.init_volt.get_sp_val()}",f"{self.peak_volt.get_sp_val()}",
+                f"{self.delay_time.get_sp_val()}",f"{self.rise_time.get_sp_val()}",
+                f"{self.fall_time.get_sp_val()}",f"{self.pulse_width.get_sp_val()}",
+                f"{self.period.get_sp_val()})",
+            ])
+        else:
+            # Assumes we're using a DC voltage source
+            sp_str: str = f"V{self.name} {self.out_node} {self.gnd_node} {self.init_volt.get_sp_val()}"
+
+        return sp_str
+
+
+
+# @dataclass
+# class SpOptions:
+#     # Contains information for option directive generation
+#     # TODO define legal options
 
 
 # @dataclass
@@ -350,30 +516,138 @@ class SpMeasure():
 @dataclass
 class SimTB():
     # Data required to perform a top level simulation of a particular component
-    # sizing_ckt: Type[SizeableCircuit]                                # The Sizeable Circuit which we are simulating
-    # SpInsts used in the top_level sim
-    top_insts: List[rg_ds.SpSubCktInst]                         = None
-    # Could possibly get these from SpSubCkts themselves
+    inc_libs: List[SpLib]                               = None
+    mode: SpSimMode                                         = None 
+    options: Dict[str, str]                                 = None 
+    # Voltage sources used in the top level simulation
+    voltage_srcs: List[SpVoltageSrc]                         = None
     # Structs to generate .MEAS statements
     meas_points: List[SpMeasure]                                = None 
+    # sizing_ckt: Type[SizeableCircuit]                                # The Sizeable Circuit which we are simulating
+    # SpInsts used in the top_level sim
+    dut_ckt: Type[SizeableCircuit]                              = None
+    top_insts: List[rg_ds.SpSubCktInst]                         = None
+    # Could possibly get these from SpSubCkts themselves
+
+    
     # List of sizable circuits require definitions to be used in this simulation
     # ckt_def_deps: List[Type[SizeableCircuit]]                   = field(default_factory= lambda: [])
-    
+    # Header lines for the spice simulation which are common to all simulations
+    # sp_sim_setup_lines: List[str]                               = None
+
     # Instead of a list of ckt dependancies I'd rather just have pure definitions of the circuit objects in child clases
-
-
     # dep_wire_names: List[str] = []
     # dep_tx_names: List[str] = []
     # dep_ckt_basenames: List[str] = []           # basename of subckt definitions that 
+
+    # Sim global param / node variables
+    # TODO get these global nodes from defined location
+    vdd_node: str = "vdd"
+    gnd_node: str = "gnd"
+    sram_vdd_node: str = "vsram"
+    sram_vss_node: str = "vsram_n"
+    supply_v_param: str = "supply_v"
+
+    # Prefix that is prepended to each measure statement variable
+    meas_val_prefix: str = "meas"
+
+    inc_hdr_lines: List[str] = field(
+        default_factory = lambda: [
+            "********************************************************************************",
+            "** Include libraries, parameters and other",
+            "********************************************************************************",
+    ])
+    setup_hdr_lines: List[str] = field(
+        default_factory = lambda: [
+            "********************************************************************************",
+            "** Setup and input",
+            "********************************************************************************",
+    ])
+    meas_hdr_lines: List[str] = field(
+        default_factory = lambda: [
+            "********************************************************************************",
+            "** Measurement",
+            "********************************************************************************",
+    ])
+    ckt_hdr_lines: List[str] = field(
+        default_factory = lambda: [
+            "********************************************************************************",
+            "** Circuit",
+            "********************************************************************************",
+    ])
+    delay_eval_cond: SpEvalFn = None # The condition to trigger trise / tfall eval on delay
+
+    def __post_init__(self):
+        self.delay_eval_cond: SpEvalFn = SpEvalFn(
+            fn = f"{self.supply_v_param}/2"
+        )
 
     # def __post_init__(self):
     #     dep_wire_names: List[str] = []                      # List of wire names (SpParams) Which are dependancies for this simulation
     #     dep_tx_names: List[str] = []                        # List of transistor names (SpParams) Which are dependancies for this simulation
     #     dep_ckt_basenames: List[str] = []
 
+    # def __post_init__(self):
+    def get_option_str(self) -> str:
+        """ 
+            Get the spice string for this option statement
+            Ex. ".OPTION BRIEF=1"
+        """
+        opt_str: str = ' '.join([f"{k}={v}" if v else f"{k}" for k, v in self.options.items()])
+        return f".OPTIONS {opt_str}"
+
+    def generate_top(self) -> str:
+        """
+            Common functionality for child generation of SPICE Testbenches
+        """
+        
+        pass
+
+
+
+@dataclass
+class Block:
+    """
+        Block refers to a type of subcircuit in the FPGA which is parameterized
+        Contains information relevant to all subcircuits used in the FPGA of this 'block_type' 
+        Examples of blocks are switch blocks, connection blocks, bles, etc but practically for now
+        blocks are created in the FPGA __post_init__ function and are named according to convience
+
+        Should only be created for non load circuits, load circuits don't need this information
+    """
+
+    total_num_per_tile: int = None # The total number of all instances of this circuit in a tile
+    ckt_defs: List[Type[SizeableCircuit]] = None
+
+    # Initalized in __post_init__
+    # Percentage of each circuit type in a block
+    perc_dist: Dict[Type[SizeableCircuit], float] = field(
+        default_factory = lambda: {}
+    ) 
+    # What is the frequency of each of these circuit types in a block
+    freq_dist: Dict[Type[SizeableCircuit], int] = field(
+        default_factory = lambda: {}
+    ) 
+
+    def __post_init__(self):
+        # self.freq_dist = {ckt: 0 for ckt in self.ckt_defs}
+
+        for ckt in self.ckt_defs:
+            self.freq_dist[ckt] = ckt.num_per_tile
+
+        self.perc_dist = {
+            ckt: freq / self.total_num_per_tile 
+                for ckt, freq in self.freq_dist.items()
+        }
+        # Struct verif checks
+        assert sum(self.freq_dist.values()) == self.total_num_per_tile, f"Sum of freq_dist values must equal total_num_per_tile, got {sum(self.freq_dist.values())} != {self.total_num_per_tile}"
+        assert all([set(self.ckt_defs) == set(list(ckt_info.keys())) for ckt_info in [self.perc_dist, self.freq_dist]]), f"perc_dist and freq_dist keys must be == ckt_defs"
+
+
 
 @dataclass
 class Model:
+
     # Models wrap around a list of SizeableCircuit objects which can exist on the FPGA
     #   and contain an update_XXX methods to condense the area of different parameterized instances of a circuit
     #   into a single value which can be used for cost functions or esitimation of area / delay / etc when considering many types for this circuit value is inconvient

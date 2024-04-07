@@ -1,5 +1,5 @@
 import math
-
+from typing import List, Tuple
 # Note: We generate all LUT netlists with a 6-LUT interface regardless of LUT size.
 # This makes it easier to include the LUT circuitry in other (top-level) netlists.
 # For example, a 5-LUT has the following interface:
@@ -12,7 +12,7 @@ import math
 #		size to reduce the amount of code repetition and make differences
 #		between them more obvious
 
-def generate_ptran_lut6(spice_filename, min_tran_width, use_finfet):
+def generate_ptran_lut6(spice_filename:str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str]]:
 	""" Generates a 6LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -115,7 +115,7 @@ def generate_ptran_lut6(spice_filename, min_tran_width, use_finfet):
 	return tran_names_list, wire_names_list
 
 
-def generate_ptran_lut5(spice_filename, min_tran_width, use_finfet):
+def generate_ptran_lut5(spice_filename: str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates a 5LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -213,7 +213,7 @@ def generate_ptran_lut5(spice_filename, min_tran_width, use_finfet):
 	return tran_names_list, wire_names_list
 
 	
-def generate_ptran_lut4(spice_filename, min_tran_width, use_finfet):
+def generate_ptran_lut4(spice_filename: str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates a 4LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -305,7 +305,7 @@ def generate_ptran_lut4(spice_filename, min_tran_width, use_finfet):
 	return tran_names_list, wire_names_list
 	
 
-def generate_ptran_lut_driver(spice_filename, lut_input_name, lut_input_type):
+def generate_ptran_lut_driver(spice_filename: str, lut_input_name: str, lut_input_type: str) -> Tuple[List[str], List[str] ]:
 	""" Generate a pass-transistor LUT driver based on type. """
 	
 	# Open SPICE file for appending
@@ -381,7 +381,7 @@ def generate_ptran_lut_driver(spice_filename, lut_input_name, lut_input_type):
 	return tran_names_list, wire_names_list
  
 
-def generate_ptran_lut_not_driver(spice_filename, lut_input_name):
+def generate_ptran_lut_not_driver(spice_filename: str, lut_input_name: str) -> Tuple[List[str], List[str] ]:
 	""" Generate a pass-transistor LUT driver based on type. """
 
 	# Open SPICE file for appending
@@ -466,7 +466,7 @@ def generate_ptran_lut_driver_load(spice_filename, lut_input_name, K, use_fluts)
 	return wire_names_list
 
 
-def generate_tgate_lut6(spice_filename, min_tran_width, use_finfet):
+def generate_tgate_lut6(spice_filename: str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates a 6LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -576,7 +576,7 @@ def generate_tgate_lut6(spice_filename, min_tran_width, use_finfet):
 	return tran_names_list, wire_names_list
 
 
-def generate_tgate_lut5(spice_filename, min_tran_width, use_finfet):
+def generate_tgate_lut5(spice_filename: str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates a 5LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -679,7 +679,7 @@ def generate_tgate_lut5(spice_filename, min_tran_width, use_finfet):
 	return tran_names_list, wire_names_list
 
 	
-def generate_tgate_lut4(spice_filename, min_tran_width, use_finfet):
+def generate_tgate_lut4(spice_filename: str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates a 4LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -776,7 +776,7 @@ def generate_tgate_lut4(spice_filename, min_tran_width, use_finfet):
 
 	
 
-def generate_tgate_lut_driver(spice_filename, lut_input_name, lut_input_type):
+def generate_tgate_lut_driver(spice_filename: str, lut_input_name: str, lut_input_type: str) -> Tuple[List[str], List[str] ]:
 	""" Generate a pass-transistor LUT driver based on type. """
 	
 	# Open SPICE file for appending
@@ -854,7 +854,7 @@ def generate_tgate_lut_driver(spice_filename, lut_input_name, lut_input_type):
  
 
 #samething doesn't change?
-def generate_tgate_lut_not_driver(spice_filename, lut_input_name):
+def generate_tgate_lut_not_driver(spice_filename: str, lut_input_name: str) -> Tuple[List[str], List[str] ]:
 	""" Generate a pass-transistor LUT driver based on type. """
 
 	# Open SPICE file for appending
@@ -886,7 +886,7 @@ def generate_tgate_lut_not_driver(spice_filename, lut_input_name):
 	return tran_names_list, wire_names_list
 
 
-def generate_tgate_lut_driver_load(spice_filename, lut_input_name, K, use_fluts):
+def generate_tgate_lut_driver_load(spice_filename: str, lut_input_name: str, K: int, use_fluts: bool) -> List[str]:
 	""" Generates LUT input load SPICE deck """
 	
 	# Calculate number of pass-transistors loading this input
@@ -936,7 +936,7 @@ def generate_tgate_lut_driver_load(spice_filename, lut_input_name, K, use_fluts)
 
 
 # not used in the code
-def generate_full_adder(spice_filename, circuit_name, use_finfet):
+def generate_full_adder(spice_filename: str, circuit_name: str, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates full adder SPICE deck """
 
 
@@ -1014,7 +1014,7 @@ def generate_full_adder(spice_filename, circuit_name, use_finfet):
 	
 
 # Simplified version of the above FA, much faster to size
-def generate_full_adder_simplified(spice_filename, circuit_name, use_finfet):
+def generate_full_adder_simplified(spice_filename: str, circuit_name: str, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates full adder SPICE deck """
 
 	
@@ -1085,7 +1085,7 @@ def generate_full_adder_simplified(spice_filename, circuit_name, use_finfet):
 	return tran_names_list, wire_names_list
 	
 
-def generate_carry_chain_perf_ripple(spice_filename, circuit_name, use_finfet):
+def generate_carry_chain_perf_ripple(spice_filename: str, circuit_name: str, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates carry chain inverters for sum SPICE deck """
 
 
@@ -1146,7 +1146,7 @@ def generate_skip_and_tree(spice_filename, circuit_name, use_finfet, nand1_size,
 	return tran_names_list, wire_names_list
 
 
-def generate_carry_inter(spice_filename, circuit_name, use_finfet):
+def generate_carry_inter(spice_filename: str, circuit_name: str, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 
 	""" Generates the driver to load "cin" of the next cluster """
 
