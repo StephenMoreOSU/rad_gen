@@ -1031,7 +1031,7 @@ def generate_full_adder_simplified(spice_filename: str, circuit_name: str, use_f
 	spice_file.write("******************************************************************************************\n")
 	spice_file.write("* Full adder subcircuit \n")
 	spice_file.write("******************************************************************************************\n")
-	spice_file.write(".SUBCKT FA_" + circuit_name + " n_a n_b n_cin n_cout n_sum_out n_p n_vdd n_gnd\n")
+	spice_file.write(".SUBCKT " + circuit_name + " n_a n_b n_cin n_cout n_sum_out n_p n_vdd n_gnd\n")
 	# The core of the FA consists of 3 inveters, 6 Transmission gates and 4 pass transistors.
 	# There should be a wire for all inputs and outputs, I'll assume the following for the wires:
 	# Cin and cout take half of the wire that is as long as the square root of the LUT + adder + the additional muxes

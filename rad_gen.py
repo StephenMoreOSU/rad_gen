@@ -144,10 +144,11 @@ def main(args: Optional[argparse.Namespace] = None) -> Union[None, Any]:
             ic_3d.run_buffer_sens_study(rad_gen_info["ic_3d"])
         if rad_gen_info["ic_3d"].args.debug_spice != None:
             debug_procs = [ 
+                # There must be a directory above the spice file dir to act as the top_sp_dir (or else we get results everywhere and be confused)
                 rg_ds.SpProcess(
-                    top_sp_dir = os.path.join(rad_gen_info["ic_3d"].common.rad_gen_home_path,"spice_sim"),
-                    title = title
-                ) for title in rad_gen_info["ic_3d"].args.debug_spice
+                    top_sp_dir = os.path.dirname(os.path.dirname(sp_fpath)), 
+                    title = os.path.splitext(os.path.basename(sp_fpath))[0] # title
+                ) for sp_fpath in rad_gen_info["ic_3d"].args.debug_spice
             ]
             for sp_process in debug_procs:
                 ic_3d.run_spice_debug(sp_process)

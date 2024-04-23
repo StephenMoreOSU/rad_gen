@@ -3,6 +3,7 @@
 
 import os
 import subprocess
+from typing import Dict, List
 import src.coffe.utils as utils
 
 # All .sp files should be created to use sweep_data.l to set parameters.
@@ -93,7 +94,7 @@ class SpiceInterface(object):
         return
     
 
-    def run(self, sp_path, parameter_dict):    
+    def run(self, sp_path: str, parameter_dict: Dict[str, List[str]]):    
         """
         This function runs HSPICE on the .sp file at 'sp_path' and returns a dictionary that 
         contains the HSPICE measurements.

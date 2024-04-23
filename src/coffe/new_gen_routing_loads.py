@@ -5,11 +5,12 @@ from dataclasses import dataclass, field
 import copy
 import math, os
 import src.coffe.data_structs as c_ds
-
+import src.common.utils as rg_utils
 # from src.coffe.new_sb_mux import SwitchBlockModel
 import src.coffe.new_sb_mux as sb_mux_lib
 import src.coffe.new_cb_mux as cb_mux_lib
 
+import src.coffe.constants as consts
 import src.coffe.new_fpga as fpga
 
 from collections import defaultdict
@@ -113,8 +114,8 @@ class GeneralBLEOutputLoad(c_ds.LoadCircuit):
             subckt_sb_mux_off_str: str = f"{sb_mux_load.sp_name}_off"
             for i in range(self.sb_load_types[sb_mux_load]["num_off"]):
                 spice_file_lines += [
-                    f"Xwire_general_ble_output_sb_{sb_id}_{i+1} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
-                    f"X{sb_mux_load.sp_name}_off_{i+1} {next_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_off_str}",
+                    f"Xwire_{subckt_sb_mux_off_str}_{i+1} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
+                    f"X{subckt_sb_mux_off_str}_{i+1} {next_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_off_str}",
                 ]
                 current_node = next_node
                 next_node = f"n_1_{node_it+3}"
@@ -128,8 +129,8 @@ class GeneralBLEOutputLoad(c_ds.LoadCircuit):
             subckt_sb_mux_partial_str: str = f"{sb_mux_load.sp_name}_partial"
             for i in range(self.sb_load_types[sb_mux_load]["num_partial"]):
                 spice_file_lines += [
-                    f"Xwire_general_ble_output_sb_{sb_id}_{i + 1 + total_num_sb_mux_off} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
-                    f"X{sb_mux_load.sp_name}_partial_{i + 1} {next_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_partial_str}",
+                    f"Xwire_{subckt_sb_mux_partial_str}_{i + 1 + total_num_sb_mux_off} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
+                    f"X{subckt_sb_mux_partial_str}_{i + 1} {next_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_partial_str}",
                 ]
                 current_node = next_node
                 next_node = f"n_1_{node_it+3}"
@@ -143,13 +144,13 @@ class GeneralBLEOutputLoad(c_ds.LoadCircuit):
             for i in range(self.sb_load_types[sb_mux_load]["num_on"]):
                 if i == self.sb_load_types[sb_mux_load]["num_on"] - 1:
                     spice_file_lines += [
-                        f"Xwire_general_ble_output_sb_{sb_id}_{i + 1 + total_num_sb_mux_off + total_num_sb_partial} {current_node} {meas_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
-                        f"X{sb_mux_load.sp_name}_on_{i + 1} {meas_node} {out_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_on_str}",
+                        f"Xwire_{subckt_sb_mux_on_str}_{i + 1 + total_num_sb_mux_off + total_num_sb_partial} {current_node} {meas_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
+                        f"X{subckt_sb_mux_on_str}_{i + 1} {meas_node} {out_node} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_on_str}",
                     ]
                 else:
                     spice_file_lines += [
-                        f"Xwire_general_ble_output_{i + 1 + total_num_sb_mux_off + total_num_sb_partial} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
-                        f"X{sb_mux_load.sp_name}_on_{i + 1} {next_node} n_hang_{i} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_on_str}",
+                        f"Xwire_{subckt_sb_mux_on_str}_{i + 1 + total_num_sb_mux_off + total_num_sb_partial} {current_node} {next_node} wire Rw='{wire_general_ble_output_pstr}_res/{self.total_sb_muxes}' Cw='{wire_general_ble_output_pstr}_cap/{self.total_sb_muxes}'",
+                        f"X{subckt_sb_mux_on_str}_{i + 1} {next_node} n_hang_{i} {nfet_g_node} {pfet_g_node} {vdd_node} {gnd_node} {subckt_sb_mux_on_str}",
                     ]   
             current_node = next_node
             next_node = f"n_1_{node_it + total_num_sb_mux_off + total_num_sb_partial + 3}"
@@ -170,6 +171,46 @@ class GeneralBLEOutputLoad(c_ds.LoadCircuit):
         
         return wire_names_list
 
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], h_dist: float = None, height: float = None):
+        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+        
+        # The BLE output wire is the wire that allows a BLE output to reach routing wires in
+        # the routing channels. This wire spans some fraction of a tile. We can set what that
+        # fraction is with the output track-access span (track-access locality).
+
+
+        # gen_ble_out_wire_key = f"wire_general_ble_output_wire_uid{self.gen_r_wire['id']}"
+
+        # Look for keys in the wire names which would be suffixed by some parameter string
+        def condition (wire_key: str) -> bool:
+            return "wire_general_ble_output" in wire_key
+        gen_ble_out_wire_key = rg_utils.get_unique_obj(self.wire_names, condition)
+
+        # Make sure it exists in the class definition, unncessesary here but just maintaining convention as some wire keys are not coming from wire_names
+        assert gen_ble_out_wire_key in self.wire_names, f"Wire {gen_ble_out_wire_key} not found in wire names list"
+        
+        # height is the lb_height, I wonder why once we have initialized the lb_height we no longer use the output track locality
+        wire_lengths[gen_ble_out_wire_key] = width_dict["tile"] * consts.OUTPUT_TRACK_ACCESS_SPAN
+        # It's not possible for the wire to be longer than the output track access span * tile width
+        if height and h_dist:
+            if h_dist <= width_dict["tile"]:
+                wire_lengths[gen_ble_out_wire_key] = h_dist
+            else:
+                print(f"Warning: The distance between the BLE output and the routing channel is greater than the tile width * OUTPUT_TRACK_ACCESS_SPAN. Setting wire length to tile width.")
+                print(f"Distance: {h_dist}, Tile Width: {width_dict['tile']}")
+
+        # Update wire layers
+        wire_layers[gen_ble_out_wire_key] = consts.LOCAL_WIRE_LAYER
+
+    def print_details(self, report_fpath: str):
+        """ Print cluster output load details """
+        
+        utils.print_and_write(report_fpath, "  CLUSTER OUTPUT LOAD DETAILS:")
+        # utils.print_and_write(report_file, "  Total number of SB inputs connected to cluster output: " + str(self.num_sb_mux_off + self.num_sb_mux_partial + self.num_sb_mux_on_assumption))
+        # utils.print_and_write(report_file, "  Number of 'on' SB MUXes (assumed): " + str(self.num_sb_mux_on_assumption))
+        # utils.print_and_write(report_file, "  Number of 'partial' SB MUXes: " + str(self.num_sb_mux_partial))
+        # utils.print_and_write(report_file, "  Number of 'off' SB MUXes: " + str(self.num_sb_mux_off))
+        # utils.print_and_write(report_file, "")
     
 
 @dataclass
@@ -451,7 +492,7 @@ class RoutingWireLoad(c_ds.LoadCircuit):
 
         # Set containing all wire params used in this circuit
         wire_param_strs: Set[str] = set()
-        wire_routing_load_param_str: str = f"wire_routing_wire_load_{self.get_param_str()}"
+        wire_routing_load_param_str: str = f"wire_gen_routing_{self.get_param_str()}"
 
         # wire load sbckt name
         routing_wire_load_subckt_str = f"{self.sp_name}"
@@ -491,9 +532,22 @@ class RoutingWireLoad(c_ds.LoadCircuit):
                         state_str: str = mux_state.replace("num_","")
                         sb_mux_str: str = f"{sb_load.sp_name}_{state_str}"
                         wire_param_str: str = f"wire_sb_load_{state_str}_{self.get_param_str()}"
+                        mux_nodes: List[str] = [
+                            f"n_1_sb_{state_str}_{sb_state_idx + 1}",
+                        ]
+                        if "on" in mux_state:
+                            mux_nodes.append(
+                                f"n_sb_mux_{state_str}_{sb_state_idx + 1}_hang"
+                            )
+                        mux_nodes += [
+                            f"n_gate",
+                            f"n_gate_n", 
+                            f"n_vdd",
+                            f"n_gnd",
+                        ]
                         spice_file_lines += [
-                            f"Xwire_sb_{sb_load.get_param_str()}_load_{state_str}_{sb_state_idx + 1} n_1_1 n_1_sb_{state_str}_{sb_state_idx + 1} wire Rw={wire_param_str}_res Cw={wire_param_str}_cap",
-                            f"Xsb_{sb_load.get_param_str()}_load_{state_str}_{sb_state_idx + 1} n_1_sb_{state_str}_{sb_state_idx + 1} n_sb_mux_{state_str}_{sb_state_idx + 1}_hang n_gate n_gate_n n_vdd n_gnd {sb_mux_str}\n"
+                            f"Xwire_{sb_mux_str}_{sb_state_idx + 1} n_1_1 n_1_sb_{state_str}_{sb_state_idx + 1} wire Rw={wire_param_str}_res Cw={wire_param_str}_cap",
+                            f"X{sb_mux_str}_{sb_state_idx + 1} {' '.join(mux_nodes)} {sb_mux_str}\n"
                         ]
                         wire_param_strs.add(wire_param_str)
 
@@ -508,8 +562,8 @@ class RoutingWireLoad(c_ds.LoadCircuit):
             cb_mux_on_str: str = f"{cb_load.sp_name}_on"
             if i == 0 and self.tile_cb_load_assignments[i][cb_load]["num_on"] > 0:
                 spice_file_lines += [ 
-                    f"Xwire_cb_load_on_{1} n_1_1 n_1_cb_on_{1} wire Rw={wire_cb_load_on_param_str}_res Cw={wire_cb_load_on_param_str}_cap",
-                    f"Xcb_load_on_{1} n_1_cb_on_{1} n_cb_out n_gate n_gate_n n_vdd_cb_mux_on n_gnd {cb_mux_on_str}\n"
+                    f"Xwire_{cb_mux_on_str}_{1} n_1_1 n_1_cb_on_{1} wire Rw={wire_cb_load_on_param_str}_res Cw={wire_cb_load_on_param_str}_cap",
+                    f"X{cb_mux_on_str}_term n_1_cb_on_{1} n_cb_out n_gate n_gate_n n_vdd_cb_mux_on n_gnd {cb_mux_on_str}\n"
                 ]
                 wire_param_strs.add(wire_cb_load_on_param_str)
             cb_load: cb_mux_lib.ConnectionBlockMux
@@ -524,10 +578,22 @@ class RoutingWireLoad(c_ds.LoadCircuit):
                         # We already wrote out Tile 1, so we skip it here
                         if i == 0 and mux_state == "num_on":
                             continue
-                        # if i != 0 and mux_state != "num_on":
+                        mux_nodes: List[str] = [
+                            f"n_1_cb_{state_str}_{sb_state_idx + 1}",
+                        ]
+                        if "on" in mux_state:
+                            mux_nodes.append(
+                                f"n_cb_mux_{state_str}_{sb_state_idx + 1}_hang"
+                            )
+                        mux_nodes += [
+                            f"n_gate",
+                            f"n_gate_n", 
+                            f"n_vdd",
+                            f"n_gnd",
+                        ]
                         spice_file_lines += [
-                            f"Xwire_cb_load_{state_str}_{cb_state_idx+1} n_1_1 n_1_cb_{state_str}_{cb_state_idx+1} wire Rw={wire_param_str}_res Cw={wire_param_str}_cap",
-                            f"Xcb_load_{state_str}_{cb_state_idx+1} n_1_cb_{state_str}_{cb_state_idx+1} n_cb_mux_{state_str}_{cb_state_idx+1}_hang n_gate n_gate_n n_vdd n_gnd {cb_mux_str}\n"
+                            f"Xwire_{cb_mux_str}_{cb_state_idx+1} n_1_1 n_1_cb_{state_str}_{cb_state_idx+1} wire Rw={wire_param_str}_res Cw={wire_param_str}_cap",
+                            f"X{cb_mux_str}_{cb_state_idx+1} {' '.join(mux_nodes)} {cb_mux_str}\n" # n_cb_mux_{state_str}_{cb_state_idx+1}_hang
                         ]
                         wire_param_strs.add(wire_param_str)
                         
@@ -538,7 +604,7 @@ class RoutingWireLoad(c_ds.LoadCircuit):
             if i == 0:
                 spice_file_lines += [
                     f"Xwire_gen_routing_2 n_1_1 n_1_2 wire Rw='{wire_routing_load_param_str}_res/{2*wire_length}' Cw='{wire_routing_load_param_str}_cap/{2*wire_length}'",
-                    f"Xsb_mux_on_out n_1_2 n_out n_gate n_gate_n n_vdd_sb_mux_on n_gnd {driven_sb_mux_str}"
+                    f"X{driven_sb_mux_str}_term n_1_2 n_out n_gate n_gate_n n_vdd_sb_mux_on n_gnd {driven_sb_mux_str}"
                 ]
                 # Some of these are not necessary but its good practice to make sure we don't miss any wire params
                 wire_param_strs.add(wire_routing_load_param_str)
@@ -561,11 +627,11 @@ class RoutingWireLoad(c_ds.LoadCircuit):
         in_node = "n_in"
         for tile in range(wire_length, 1, -1):
             out_node = "n_" + str(tile)
-            spice_file_lines += [ f"Xrouting_wire_load_tile_{tile} {in_node} {out_node} n_hang_{tile} n_gate n_gate_n n_vdd n_gnd routing_wire_load_tile_{tile}_{self.get_param_str()}" ]
+            spice_file_lines += [ f"Xrouting_wire_load_tile_{tile}_{self.get_param_str()} {in_node} {out_node} n_hang_{tile} n_gate n_gate_n n_vdd n_gnd routing_wire_load_tile_{tile}_{self.get_param_str()}" ]
             in_node = out_node
         # Write tile 1
         spice_file_lines += [
-            f"Xrouting_wire_load_tile_1 {in_node} n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on routing_wire_load_tile_1_{self.get_param_str()}",
+            f"Xrouting_wire_load_tile_1_{self.get_param_str()} {in_node} n_out n_cb_out n_gate n_gate_n n_vdd n_gnd n_vdd_sb_mux_on n_vdd_cb_mux_on routing_wire_load_tile_1_{self.get_param_str()}",
             ".ENDS\n\n"
         ]
         
@@ -588,3 +654,103 @@ class RoutingWireLoad(c_ds.LoadCircuit):
         self._compute_load(specs)
         self.wire_names = self.general_routing_load_generate(subcircuit_filename)
 
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], num_sb_stripes: int, num_cb_stripes: int, height: float = None):
+        """ Calculate wire lengths and wire layers. """
+
+        # Get information from the general routing wire
+        wire_length: int = self.gen_r_wire.length
+        wire_layer: int = self.gen_r_wire.layer
+
+        # key_str_suffix = f"_wire_uid{wire_id}"
+        # Get get keys for wires
+        # TODO remove duplication figure out somewhere to define and save these keys
+        
+        wire_gen_routing_load_key = rg_utils.get_unique_obj(self.wire_names, rg_utils.str_match_condition, "wire_gen_routing")
+
+        # SB mux wire keys
+        wire_sb_keys: List[str] = []
+        wire_cb_keys: List[str] = []
+        for mux_state in ["on", "partial", "off"]:
+            for wire in self.wire_names:
+                if "wire_sb_load" in wire and mux_state in wire:
+                    wire_sb_keys.append(wire)
+                elif "wire_cb_load" in wire and mux_state in wire:
+                    wire_cb_keys.append(wire)
+        # make sure they are unique
+        assert len(set(wire_sb_keys)) == len(wire_sb_keys), "SB Wire keys are not unique"
+        assert len(set(wire_cb_keys)) == len(wire_cb_keys), "CB Wire keys are not unique"
+
+        # wire_sb_load_on_key = rg_utils.get_unique_obj(self.wire_names, rg_utils.str_match_condition , "wire_sb_load_on")
+        # wire_sb_load_partial_key = rg_utils.get_unique_obj(self.wire_names, rg_utils.str_match_condition, "wire_sb_load_partial")
+        # wire_sb_load_off_key = rg_utils.get_unique_obj(self.wire_names, rg_utils.str_match_condition, "wire_sb_load_off")
+
+        # wire_cb_load_on_key = rg_utils.get_unique_obj(self.wire_names, rg_utils.str_match_condition, "wire_cb_load_on")
+        # wire_cb_load_partial_key = rg_utils.get_unique_obj(self.wire_names, rg_utils.str_match_condition, "wire_cb_load_partial")
+        # wire_cb_load_off_key = rg_utils.get_unique_obj(self.wire_names, rg_utils.str_match_condition, "wire_cb_load_off")
+
+        mod_wire_keys: List[str] = [
+            wire_gen_routing_load_key, 
+            *wire_sb_keys,
+            *wire_cb_keys            
+        ]
+        
+        # check if there are any wires left over
+        assert set(mod_wire_keys) == set(self.wire_names), "Wire keys do not match wire names"
+
+        # This is the general routing wire that spans L tiles
+        wire_lengths[wire_gen_routing_load_key] = wire_length * width_dict["tile"]
+        # if lb_height has been initialized
+        if height:
+            width: float = ((width_dict["tile"] * width_dict["tile"]) / height)
+            # If the height is greater than the width of the tile, then the wire length is the height, else width
+            # This takes the larger of the two values to get wirelength, worst case?
+            if height > width:
+                wire_lengths[wire_gen_routing_load_key] = wire_length * height
+            else:
+                wire_lengths[wire_gen_routing_load_key] = wire_length * width
+
+        # TODO make these assumptions more accurate, we have layout why assume half
+        # These are the pieces of wire that are required to connect routing wires to switch 
+        # block inputs. We assume that on average, they span half a tile.
+        for wire_sb_key in wire_sb_keys:
+            wire_lengths[wire_sb_key] = width_dict["tile"] / 2
+        if height:
+            # This is saying that if we have a single stripe we have to travel the entire width of the LB to get from the routing wire to the SB input (worst case)
+            if num_sb_stripes == 1:
+                for wire_sb_key in wire_sb_keys:
+                    wire_lengths[wire_sb_key] = wire_lengths[wire_gen_routing_load_key] / wire_length
+            # I guess this says if there are more than 1 then just estimate by traveling half of the width of the LB
+            else:
+                for wire_sb_key in wire_sb_keys:
+                    wire_lengths[wire_sb_key] = wire_lengths[wire_gen_routing_load_key] / ( 2 * wire_length)
+        
+        # These are the pieces of wire that are required to connect routing wires to 
+        # connection block multiplexer inputs. They span some fraction of a tile that is 
+        # given my the input track-access span (track-access locality). 
+        for wire_cb_key in wire_cb_keys:
+            wire_lengths[wire_cb_key] = width_dict["tile"] * consts.INPUT_TRACK_ACCESS_SPAN
+        # Doing something similar to switch blocks, if we have an initialized lb_height & single stripe then use full width of LB as base wire length being multiplied by input track access factor
+        if height and num_cb_stripes == 1:
+            for wire_cb_key in wire_cb_keys:
+                wire_lengths[wire_cb_key] = (wire_lengths[wire_gen_routing_load_key] / wire_length) * consts.INPUT_TRACK_ACCESS_SPAN
+        elif height:
+            for wire_cb_key in wire_cb_keys:
+                wire_lengths[wire_cb_key] = (wire_lengths[wire_gen_routing_load_key] / (2 * wire_length)) * consts.INPUT_TRACK_ACCESS_SPAN
+			
+       # Update wire layers
+        wire_layers[wire_gen_routing_load_key] = wire_layer # used to be 1 -> the first metal layer above local
+        for wire_sb_key in wire_sb_keys:
+            wire_layers[wire_sb_key] = consts.LOCAL_WIRE_LAYER
+        for wire_cb_key in wire_cb_keys:
+            wire_layers[wire_cb_key] = consts.LOCAL_WIRE_LAYER
+
+        # wire_layers[wire_sb_load_on_key] = consts.LOCAL_WIRE_LAYER 
+        # wire_layers[wire_sb_load_partial_key] = consts.LOCAL_WIRE_LAYER
+        # wire_layers[wire_sb_load_off_key] = consts.LOCAL_WIRE_LAYER
+        # wire_layers[wire_cb_load_on_key] = consts.LOCAL_WIRE_LAYER
+        # wire_layers[wire_cb_load_partial_key] = consts.LOCAL_WIRE_LAYER
+        # wire_layers[wire_cb_load_off_key] = consts.LOCAL_WIRE_LAYER
+    def print_details(self, report_fpath: str):
+        """ Print General Routing Wire Load Details """
+        
+        utils.print_and_write(report_fpath, "  GEN ROUTING WIRE LOAD DETAILS:")

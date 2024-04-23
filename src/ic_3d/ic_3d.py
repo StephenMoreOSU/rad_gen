@@ -594,8 +594,8 @@ def run_spice_debug(spProcess: rg_ds.SpProcess) -> Tuple[pd.DataFrame, dict, Dic
     # This will be invalid if the user wants to look at something other than voltage
     fig.update_layout(
         title=f"Spice {spProcess.title} Waveforms @ {spProcess.sp_file}",
-        xaxis_title=f"Time ({sp_sim_settings.unit_lookup_factors['time']}s)", 
-        yaxis_title=f"Voltage ({sp_sim_settings.unit_lookup_factors['voltage']}V)",
+        xaxis_title=f"Time (s)", # ({sp_sim_settings.unit_lookup_factors['time']}s)", 
+        yaxis_title=f"Voltage (V)", #({sp_sim_settings.unit_lookup_factors['voltage']}V)",
     )
     fig.show()
     # assuming all measurements are delays we can convert to ps

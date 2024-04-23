@@ -3,8 +3,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Tuple, Union, Type
+import re
+
 
 import src.coffe.mux_subcircuits as mux_subcircuits
+import src.coffe.utils as utils
 import src.coffe.data_structs as c_ds
 # import src.coffe.fpga as fpga
 import src.coffe.constants as consts
@@ -199,9 +202,9 @@ class Mux2Lvl(c_ds.SizeableCircuit):
         inv_area_keys = []
         for tx_param in self.transistor_names:
             if "inv" in tx_param:
-                assert tx_param == f"inv_{sp_name}_{inv_id}", f"Invalid inv name {tx_param} for mux {sp_name}"
+                # assert re.search(f'inv_{sp_name}_') tx_param == f"inv_{sp_name}_{inv_id}", f"Invalid inv name {tx_param} for mux {sp_name}"
                 inv_area_keys.append(
-                    f"inv_{sp_name}_{inv_id}"
+                    tx_param.replace("_pmos","").replace("_nmos","")
                 )
                 inv_id += 1
         
@@ -222,14 +225,15 @@ class Mux2Lvl(c_ds.SizeableCircuit):
                 self.level2_size * area_dict[f"{tx_type_key}_{sp_name}_L2"] +                         # Level 2 Mux Area = L2_size * Area of a single L2 switch
                 sum(area_dict[inv_area_key] for inv_area_key in inv_area_keys)                          # Inv Area = Sum of all invs in the mux -> These drive the mux output load
             )
-        width = math.sqrt(area)                                 # Width w/o SRAM = sqrt(area)           -> Assumes square aspect ratio here
-        width_with_sram = math.sqrt(area_with_sram)             # Width w/ SRAM  = sqrt(area_with_sram) -> Assumes square aspect ratio here
 
         # Mux area including SRAM
         area_with_sram = (
             area +                                                          # Logic area calculated above
             (self.level1_size + self.level2_size) * area_dict["sram"]       # SRAM area = (L1_size + L2_size) * Area of a single SRAM cell
-        )      
+        )    
+
+        width = math.sqrt(area)                                 # Width w/o SRAM = sqrt(area)           -> Assumes square aspect ratio here
+        width_with_sram = math.sqrt(area_with_sram)             # Width w/ SRAM  = sqrt(area_with_sram) -> Assumes square aspect ratio here
 
         # Update the width & area dicts
         width_dict[sp_name] = width                           
@@ -262,9 +266,20 @@ class Mux2Lvl(c_ds.SizeableCircuit):
         wire_lengths[l2_wire_key] = width_dict[sp_name] * ratio
         
         # Update set wire layers
-        wire_layers[drv_wire_key] = consts.consts.LOCAL_WIRE_LAYER
-        wire_layers[l1_wire_key] = consts.consts.LOCAL_WIRE_LAYER
-        wire_layers[l2_wire_key] = consts.consts.LOCAL_WIRE_LAYER
+        wire_layers[drv_wire_key] = consts.LOCAL_WIRE_LAYER
+        wire_layers[l1_wire_key] = consts.LOCAL_WIRE_LAYER
+        wire_layers[l2_wire_key] = consts.LOCAL_WIRE_LAYER
+
+    def print_details(self, report_fpath: str):
+        utils.print_and_write(report_fpath, "  Style: two-level MUX")
+        utils.print_and_write(report_fpath, "  Required MUX size: " + str(self.required_size) + ":1")
+        utils.print_and_write(report_fpath, "  Implemented MUX size: " + str(self.implemented_size) + ":1")
+        utils.print_and_write(report_fpath, "  Level 1 size = " + str(self.level1_size))
+        utils.print_and_write(report_fpath, "  Level 2 size = " + str(self.level2_size))
+        utils.print_and_write(report_fpath, "  Number of unused inputs = " + str(self.num_unused_inputs))
+        utils.print_and_write(report_fpath, "  Number of MUXes per tile: " + str(self.num_per_tile))
+        utils.print_and_write(report_fpath, "  Number of SRAM cells per MUX: " + str(self.sram_per_mux))
+        utils.print_and_write(report_fpath, "")
 
 
 
@@ -401,12 +416,12 @@ class Mux2to1(c_ds.SizeableCircuit):
     
         # Update wire lengths
         if not self.use_tgate :
-            wire_lengths["wire_" + self.name] = width_dict["ptran_" + self.name]
+            wire_lengths["wire_" + self.sp_name] = width_dict["ptran_" + self.sp_name]
         else :
-            wire_lengths["wire_" + self.name] = width_dict["tgate_" + self.name]
+            wire_lengths["wire_" + self.sp_name] = width_dict["tgate_" + self.sp_name]
 
-        wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_1"])/4
+        wire_lengths["wire_" + self.sp_name + "_driver"] = (width_dict["inv_" + self.sp_name + "_1"] + width_dict["inv_" + self.sp_name + "_1"])/4
         
         # Update wire layers
-        wire_layers["wire_" + self.name] = consts.LOCAL_WIRE_LAYER
-        wire_layers["wire_" + self.name + "_driver"] = consts.LOCAL_WIRE_LAYER
+        wire_layers["wire_" + self.sp_name] = consts.LOCAL_WIRE_LAYER
+        wire_layers["wire_" + self.sp_name + "_driver"] = consts.LOCAL_WIRE_LAYER

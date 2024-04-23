@@ -2,14 +2,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field, InitVar
 
 import math, os, sys
+import re
 from typing import List, Dict, Any, Tuple, Union, Type
 
 import src.coffe.data_structs as c_ds
+import src.common.data_structs as rg_ds
+import src.common.spice_parser as sp_parser
+import src.common.utils as rg_utils
 import src.coffe.utils as utils
 import src.coffe.mux as mux
+import src.coffe.new_carry_chain as cc_lib
 # import src.coffe.new_fpga as fpga
 
 import src.coffe.new_lut as lut_lib
+import src.coffe.new_gen_routing_loads as gen_r_load_lib
+import src.coffe.new_logic_block as lb_lib
+
 import src.coffe.constants as consts
 
 
@@ -58,12 +66,159 @@ class LocalBLEOutput(mux.Mux2to1):
         return self.initial_transistor_sizes
 
 @dataclass
+class LocalBLEOutputTB(c_ds.SimTB):
+    lut: lut_lib.LUT = None
+    lut_output_load: LUTOutputLoad = None
+    gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = None
+
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    
+    # Initialized in __post_init__
+    dut_ckt: LocalBLEOutput = None
+    local_out_node: str = None
+    general_out_node: str = None
+
+    def __hash__(self):
+        return super().__hash__()
+
+    def __post_init__(self, subckt_lib: Dict[str, rg_ds.SpSubCkt]):
+        super().__post_init__()
+        self.meas_points = []
+        pwr_v_node: str = "vdd_local_output"
+        # node definitions
+        self.local_out_node: str = "n_local_out"
+        self.general_out_node: str = "n_general_out"
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc: c_ds.SpVoltageSrc = c_ds.SpVoltageSrc(
+            name = "_LOCAL_OUTPUT",
+            out_node = pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        
+        # Initialize the DUT from our inputted wire loads
+        self.dut_ckt = self.lut_output_load.ble_outputs.general_output
+        
+        if self.lut.use_tgate:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_1_1",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_c": self.vdd_node,
+                "n_c_n": self.gnd_node,
+                "n_d": self.vdd_node,
+                "n_d_n": self.gnd_node,
+                "n_e": self.vdd_node,
+                "n_e_n": self.gnd_node,
+                "n_f": self.vdd_node,
+                "n_f_n": self.gnd_node,
+                "n_vdd": self.vdd_node,
+                "n_gnd": self.gnd_node,
+            }
+        else:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_1_1",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_vdd": self.vdd_node,
+                "n_gnd": self.gnd_node,
+            }
+        self.top_insts = [
+            # LUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut.name}", # TODO update to sp_name
+                subckt = subckt_lib[self.lut.name], # TODO update to sp_name
+                conns = lut_conns,
+            ),
+            # LUT OUTPUT LOAD
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut_output_load.sp_name}",
+                subckt = subckt_lib[self.lut_output_load.sp_name],
+                conns = {
+                    "n_in": "n_1_1",
+                    "n_local_out": self.local_out_node,
+                    "n_general_out": self.general_out_node,
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                    "n_vdd_local_output_on": pwr_v_node,
+                    "n_vdd_general_output_on": self.vdd_node,
+                }
+            ),
+            # GENERAL BLE OUTPUT LOAD
+            rg_ds.SpSubCktInst(
+                name = f"X{self.gen_ble_output_load.sp_name}",
+                subckt = subckt_lib[self.gen_ble_output_load.sp_name],
+                conns = {
+                    "n_1_1": self.general_out_node,
+                    "n_out": "n_hang_1",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ), 
+        ]
+
+    def generate_top(self) -> str:
+        dut_sp_name: str = self.dut_ckt.sp_name
+        # Get list of insts to get to the general_ble_output inst in lut_output_load
+        loc_ble_out_in_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts, 
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+                for re_str in [
+                    "lut_output_load",
+                    "ble_outputs", 
+                    "local_ble_output"
+                ] 
+            ], #"general_ble_output" is the param_inst but param is suffix ie no change
+            [] # You need to pass in an empty list to init function, if you don't weird things will happen (like getting previous results from other function calls)
+        )
+        loc_ble_out_load_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts,
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) for re_str in ["local_ble_output"] ],
+            []
+        )
+        meas_loc_ble_out_in_node: str = ".".join(
+            [inst.name for inst in loc_ble_out_in_path] + ["n_2_1"]
+        )
+        meas_loc_ble_out_term_node: str = ".".join(
+            [inst.name for inst in loc_ble_out_load_path] + ["n_1_2"]
+        )
+        delay_names: List[str] = [
+            f"inv_{dut_sp_name}_1",
+            f"inv_{dut_sp_name}_2",
+            f"total",
+        ]
+        targ_nodes: List[str] = [
+            meas_loc_ble_out_in_node, 
+            meas_loc_ble_out_term_node,
+            meas_loc_ble_out_term_node,
+        ]
+        trig_node: str = "n_1_1"
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = self.local_out_node,
+        )
+
+
+
+@dataclass
 class GeneralBLEOutput(mux.Mux2to1):
     name: str = "general_ble_output"
     delay_weight: float = consts.DELAY_WEIGHT_GENERAL_BLE_OUTPUT
     
     def __post_init__(self):
-        return super().__post_init__()
+        super().__post_init__()
 
     def generate(self, subckt_lib_fpath: str) -> Dict[str, int | float]:
         # Call Parent Mux generate, does correct generation but has incorrect initial tx sizes
@@ -98,6 +253,151 @@ class GeneralBLEOutput(mux.Mux2to1):
         
         # Will be dict of ints if FinFET or discrete Tx, can be floats if bulk
         return self.initial_transistor_sizes
+
+@dataclass
+class GeneralBLEOutputTB(c_ds.SimTB):
+    lut: lut_lib.LUT = None
+    lut_output_load: LUTOutputLoad = None
+    gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = None
+
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    
+    # Initialized in __post_init__
+    dut_ckt: GeneralBLEOutput = None
+    local_out_node: str = None
+    general_out_node: str = None
+    
+    def __hash__(self):
+        return super().__hash__()
+    
+    def __post_init__(self, subckt_lib: Dict[str, rg_ds.SpSubCkt]):
+        super().__post_init__()
+        self.meas_points = []
+        pwr_v_node: str = "vdd_general_output"
+        # node definitions
+        self.local_out_node: str = "n_local_out"
+        self.general_out_node: str = "n_general_out"
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc: c_ds.SpVoltageSrc = c_ds.SpVoltageSrc(
+            name = "_GENERAL_OUTPUT",
+            out_node = pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        
+        # Initialize the DUT from our inputted wire loads
+        self.dut_ckt = self.lut_output_load.ble_outputs.general_output
+        
+        if self.lut.use_tgate:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_1_1",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_c": self.vdd_node,
+                "n_c_n": self.gnd_node,
+                "n_d": self.vdd_node,
+                "n_d_n": self.gnd_node,
+                "n_e": self.vdd_node,
+                "n_e_n": self.gnd_node,
+                "n_f": self.vdd_node,
+                "n_f_n": self.gnd_node,
+                "n_vdd": self.vdd_node,
+                "n_gnd": self.gnd_node,
+            }
+        else:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_1_1",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_vdd": self.vdd_node,
+                "n_gnd": self.gnd_node,
+            }
+        self.top_insts = [
+            # LUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut.name}", # TODO update to sp_name
+                subckt = subckt_lib[self.lut.name], # TODO update to sp_name
+                conns = lut_conns,
+            ),
+            # LUT OUTPUT LOAD
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut_output_load.sp_name}",
+                subckt = subckt_lib[self.lut_output_load.sp_name],
+                conns = {
+                    "n_in": "n_1_1",
+                    "n_local_out": self.local_out_node,
+                    "n_general_out": self.general_out_node,
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                    "n_vdd_local_output_on": self.vdd_node,
+                    "n_vdd_general_output_on": pwr_v_node,
+                }
+            ),
+            # GENERAL BLE OUTPUT LOAD
+            rg_ds.SpSubCktInst(
+                name = f"X{self.gen_ble_output_load.sp_name}",
+                subckt = subckt_lib[self.gen_ble_output_load.sp_name],
+                conns = {
+                    "n_1_1": self.general_out_node,
+                    "n_out": "n_hang_1",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ), 
+        ]
+
+    def generate_top(self) -> str:
+        dut_sp_name: str = self.dut_ckt.sp_name
+        # Create directory for this sim
+        if not os.path.exists(dut_sp_name):
+            os.makedirs(dut_sp_name)
+        # Get list of insts to get to the general_ble_output inst in lut_output_load
+        # TODO update these for parametrization, non single Logic Cluster
+        gen_ble_out_in_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts, 
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) for re_str in ["lut_output_load", "ble_outputs", "general_ble_output"] ], #"general_ble_output" is the param_inst but param is suffix ie no change
+            [] # You need to pass in an empty list to init function, if you don't weird things will happen (like getting previous results from other function calls)
+        )
+        gen_ble_out_load_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts,
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) for re_str in ["general_ble_output_load"] ],
+            []
+        )
+        meas_gen_ble_out_in_node: str = ".".join(
+            [inst.name for inst in gen_ble_out_in_path] + ["n_2_1"]
+        )
+        meas_gen_ble_out_term_node: str = ".".join(
+            [inst.name for inst in gen_ble_out_load_path] + ["n_meas_point"]
+        )
+        delay_names = [
+            f"inv_{dut_sp_name}_1",
+            f"inv_{dut_sp_name}_2",
+            f"total",
+        ]
+        targ_nodes: List[str] = [
+            meas_gen_ble_out_in_node, 
+            meas_gen_ble_out_term_node,
+            meas_gen_ble_out_term_node,
+        ]
+        trig_node: str = "n_1_1"
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = self.general_out_node,
+        )
+
+
 
 @dataclass
 class FlipFlop(c_ds.SizeableCircuit):
@@ -641,7 +941,7 @@ class LUTOutputLoad(c_ds.LoadCircuit):
         """ Create the LUT output load subcircuit. It consists of a FF which 
             has the register select mux at its input and all BLE outputs which 
             include the output routing mux (Or) and the output feedback mux (Ofb) """
-
+        # TODO update this for multi ckt support
 
         # Total number of BLE outputs
         total_outputs = self.num_local_outputs + self.num_general_outputs
@@ -689,6 +989,9 @@ class LUTOutputLoad(c_ds.LoadCircuit):
 class FlutMux(mux.Mux2to1):
     name: str = "flut_mux"
 
+    def __post_init__(self):
+        super().__post_init__()
+
     def generate(self, subckt_lib_fpath: str) -> Dict[str, int | float]:
             # Call Parent Mux generate, does correct generation but has incorrect initial tx sizes
             self.initial_transistor_sizes = super().generate(subckt_lib_fpath)
@@ -723,6 +1026,198 @@ class FlutMux(mux.Mux2to1):
             # Will be dict of ints if FinFET or discrete Tx, can be floats if bulk
             return self.initial_transistor_sizes
     
+@dataclass
+class FlutMuxTB(c_ds.SimTB):
+    lut: lut_lib.LUT = None
+    flut_mux: FlutMux = None
+    cc_mux: cc_lib.CarryChainMux = None
+    lut_output_load: LUTOutputLoad = None
+    gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = None
+
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    
+    # Initialized in __post_init__
+    dut_ckt: FlutMux = None
+    local_out_node: str = None
+    general_out_node: str = None
+
+    def __hash__(self):
+        return super().__hash__()
+    def __post_init__(self, subckt_lib: Dict[str, rg_ds.SpSubCkt]):
+        super().__post_init__()
+        # Make sure its valid
+        assert self.cc_mux or self.lut_output_load, "Must have either a carry chain mux or lut output load"
+
+        self.meas_points = []
+        pwr_v_node: str = "vdd_flut_mux"
+        # node definitions
+        self.local_out_node: str = "n_local_out"
+        self.general_out_node: str = "n_general_out"
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc: c_ds.SpVoltageSrc = c_ds.SpVoltageSrc(
+            name = "_FLUX_MUX",
+            out_node = pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        # Initialize the DUT 
+        self.dut_ckt = self.flut_mux
+        # LUT conditionals
+        if self.lut.use_tgate:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_1_1",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_c": self.vdd_node,
+                "n_c_n": self.gnd_node,
+                "n_d": self.vdd_node,
+                "n_d_n": self.gnd_node,
+                "n_e": self.vdd_node,
+                "n_e_n": self.gnd_node,
+                "n_f": self.vdd_node,
+                "n_f_n": self.gnd_node,
+                "n_vdd": self.vdd_node,
+                "n_gnd": self.gnd_node,
+            }
+        else:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_1_1",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_vdd": self.vdd_node,
+                "n_gnd": self.gnd_node,
+            }
+        
+        cur_top_insts: List[rg_ds.SpSubCktInst] = [
+            # LUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut.name}", # TODO update to sp_name
+                subckt = subckt_lib[self.lut.name], # TODO update to sp_name
+                conns = lut_conns,
+            ),
+            # lut -> flut wire
+            rg_ds.SpSubCktInst(
+                name = f"Xwire_{self.flut_mux.sp_name}",
+                subckt = subckt_lib["wire"],
+                conns = {
+                    "n_in": "n_1_1",
+                    "n_out": "n_1_2",
+                },
+                param_values = {
+                    "Rw": "wire_lut_to_flut_mux_res",
+                    "Cw": "wire_lut_to_flut_mux_cap",
+                }
+            ),
+            # FLUT Mux
+            rg_ds.SpSubCktInst(
+                name = f"X{self.flut_mux.sp_name}",
+                subckt = subckt_lib[self.flut_mux.sp_name],
+                conns = {
+                   "n_in": "n_1_2", 
+                    "n_out": "n_1_3",
+                    "n_gate": self.vdd_node,
+                    "n_gate_n": self.gnd_node,
+                    "n_vdd": pwr_v_node,
+                    "n_gnd": self.gnd_node, 
+                }
+            )
+        ]
+        # If cc_mux was passed in carry chain assumed to be enabled
+        if self.cc_mux:
+            cur_top_insts += [
+                # flut -> cc_mux wire
+                rg_ds.SpSubCktInst(
+                    name = f"Xwire_{self.cc_mux.sp_name}",
+                    subckt = subckt_lib["wire"],
+                    conns = {
+                        "n_in": "n_1_3",
+                        "n_out": "n_1_4",
+                    },
+                    param_values = {
+                        "Rw": "wire_carry_chain_5_res",
+                        "Cw": "wire_carry_chain_5_cap",
+                    }
+                ),
+                # CC Mux
+                rg_ds.SpSubCktInst(
+                    name = f"X{self.cc_mux.sp_name}",
+                    subckt = subckt_lib[self.cc_mux.sp_name],
+                    conns = {
+                        "n_in": "n_1_4", 
+                        "n_out": self.local_out_node,
+                        "n_gate": self.vdd_node,
+                        "n_gate_n": self.gnd_node,
+                        "n_vdd": self.vdd_node,
+                        "n_gnd": self.gnd_node, 
+                    }
+                )
+            ]
+        # If no carry chain we load with lut output load
+        elif self.lut_output_load:
+            cur_top_insts += [
+                rg_ds.SpSubCktInst(
+                    name = f"X{self.lut_output_load.sp_name}",
+                    subckt = subckt_lib[self.lut_output_load.sp_name],
+                    conns = {
+                        "n_in": "n_1_4",
+                        "n_local_out": self.local_out_node,
+                        "n_general_out": self.general_out_node, 
+                        "n_gate": self.sram_vdd_node,
+                        "n_gate_n": self.sram_vss_node,
+                        "n_vdd": self.vdd_node,
+                        "n_gnd": self.gnd_node,
+                        "n_vdd_local_output_on": self.vdd_node,
+                        "n_vdd_general_output_on": self.vdd_node,
+                    }
+                ),
+            ]
+        # After cc mux conditional we attach a general_ble_output_load
+        self.top_insts = cur_top_insts + [
+            # GENERAL BLE OUTPUT LOAD
+            rg_ds.SpSubCktInst(
+                name = f"X{self.gen_ble_output_load.sp_name}",
+                subckt = subckt_lib[self.gen_ble_output_load.sp_name],
+                conns = {
+                    "n_1_1": self.general_out_node, # TODO figure this out, node only driven when carry chain enabled
+                    "n_out": "n_hang_1",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ), 
+        ]
+    def generate_top(self):
+        dut_sp_name: str = self.dut_ckt.sp_name
+        # meas paths
+        flut_mux_inv_1_out_node: str = ".".join(
+            [f"X{self.flut_mux.sp_name}", "n_2_1"]
+        )
+        flut_mux_inv_2_out_node: str = self.local_out_node
+        delay_names: List[str] = [
+            f"inv_{dut_sp_name}_1",
+            f"inv_{dut_sp_name}_2",
+            f"total",
+        ]
+        targ_nodes: List[str] = [
+            flut_mux_inv_1_out_node,
+            flut_mux_inv_2_out_node,
+            flut_mux_inv_2_out_node,
+        ]
+        trig_node: str = "n_1_2"
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = self.general_out_node,
+        )
+
 
 
 
@@ -753,6 +1248,13 @@ class BLE(c_ds.CompoundCircuit):
     ff: FlipFlop = None
     lut_output_load: LUTOutputLoad = None
     fmux: FlutMux = None
+    # Carry Chain
+    cc_mux: cc_lib.CarryChainMux = None
+    cc: cc_lib.CarryChain = None
+    cc_skip_and: cc_lib.CarryChainSkipAnd = None
+    cc_skip_mux: cc_lib.CarryChainSkipMux = None
+    # Local Mux (required by lut input area calculation)
+    local_mux: lb_lib.LocalMux = None
 
     def __post_init__(self):
         # TODO update this to be consistent, this is weird case where base name is different from sp_name
@@ -795,7 +1297,8 @@ class BLE(c_ds.CompoundCircuit):
             Rsel = self.Rsel,
             use_finfet = self.use_finfet,
             use_fluts = self.use_fluts,
-            use_tgate = self.use_tgate
+            use_tgate = self.use_tgate,
+            local_mux = self.local_mux,
         )
 
     def generate_ble_outputs(self, spice_filename: str) -> List[str]:
@@ -891,10 +1394,9 @@ class BLE(c_ds.CompoundCircuit):
 
         lut_area = self.lut.update_area(area_dict, width_dict)
 
-
         # Calculate area of BLE outputs
-        local_ble_output_area = self.num_local_outputs*self.local_output.update_area(area_dict, width_dict)
-        general_ble_output_area = self.num_general_outputs*self.general_output.update_area(area_dict, width_dict)
+        local_ble_output_area = self.num_local_outputs * self.local_output.update_area(area_dict, width_dict)
+        general_ble_output_area = self.num_general_outputs * self.general_output.update_area(area_dict, width_dict)
         
         ble_output_area = local_ble_output_area + general_ble_output_area
         ble_output_width = math.sqrt(ble_output_area)
@@ -902,16 +1404,14 @@ class BLE(c_ds.CompoundCircuit):
         width_dict["ble_output"] = ble_output_width
 
         if self.use_fluts:
-            ble_area = lut_area + 2*ff_area + ble_output_area# + fmux_area
+            ble_area = lut_area + 2 * ff_area + ble_output_area # + fmux_area
         else:
             ble_area = lut_area + ff_area + ble_output_area
 
         if self.enable_carry_chain == 1:
-            if self.carry_skip_periphery_count ==0:
-                ble_area = ble_area + area_dict["carry_chain"] * self.FAs_per_flut + (self.FAs_per_flut) * area_dict["carry_chain_mux"]
-            else:
-                ble_area = ble_area + area_dict["carry_chain"] * self.FAs_per_flut + (self.FAs_per_flut) * area_dict["carry_chain_mux"]
-                ble_area = ble_area + ((area_dict["xcarry_chain_and"] + area_dict["xcarry_chain_mux"]) * self.carry_skip_periphery_count)/self.N
+            ble_area = ble_area + area_dict[self.cc.sp_name] * self.FAs_per_flut + (self.FAs_per_flut) * area_dict[self.cc_mux.sp_name]
+            if self.carry_skip_periphery_count != 0:
+                ble_area = ble_area + ((area_dict[self.cc_skip_and.sp_name] + area_dict[self.cc_skip_mux.sp_name]) * self.carry_skip_periphery_count) / self.cluster_size
 
         ble_width = math.sqrt(ble_area)
         area_dict["ble"] = ble_area
@@ -921,8 +1421,13 @@ class BLE(c_ds.CompoundCircuit):
         """ Update wire of member objects. """
         
         # Filter wire names list to get the name of ble_output_wire (with any parameters added to suffix)
-        ble_outputs_wire_key = [ wire_name for wire_name in self.wire_names if "wire_ble_outputs" in wire_name][0]
-
+        
+        ble_outputs_wire_key = rg_utils.get_unique_obj(
+            self.wire_names,
+            rg_utils.str_match_condition,
+            "wire_ble_outputs", 
+        )
+        # ble_outputs_wire_key = [ wire_name for wire_name in self.wire_names if "wire_ble_outputs" in wire_name][0]
 
         # Assert keys exist in wire_names, unneeded but following convension if wire keys not coming from wire_names
         assert ble_outputs_wire_key in self.wire_names
@@ -936,7 +1441,10 @@ class BLE(c_ds.CompoundCircuit):
         self.general_output.update_wires(width_dict, wire_lengths, wire_layers)
         
         # Wire connecting all BLE output mux-inputs together
-        wire_lengths[ble_outputs_wire_key] = self.num_local_outputs * width_dict[self.local_output.name] + self.num_general_outputs * width_dict[self.general_output.name]
+        wire_lengths[ble_outputs_wire_key] = (
+            self.num_local_outputs * width_dict[self.local_output.sp_name] 
+                + self.num_general_outputs * width_dict[self.general_output.sp_name]
+        )
         wire_layers[ble_outputs_wire_key] = consts.LOCAL_WIRE_LAYER
 
         # Update LUT load wires
@@ -944,7 +1452,7 @@ class BLE(c_ds.CompoundCircuit):
 
         # Fracturable luts:
         if self.use_fluts:
-            self.fmux.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
+            self.fmux.update_wires(width_dict, wire_lengths, wire_layers)
         
         
     def print_details(self, report_file):

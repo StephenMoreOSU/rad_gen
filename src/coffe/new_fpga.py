@@ -29,7 +29,7 @@ import src.coffe.cost as cost
 # from src.coffe.circuit_baseclasses import _SizableCircuit, _CompoundCircuit
 
 # Top level file generation module
-import src.coffe.top_level as top_level
+# import src.coffe.top_level as top_level
 
 # HSPICE handling module
 import src.coffe.spice as spice
@@ -50,6 +50,8 @@ import src.coffe.data_structs as c_ds
 import src.coffe.new_gen_routing_loads as gen_r_load_lib
 import src.coffe.new_sb_mux as sb_mux_lib
 import src.coffe.new_cb_mux as cb_mux_lib
+import src.coffe.new_lut as lut_lib
+import src.coffe.new_ble as ble_lib
 import src.coffe.new_logic_block as lb_lib
 import src.coffe.new_carry_chain as carry_chain_lib
 import src.coffe.ram as ram_lib
@@ -195,6 +197,41 @@ import src.common.rr_parse as rrg_parse
 # Each model would have a list of possible base components, generated from user params
 # From that list of components, we can iterate and swap out components while we run simulations to test multiple types of components
 # When looking at multiple "models" we can determine if we need to do a geometric or linear sweep of them to accurately represent the FPGA
+def sim_tbs( 
+    tbs: List[Type[c_ds.SimTB]],
+    sp_interface: spice.SpiceInterface,
+    parameter_dict: Dict[str, List[str]],
+) -> Dict[Type[c_ds.SimTB], Dict[str, float]]:
+    """
+        Runs HSPICE on all testbenches in the list with the corresponding parameter dict
+        Returns a dict hashed by each testbench with its corresponding results (delay, power)
+    """
+    sp_out_meas = { 
+        "trise": 0,
+        "tfall": 0,
+        "delay": 0,
+        "power": 0,
+    }
+    tb_meas: Dict[Type[c_ds.SimTB], Dict[str, float]] = defaultdict(lambda: sp_out_meas)
+    for tb in tbs:
+        print(f"Updating delay for {tb.dut_ckt.sp_name} with TB {tb.tb_fname.strip('.sp')}")
+        spice_meas = sp_interface.run(tb.sp_fpath, parameter_dict)
+        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+            valid_delay = False
+            tfall = 1
+            trise = 1
+        else :  
+            tfall = float(spice_meas["meas_total_tfall"][0])
+            trise = float(spice_meas["meas_total_trise"][0])
+        if tfall < 0 or trise < 0:
+            valid_delay = False
+        tb_meas[tb]["trise"] = trise
+        tb_meas[tb]["tfall"] = tfall
+        tb_meas[tb]["delay"] = max(tfall, trise)
+        tb_meas[tb]["power"] = float(spice_meas["meas_avg_power"][0])
+    return tb_meas
+
+
 @dataclass
 class FPGA:
     """ 
@@ -233,37 +270,95 @@ class FPGA:
         default_factory=lambda: []
     )
 
+    update_area_cnt: int = 0
+    update_wires_cnt: int = 0
+    compute_distance_cnt: int = 0
+    update_delays_cnt: int = 0
+
     ######################################################################################
     ### LISTS CONTAINING ALL CREATED SUBCIRCUITS (ALL MAY NOT BE SIMULATED AND SIZED)  ###
     ######################################################################################
 
     # Switch Block Muxes
-    sb_mux: c_ds.Block = None
-    sb_muxes: List[sb_mux_lib.SwitchBlockMux] = field(
-        default_factory=lambda: []
-    )
+    # sb_muxes: List[sb_mux_lib.SwitchBlockMux] = field(
+    #     default_factory=lambda: []
+    # )
     sb_mux_tbs: List[sb_mux_lib.SwitchBlockMuxTB] = field(
         default_factory=lambda: []
     )
     # Connection Block Muxes
-    cb_mux: c_ds.Block = None
-    cb_muxes: List[cb_mux_lib.ConnectionBlockMux] = field(
-        default_factory=lambda: []
-    )
+    # cb_muxes: List[cb_mux_lib.ConnectionBlockMux] = field(
+    #     default_factory=lambda: []
+    # )
     cb_mux_tbs: List[cb_mux_lib.ConnectionBlockMuxTB] = field(
         default_factory=lambda: []
     )
     # BLE General Output Loads
-    gen_ble_output_loads: List[gen_r_load_lib.GeneralBLEOutputLoad] = field(
-        default_factory=lambda: []
-    )
-    # General Programmable Routing Loads
-    gen_routing_loads: List[gen_r_load_lib.RoutingWireLoad] = field(
-        default_factory=lambda: []
-    )
+    # gen_ble_output_loads: List[gen_r_load_lib.GeneralBLEOutputLoad] = field(
+    #     default_factory=lambda: []
+    # )
+    # # General Programmable Routing Loads
+    # gen_routing_loads: List[gen_r_load_lib.RoutingWireLoad] = field(
+    #     default_factory=lambda: []
+    # )
     # Logic Clusters
-    logic_cluster: c_ds.Block = None
-    logic_clusters: List[lb_lib.LogicCluster] = field(
+    # logic_clusters: List[lb_lib.LogicCluster] = field(
+    #     default_factory=lambda: []
+    # )
+    # Local Mux TBs
+    local_mux_tbs: List[lb_lib.LocalMuxTB] = field(
+        default_factory=lambda: []
+    )
+    # Local BLE Output TBs
+    local_ble_output_tbs: List[ble_lib.LocalBLEOutputTB] = field(
+        default_factory=lambda: []
+    )
+    # General BLE Output TBs
+    general_ble_output_tbs: List[ble_lib.GeneralBLEOutputTB] = field(
+        default_factory=lambda: []
+    )
+    # LUT TBs
+    lut_tbs: List[lut_lib.LUTTB] = field(
+        default_factory=lambda: []
+    )
+    # Flut Mux TBs
+    flut_mux_tbs: List[ble_lib.FlutMuxTB] = field(
+        default_factory=lambda: []
+    )
+    # Lut Input Driver TBs
+    lut_in_driver_tbs: Dict[str, List[lut_lib.LUTInputDriverTB]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    # Lut Input Not Driver TBs
+    lut_in_not_driver_tbs: Dict[str, List[lut_lib.LUTInputDriverTB]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    # Lut Input Driver LUT Load TBs
+    lut_in_driver_lut_load_tbs: Dict[str, List[lut_lib.LUTInputDriverLUTLoadTB]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    # Carry Chain Mux TBs
+    carry_chain_mux_tbs: List[carry_chain_lib.CarryChainMuxTB] = field(
+        default_factory=lambda: []
+    )
+    # Carry Chain Peripherial TBs
+    carry_chain_per_tbs: List[carry_chain_lib.CarryChainPerTB] = field(
+        default_factory=lambda: []
+    )
+    # Carry Chain TBs
+    carry_chain_tbs: List[carry_chain_lib.CarryChainTB] = field(
+        default_factory=lambda: []
+    )
+    # Carry Chain Mux Skip TBs
+    carry_chain_skip_and_tbs: List[carry_chain_lib.CarryChainSkipAndTB] = field(
+        default_factory=lambda: []
+    )
+    # Carry Chain Inter Cluster TBs
+    carry_chain_inter_tbs: List[carry_chain_lib.CarryChainInterClusterTB] = field(
+        default_factory=lambda: []
+    )
+    # Carry Chain Skip Mux TBs
+    carry_chain_skip_mux_tbs: List[carry_chain_lib.CarryChainSkipMuxTB] = field(
         default_factory=lambda: []
     )
 
@@ -271,19 +366,69 @@ class FPGA:
     carry_skip_periphery_count: int = None
     skip_size: int = None
 
-    # Carry Chain Circuits 
-    # TODO consolidate into a single object and conform to format used by other circuits
-    carrychain: carry_chain_lib.CarryChain = None
-    carrychainperf: carry_chain_lib.CarryChainPer = None
-    carrychainmux: carry_chain_lib.CarryChainMux = None
-    carrychaininter: carry_chain_lib.CarryChainInterCluster = None
-    carrychainand: carry_chain_lib.CarryChainSkipAnd = None
-    carrychainskipmux: carry_chain_lib.CarryChainSkipMux = None
+    #   ___ ___  ___   _      ___ ___ ___  ___ _   _ ___ _____    ___  ___    _ ___ 
+    #  | __| _ \/ __| /_\    / __|_ _| _ \/ __| | | |_ _|_   _|  / _ \| _ )_ | / __|
+    #  | _||  _/ (_ |/ _ \  | (__ | ||   / (__| |_| || |  | |   | (_) | _ \ || \__ \
+    #  |_| |_|  \___/_/ \_\  \___|___|_|_\\___|\___/|___| |_|    \___/|___/\__/|___/
+    
+    
+    # Switch Block
+    sb_mux: c_ds.Block = None
+    sb_muxes: List[sb_mux_lib.SwitchBlockMux] = None
+
+    # Routing Wire Load Circuits
+    gen_routing_wire_loads: List[gen_r_load_lib.RoutingWireLoad] = None
+    gen_ble_output_loads: List[gen_r_load_lib.GeneralBLEOutputLoad] = None
+
+    # Connection Block
+    cb_mux: c_ds.Block = None
+    cb_muxes: List[cb_mux_lib.ConnectionBlockMux] = None
+
+    # Logic Cluster (higher level group of sizeable ckts)
+    logic_cluster: c_ds.Block = None
+    logic_clusters: List[lb_lib.LogicCluster] = None
+
+    # Local Interconnect
+    # local_mux: c_ds.Block = None # Unused TODO remove if necessary
+    local_muxes: List[lb_lib.LocalMux] = None
+    local_routing_wire_loads: List[lb_lib.LocalRoutingWireLoad] = None
+    local_ble_output_loads: List[lb_lib.LocalBLEOutputLoad] = None
+
+    # BLE
+    # local_ble_output: c_ds.Block = None # Unused TODO remove if necessary
+    local_ble_outputs: List[ble_lib.LocalBLEOutput] = None
+    # general_ble_output: c_ds.Block = None # Unused TODO remove if necessary
+    general_ble_outputs: List[ble_lib.GeneralBLEOutput] = None    
+    lut_output_loads: List[ble_lib.LUTOutputLoad] = None
+    # flut_mux: c_ds.Block = None # Unused TODO remove if necessary
+    flut_muxes: List[ble_lib.FlutMux] = None
+    flip_flops: List[ble_lib.FlipFlop] = None
+
+    # LUT
+    lut: c_ds.Block = None
+    luts: List[lut_lib.LUT] = None
+
+    # LUT Input Drivers
+    lut_input_driver: Dict[str, c_ds.Block] = None
+    lut_input_drivers: Dict[str, List[lut_lib.LUTInputDriver]] = None
+    lut_input_not_driver: Dict[str, c_ds.Block] = None
+    lut_input_not_drivers: Dict[str, List[lut_lib.LUTInputNotDriver]] = None
+    lut_input_driver_loads: Dict[str, List[lut_lib.LUTInputDriverLoad]] = None
+
+    # Carry Chain Circuits
+    carry_chains: List[carry_chain_lib.CarryChain] = None
+    carry_chain_periphs: List[carry_chain_lib.CarryChainPer] = None               
+    carry_chain_muxes: List[carry_chain_lib.CarryChainMux] = None
+    carry_chain_inter_clusters: List[carry_chain_lib.CarryChainInterCluster] = None
+    carry_chain_skip_ands: List[carry_chain_lib.CarryChainSkipAnd] = None
+    carry_chain_skip_muxes: List[carry_chain_lib.CarryChainSkipMux] = None
 
     # Ram Circuits
     # TODO consolidate into a single object and conform to format used by other circuits
     RAM: ram_lib._RAM = None
     
+    # Hard Block Circuits
+    hardblocklist: List[hb_lib._hard_block] = None
 
     # FPGA Specifications required in later functions
     specs: c_ds.Specs = None
@@ -426,12 +571,13 @@ class FPGA:
             run_options.quick_mode
         )
 
+        # Global Setting inits
+        self.metal_stack = self.specs.metal_stack
         self.use_tgate = self.specs.use_tgate
 
         # Init height of logic block to 0 (representing uninitialized)
         # TODO update all initializations to None instead of some other value
-        self.lb_height = 0.0
-
+        # self.lb_height = 0.0
 
         # All general routing wires in the FPGA 
         self.gen_r_wires: Dict[str, c_ds.GenRoutingWire] = {}
@@ -633,7 +779,7 @@ class FPGA:
                 required_size = cb_mux_size_required,
                 num_per_tile = num_cb_mux_per_tile,
                 use_tgate = self.specs.use_tgate,
-                # self.sb_muxes[0], self.routing_wire_loads[0]
+                # self.sb_muxes[0], self.gen_routing_wire_loads[0]
             )
             self.cb_muxes.append(cb_mux)
             self.cb_mux = c_ds.Block(
@@ -719,17 +865,9 @@ class FPGA:
                         # Now we can create the dict entry for this gen_r_wire and sb_mux_load
                         sb_mux_load_freqs[gen_r_wire][sb_mux_load] = load_info.freq
 
-                    # [
-                    #     sb_mux for sb_mux in self.sb_muxes if sb_mux.sink_wire.type == drv_2_seg_lookup[load_info.mux_type]
-                    # ][0]
-
-
-
             # Iterate over CB muxes and determine which is capable of having taking each gen_r_wire as an input
-
-
             # Create the Routing Wire Load Objects
-            self.routing_wire_loads: List[gen_r_load_lib.RoutingWireLoad] = []
+            self.gen_routing_wire_loads: List[gen_r_load_lib.RoutingWireLoad] = []
             # TODO init a similar input as sb_mux_load_freqs except for cb_mux_load_freqs as current version only requires the cb_mux_load_freqs to have all valid cb_muxes as keys
             
             # Connection block mux load freq, TODO make the freq portion accurate and not a stand in, just putting 1 in for now but its not correct OR used
@@ -756,7 +894,7 @@ class FPGA:
                     cur_id += 1
 
                     # Append to the list of RoutingWireLoads
-                    self.routing_wire_loads.append(routing_wire_load)
+                    self.gen_routing_wire_loads.append(routing_wire_load)
 
             ###################################
             ### CREATE LOGIC CLUSTER OBJECT ###
@@ -773,7 +911,62 @@ class FPGA:
             self.carry_skip_periphery_count: int = 0
             if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip":
                 self.carry_skip_periphery_count = int(math.floor((self.specs.N * self.specs.FAs_per_flut)/self.skip_size))
-
+            ##################################
+            ### CREATE CARRY CHAIN OBJECTS ###
+            ##################################
+            self.carry_chains = []
+            self.carry_chain_periphs = []
+            self.carry_chain_muxes = []
+            self.carry_chain_inter_clusters = []
+            if self.specs.enable_carry_chain == 1:
+                carrychainperiph = carry_chain_lib.CarryChainPer(
+                    id = 0,
+                    use_tgate = self.specs.use_tgate,
+                    use_finfet = self.specs.use_finfet, 
+                )
+                self.carry_chain_periphs.append(carrychainperiph)
+                carrychain = carry_chain_lib.CarryChain(
+                    id = 0,
+                    cluster_size = self.specs.N, 
+                    FAs_per_flut = self.specs.FAs_per_flut,
+                    use_finfet = self.specs.use_finfet,
+                    carry_chain_periph = self.carry_chain_periphs[0], # TODO update for multi ckt support
+                )
+                self.carry_chains.append(carrychain)
+                carrychainmux = carry_chain_lib.CarryChainMux(
+                    id = 0,
+                    use_fluts = self.specs.use_fluts,
+                    use_tgate = self.specs.use_tgate,
+                    use_finfet = self.specs.use_finfet, 
+                )
+                self.carry_chain_muxes.append(carrychainmux)
+                carrychaininter = carry_chain_lib.CarryChainInterCluster(
+                    id = 0,
+                    use_finfet = self.specs.use_finfet, 
+                    carry_chain_type = self.specs.carry_chain_type,    
+                    inter_wire_length = inter_wire_length,
+                )
+                self.carry_chain_inter_clusters.append(carrychaininter)
+                if self.specs.carry_chain_type == "skip":
+                    self.carry_chain_skip_muxes = []
+                    self.carry_chain_skip_ands = []
+                    carrychainand = carry_chain_lib.CarryChainSkipAnd(
+                        id = 0,
+                        use_tgate = self.specs.use_tgate,
+                        use_finfet = self.specs.use_finfet, 
+                        carry_chain_type = self.specs.carry_chain_type,    
+                        cluster_size = self.specs.N, 
+                        FAs_per_flut = self.specs.FAs_per_flut,
+                        skip_size = self.skip_size,
+                    )
+                    self.carry_chain_skip_ands.append(carrychainand)
+                    carrychainskipmux = carry_chain_lib.CarryChainSkipMux(
+                        id = 0,
+                        use_tgate = self.specs.use_tgate,
+                        use_finfet = self.specs.use_finfet, 
+                        carry_chain_type = self.specs.carry_chain_type,    
+                    )
+                    self.carry_chain_skip_muxes.append(carrychainskipmux)
             # Create a list for all Logic Clusters that could exist in device
             self.logic_clusters: List[lb_lib.LogicCluster] = []
             # Create a Logic Cluster Object
@@ -799,53 +992,57 @@ class FPGA:
                 use_tgate = self.specs.use_tgate,
                 use_finfet = self.specs.use_finfet,
                 use_fluts = self.specs.use_fluts,
+                # Circuit dependancies
+                cc = self.carry_chains[0] if self.specs.enable_carry_chain == 1 else None,
+                cc_mux = self.carry_chain_muxes[0] if self.specs.enable_carry_chain == 1 else None,
+                cc_skip_and = self.carry_chain_skip_ands[0] if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip" else None,
+                cc_skip_mux = self.carry_chain_skip_muxes[0] if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip" else None,
             )
             self.logic_clusters.append(logic_cluster)
-            ##################################
-            ### CREATE CARRY CHAIN OBJECTS ###
-            ##################################
-            # TODO: Why is the carry chain created here and not in the logic cluster object?
+            # TODO make these individual instantiations rather than being derived from logic clusters
+            
+            # Local Interconnect
+            self.local_muxes = [
+                lc.local_mux for lc in self.logic_clusters
+            ]
+            self.local_mux = c_ds.Block(
+                ckt_defs = self.local_muxes,
+                total_num_per_tile = sum([lc.num_local_mux_per_tile for lc in self.logic_clusters])
+            )
+            self.local_routing_wire_loads = [
+                lc.local_routing_wire_load for lc in self.logic_clusters
+            ]
+            self.local_ble_output_loads = [ 
+                lc.local_ble_output_load for lc in self.logic_clusters
+            ]
+            # BLE
+            self.local_ble_outputs = [
+                lc.ble.local_output for lc in self.logic_clusters
+            ]
+            self.general_ble_outputs = [
+                lc.ble.general_output for lc in self.logic_clusters
+            ]
+            self.lut_output_loads = [
+                lc.ble.lut_output_load for lc in self.logic_clusters
+            ]
+            self.flut_muxes = [
+                lc.ble.fmux for lc in self.logic_clusters
+            ] 
+            # LUT
+            self.luts = [
+                lc.ble.lut for lc in self.logic_clusters
+            ]
+            # Input Driver & Not input driver
+            self.lut_input_drivers = defaultdict(list)
+            self.lut_input_not_drivers = defaultdict(list)
+            for lc in self.logic_clusters:
+                lut_in: lut_lib.LUTInput
+                for lut_in in lc.ble.lut.input_drivers.values():
+                    self.lut_input_drivers[lut_in.lut_input_key].append(lut_in.driver)
+                    self.lut_input_not_drivers[lut_in.lut_input_key].append(lut_in.not_driver)
 
-            if self.specs.enable_carry_chain == 1:
-                self.carrychain = carry_chain_lib.CarryChain(
-                    id = 0,
-                    cluster_size = self.specs.N, 
-                    FAs_per_flut = self.specs.FAs_per_flut,
-                    use_finfet = self.specs.use_finfet,
-                )
-                self.carrychainperf = carry_chain_lib.CarryChainPer(
-                    id = 0,
-                    use_tgate = self.specs.use_tgate,
-                    use_finfet = self.specs.use_finfet, 
-                )
-                self.carrychainmux = carry_chain_lib.CarryChainMux(
-                    id = 0,
-                    use_fluts = self.specs.use_fluts,
-                    use_tgate = self.specs.use_tgate,
-                    use_finfet = self.specs.use_finfet, 
-                )
-                self.carrychaininter = carry_chain_lib.CarryChainInterCluster(
-                    id = 0,
-                    use_finfet = self.specs.use_finfet, 
-                    carry_chain_type = self.specs.carry_chain_type,    
-                    inter_wire_length = inter_wire_length,
-                )
-                if self.specs.carry_chain_type == "skip":
-                    self.carrychainand = carry_chain_lib.CarryChainSkipAnd(
-                        id = 0,
-                        use_tgate = self.specs.use_tgate,
-                        use_finfet = self.specs.use_finfet, 
-                        carry_chain_type = self.specs.carry_chain_type,    
-                        cluster_size = self.specs.N, 
-                        FAs_per_flut = self.specs.FAs_per_flut,
-                        skip_size = self.skip_size,
-                    )
-                    self.carrychainskipmux = carry_chain_lib.CarryChainSkipMux(
-                        id = 0,
-                        use_tgate = self.specs.use_tgate,
-                        use_finfet = self.specs.use_finfet, 
-                        carry_chain_type = self.specs.carry_chain_type,    
-                    )
+
+
             
             #########################
             ### CREATE RAM OBJECT ###
@@ -871,18 +1068,6 @@ class FPGA:
                     hard_block = hb_lib._hard_block(hb_conf, self.specs.use_tgate)
                     self.hardblocklist.append(hard_block)
 
-                                                          
-
-        # Once we have our Routing Mux + Wire Statistics we can create RoutingWireLoads and SwitchblockMuxes
-        # elif self.specs.wire_types and self.specs.Fs_mtx:
-        #     # Not using an RR graph but getting our wire load information from an Fs matrix and user inputted wire types
-        #     # TODO implement
-        #     use_rrg = False
-        #     pass 
-        # else:
-        #     assert False, "No RR graph or wire types and Fs matrix provided. Cannot proceed."
-
-        
     def generate(self, size_hb_interfaces: bool):
         """ This function generates all SPICE netlists and library files. """
     
@@ -923,6 +1108,13 @@ class FPGA:
         self._create_lib_files()
         
         # Generate the various subcircuits netlists of the FPGA (call members)
+        sb_mux: sb_mux_lib.SwitchBlockMux
+        for sb_mux in self.sb_muxes:
+            self.transistor_sizes.update(
+                sb_mux.generate(
+                    self.subcircuits_filename
+                )
+            )
         cb_mux: cb_mux_lib.ConnectionBlockMux
         for cb_mux in self.cb_muxes:
             self.transistor_sizes.update(
@@ -939,47 +1131,30 @@ class FPGA:
                     self.specs,
                 )
             )
-        sb_mux: sb_mux_lib.SwitchBlockMux
-        for sb_mux in self.sb_muxes:
-            self.transistor_sizes.update(
-                sb_mux.generate(
-                    self.subcircuits_filename
-                )
-            )
+
        
-        # Iterate over all existing sb muxes and generate them + cluster / gen routing load collateral 
-        # for sb_mux in self.sb_muxes:
-
-        #     # self.transistor_sizes.update(cb_mux.generate(self.subcircuits_filename, 
-        #     #                                               self.specs.min_tran_width))
-            
-        #     # self.transistor_sizes.update(logic_cluster.generate(self.subcircuits_filename, 
-        #     #                                                      self.specs.min_tran_width, 
-        #     #                                                      self.specs))
-
-        #     self.transistor_sizes.update(
-        #         sb_mux.generate(
-        #             self.subcircuits_filename, 
-        #             self.specs.min_tran_width
-        #         )
-        #     )
-            # sb_mux.generate_top()
         gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad
         for gen_ble_output_load in self.gen_ble_output_loads:
             gen_ble_output_load.generate(self.subcircuits_filename, self.specs)
 
         routing_wire_load: gen_r_load_lib.RoutingWireLoad
-        for routing_wire_load in self.routing_wire_loads:
+        for routing_wire_load in self.gen_routing_wire_loads:
             routing_wire_load.generate(self.subcircuits_filename, self.specs)
         
         if self.specs.enable_carry_chain == 1:
-            self.transistor_sizes.update(self.carrychain.generate(self.subcircuits_filename))
-            self.transistor_sizes.update(self.carrychainperf.generate(self.subcircuits_filename))
-            self.transistor_sizes.update(self.carrychainmux.generate(self.subcircuits_filename))
-            self.transistor_sizes.update(self.carrychaininter.generate(self.subcircuits_filename))
+            for carrychain in self.carry_chains:
+                self.transistor_sizes.update(carrychain.generate(self.subcircuits_filename))
+            for carrychainperiph in self.carry_chain_periphs:
+                self.transistor_sizes.update(carrychainperiph.generate(self.subcircuits_filename))
+            for carrychainmux in self.carry_chain_muxes:
+                self.transistor_sizes.update(carrychainmux.generate(self.subcircuits_filename))
+            for carrychaininter in self.carry_chain_inter_clusters:
+                self.transistor_sizes.update(carrychaininter.generate(self.subcircuits_filename))
             if self.specs.carry_chain_type == "skip":
-                self.transistor_sizes.update(self.carrychainand.generate(self.subcircuits_filename))
-                self.transistor_sizes.update(self.carrychainskipmux.generate(self.subcircuits_filename))
+                for carrychainand in self.carry_chain_skip_ands:
+                    self.transistor_sizes.update(carrychainand.generate(self.subcircuits_filename))
+                for carrychainskipmux in self.carry_chain_skip_muxes:
+                    self.transistor_sizes.update(carrychainskipmux.generate(self.subcircuits_filename))
 
         if self.specs.enable_bram_block == 1:
             self.transistor_sizes.update(self.RAM.generate(self.subcircuits_filename, self.specs.min_tran_width, self.specs))
@@ -1040,7 +1215,12 @@ class FPGA:
             }
         )
         sim_options: Dict[str, str] = {
-            "BRIEF": "1"
+            "BRIEF": "1",
+            # Check if these work...
+            "POST": "1",
+            "INGOLD":"1",
+            "NODE":"1",
+            "LIST":"1",
         }
         
         #   ___ ___   __  __ _   ___  __
@@ -1059,10 +1239,11 @@ class FPGA:
         sb_mux_sim_mode.sim_time = c_ds.Value(8, units = sb_mux_sim_mode.sim_time.units) # ns
 
         print("Creating SB Mux TB Objects:")
+        tb_idx: int = 0
         src_r_wire_load: gen_r_load_lib.RoutingWireLoad
-        for src_r_wire_load in self.routing_wire_loads:
+        for src_r_wire_load in self.gen_routing_wire_loads:
             sink_r_wire_load: gen_r_load_lib.RoutingWireLoad
-            for sink_r_wire_load in self.routing_wire_loads:
+            for sink_r_wire_load in self.gen_routing_wire_loads:
                 # Make sure this general routing wire load is driving the wire we expect
                 if src_r_wire_load.terminal_sb_mux.sink_wire == sink_r_wire_load.gen_r_wire:
                     def condition(sb_mux: sb_mux_lib.SwitchBlockMux) -> bool:
@@ -1071,13 +1252,14 @@ class FPGA:
                         self.sb_muxes,
                         condition,
                     )
-                    print((
-                        f"{start_sb_mux.sink_wire.type} DUT[ -> "
-                        f"{src_r_wire_load.terminal_sb_mux.sink_wire.type}] -> "
-                        f"{sink_r_wire_load.terminal_sb_mux.sink_wire.type}"
-                    ))
+                    # print((
+                    #     f"{start_sb_mux.sink_wire.type} DUT[ -> "
+                    #     f"{src_r_wire_load.terminal_sb_mux.sink_wire.type}] -> "
+                    #     f"{sink_r_wire_load.terminal_sb_mux.sink_wire.type}"
+                    # ))
                     # Create a testbench for this legal combination
-                    sb_mux_tb: sb_mux_lib.SwitchBlockMuxTB = sb_mux_lib.SwitchBlockMuxTB(
+                    sb_mux_tb = sb_mux_lib.SwitchBlockMuxTB(
+                        id = tb_idx,
                         # SB Mux Specific args
                         start_sb_mux = start_sb_mux,
                         src_routing_wire_load = src_r_wire_load, 
@@ -1089,6 +1271,7 @@ class FPGA:
                         # Pass in library of all subckts 
                         subckt_lib = self.subckt_lib,
                     )
+                    tb_idx += 1
                     # For now only append to the list for each uniq comb of src_routing_wire_load & sink_routing_wire_load
                     # ie ignore unique start sb_muxes
                     # TODO implement TB filtering somewhere else
@@ -1110,29 +1293,34 @@ class FPGA:
         # Again the way we get all possible sim combinations would be to take the circuits in the testbench and combine them geometrically        
         print("Creating CB Mux TB Object")
         
-        cb_mux_sim_mode: c_ds.SpSimMode = copy.deepcopy(base_sim_mode)
+        gen_sim_mode: c_ds.SpSimMode = copy.deepcopy(base_sim_mode)
         # Certain simulations may run at lower / higher clock freqs? The only reason I could see for this would be make sure the meas statements voltage triggers hit
-        cb_mux_sim_mode.sim_time = c_ds.Value(4, units = sb_mux_sim_mode.sim_time.units) # ns
+        gen_sim_mode.sim_time = c_ds.Value(4, units = sb_mux_sim_mode.sim_time.units) # ns
         
         # Num TBs = number of unique terminating CB muxes * num unique routing wire loads that can drive them * \
         #           * num unique terminating local muxes * num unique local routing wire load that can drive them
         
         # TODO implement for the above, but for now we're just going to assume we only have a single CB mux type in the device
         # Find all legal gen routing wire load components
-        cb_tb_gen_r_wire_loads: List[gen_r_load_lib.RoutingWireLoad] = []
-        cb_tb_local_r_wire_loads: List[lb_lib.LocalRoutingWireLoad] = []
-        cb_tb_local_muxes: List[lb_lib.LocalMux] = []
-        cb_tb_lut_input_drivers: List[lb_lib.ble_lib.lut_lib.LUTInputDriver] = []
+        tb_gen_r_wire_loads: List[gen_r_load_lib.RoutingWireLoad] = []
         for cb_mux in self.cb_muxes:
-            for gen_r_wire_load in self.routing_wire_loads:
+            for gen_r_wire_load in self.gen_routing_wire_loads:
+                # This filters out general routing wires which have terminal_cb_muxes inside thier struct yet don't have them assigned
+                # TODO really terminal muxes shouldn't be assigned to gen_r_wire_loads thats don't have them
                 if gen_r_wire_load.terminal_cb_mux and gen_r_wire_load.terminal_cb_mux == cb_mux and \
                     gen_r_wire_load.tile_cb_load_assignments[0][gen_r_wire_load.terminal_cb_mux]["num_on"] > 0:
-                    cb_tb_gen_r_wire_loads.append(gen_r_wire_load)
+                    tb_gen_r_wire_loads.append(gen_r_wire_load)
         # TODO find all legal local routing wire loads that can be driven by the CB mux
         # We just assume as many types as we have logic clusters TODO circuits should be split up and indivdualized for more clarity + modularity
-        cb_tb_local_r_wire_loads = [lb.local_routing_wire_load for lb in self.logic_clusters]
-        cb_tb_local_muxes = [lb.local_mux for lb in self.logic_clusters]
-        cb_tb_lut_input_drivers = [lb.ble.lut.input_drivers["a"].driver for lb in self.logic_clusters]
+        tb_local_r_wire_loads: List[lb_lib.LocalRoutingWireLoad] = [
+            lb.local_routing_wire_load for lb in self.logic_clusters
+        ]
+        tb_local_muxes: List[lb_lib.LocalMux] = [
+            lb.local_mux for lb in self.logic_clusters
+        ]
+        tb_lut_input_drivers: List[lb_lib.ble_lib.lut_lib.LUTInputDriver] = [
+            lb.ble.lut.input_drivers["a"].driver for lb in self.logic_clusters
+        ]
         # Create geometric product of these input circuits to get out all possible testbenches
         cb_tb_in_ckt_combos: List[
             Tuple[
@@ -1143,13 +1331,13 @@ class FPGA:
             ]
         ] = list(
             itertools.product(
-                cb_tb_gen_r_wire_loads,
-                cb_tb_local_r_wire_loads, 
-                cb_tb_local_muxes, 
-                cb_tb_lut_input_drivers
+                tb_gen_r_wire_loads,
+                tb_local_r_wire_loads, 
+                tb_local_muxes, 
+                tb_lut_input_drivers
             )
         )
-        for cb_tb_in_ckt_combo in cb_tb_in_ckt_combos:
+        for tb_idx, cb_tb_in_ckt_combo in enumerate(cb_tb_in_ckt_combos):
             gen_r_wire_load: gen_r_load_lib.RoutingWireLoad = cb_tb_in_ckt_combo[0]
             local_r_wire_load: lb_lib.LocalRoutingWireLoad = cb_tb_in_ckt_combo[1]
             lut_input_driver: lb_lib.ble_lib.lut_lib.LUTInputDriver = cb_tb_in_ckt_combo[3]
@@ -1161,6 +1349,7 @@ class FPGA:
                 condition,
             )
             cb_mux_tb: cb_mux_lib.ConnectionBlockMuxTB = cb_mux_lib.ConnectionBlockMuxTB(
+                id = tb_idx,
                 # CB Mux Specific args
                 start_sb_mux = start_sb_mux,
                 gen_r_wire_load = gen_r_wire_load,
@@ -1168,13 +1357,466 @@ class FPGA:
                 lut_input_driver = lut_input_driver,
                 # General SimTB args
                 inc_libs = inc_libs,
-                mode = cb_mux_sim_mode,
+                mode = gen_sim_mode,
                 options = sim_options,
                 # Pass in library of all subckts 
                 subckt_lib = self.subckt_lib,
             )
             self.cb_mux_tbs.append(cb_mux_tb)
+            # LOGIC BLOCK TBs
+            local_mux_tb: lb_lib.LocalMuxTB = lb_lib.LocalMuxTB(
+                id = tb_idx,
+                # Local Mux Specific args
+                # CB Mux Specific args
+                start_sb_mux = start_sb_mux,
+                gen_r_wire_load = gen_r_wire_load,
+                local_r_wire_load = local_r_wire_load,
+                lut_input_driver = lut_input_driver,
+                # General SimTB args
+                inc_libs = inc_libs,
+                mode = gen_sim_mode, # 
+                options = sim_options,
+                # Pass in library of all subckts 
+                subckt_lib = self.subckt_lib,
+            )
+            self.local_mux_tbs.append(local_mux_tb)
 
+        #   _    ___   ___ ___ ___    ___ _   _   _ ___ _____ ___ ___ 
+        #  | |  / _ \ / __|_ _/ __|  / __| | | | | / __|_   _| __| _ \
+        #  | |_| (_) | (_ || | (__  | (__| |_| |_| \__ \ | | | _||   /
+        #  |____\___/ \___|___\___|  \___|____\___/|___/ |_| |___|_|_\
+        
+        # Define our ckts that are used in tb
+        tb_luts: List[lut_lib.LUT] = [ lb.ble.lut for lb in self.logic_clusters ]
+        tb_lut_output_loads: List[ble_lib.LUTOutputLoad] = [ lb.ble.lut_output_load for lb in self.logic_clusters ]
+        tb_gen_ble_output_loads: List[gen_r_load_lib.GeneralBLEOutputLoad] = self.gen_ble_output_loads
+
+        # General BLE Output TB
+        # TODO implement for all combinations, in the case which we have multiple individual circuit types in a logic cluster
+        gen_ble_out_tb_in_ckts: List[
+            Tuple[
+                lut_lib.LUT, 
+                ble_lib.LUTOutputLoad, 
+                gen_r_load_lib.GeneralBLEOutputLoad, 
+            ]
+        ] = list(
+            itertools.product(
+                tb_luts,
+                tb_lut_output_loads,
+                tb_gen_ble_output_loads,
+            )
+        )
+        for tb_idx, in_ckt_combo in enumerate(gen_ble_out_tb_in_ckts): 
+            # Same combo used for local & general ble output tbs
+            lut: lut_lib.LUT = in_ckt_combo[0]
+            lut_output_load: ble_lib.LUTOutputLoad = in_ckt_combo[1]
+            gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = in_ckt_combo[2]
+            # General BLE Output 
+            gen_ble_out_tb = ble_lib.GeneralBLEOutputTB(
+                id = tb_idx,
+                # BLE Output Specific args
+                lut = lut,
+                lut_output_load = lut_output_load,
+                gen_ble_output_load = gen_ble_output_load,
+                # General SimTB args
+                inc_libs = inc_libs,
+                mode = gen_sim_mode,
+                options = sim_options,
+                # Pass in library of all subckts 
+                subckt_lib = self.subckt_lib,
+            )
+            self.general_ble_output_tbs.append(gen_ble_out_tb)
+            # Local BLE Output
+            local_ble_output_tb = ble_lib.LocalBLEOutputTB(
+                id = tb_idx,
+                # BLE Output Specific args
+                lut = lut,
+                lut_output_load = lut_output_load,
+                gen_ble_output_load = gen_ble_output_load,
+                # General SimTB args
+                inc_libs = inc_libs,
+                mode = gen_sim_mode,
+                options = sim_options,
+                # Pass in library of all subckts 
+                subckt_lib = self.subckt_lib,
+            )
+            self.local_ble_output_tbs.append(local_ble_output_tb)
+            # LUT 
+            lut_tb = lut_lib.LUTTB(
+                id = tb_idx,
+                lut = lut,
+                lut_output_load = lut_output_load,
+                # General SimTB args
+                inc_libs = inc_libs,
+                mode = gen_sim_mode,
+                options = sim_options,
+                # Pass in library of all subckts 
+                subckt_lib = self.subckt_lib,
+            )
+            self.lut_tbs.append(lut_tb)
+        # FLUT MUXES 
+        # The circuit deps for the FlutMuxTB are a superset of those in gen_ble_output
+        # TODO perform this conditional check for fluts at the ble level for more flexibility
+        if self.specs.use_fluts: 
+            tb_flut_muxes: List[ble_lib.FlutMux] = [ lb.ble.fmux for lb in self.logic_clusters ]
+            tb_cc_muxes: List[carry_chain_lib.CarryChainMux]
+            if self.specs.enable_carry_chain:
+                tb_cc_muxes = self.carry_chain_muxes
+            else:
+                tb_cc_muxes = None
+            flut_in_ckts: List[tuple] = list(
+                itertools.product(
+                    tb_luts,
+                    tb_flut_muxes,
+                    tb_cc_muxes,
+                    tb_lut_output_loads,
+                    tb_gen_ble_output_loads,
+                )
+            )
+            for tb_idx, in_ckt_combo in enumerate(flut_in_ckts):
+                lut : lut_lib.LUT = in_ckt_combo[0]
+                flut_mux: ble_lib.FlutMux = in_ckt_combo[1]
+                cc_mux: carry_chain_lib.CarryChainMux = in_ckt_combo[2]
+                lut_output_load: ble_lib.LUTOutputLoad = in_ckt_combo[3]
+                gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = in_ckt_combo[4]
+                flut_mux_tb = ble_lib.FlutMuxTB(
+                    id = tb_idx,
+                    # BLE Output Specific args
+                    lut = lut,
+                    flut_mux = flut_mux,
+                    cc_mux = cc_mux,
+                    lut_output_load = lut_output_load,
+                    gen_ble_output_load = gen_ble_output_load,
+                    # General SimTB args
+                    inc_libs = inc_libs,
+                    mode = gen_sim_mode,
+                    options = sim_options,
+                    # Pass in library of all subckts 
+                    subckt_lib = self.subckt_lib,
+                )
+                self.flut_mux_tbs.append(flut_mux_tb)
+
+        tb_lut_input_drivers: List[ lut_lib.LUTInputDriver] = []
+        tb_lut_input_not_drivers: List[ lut_lib.LUTInputNotDriver] = []
+
+        # Get list of all possible input keys, ONLY WORKS FOR ONE LC
+        # Assumes matching keys for all input drivers + not drivers + input drv loads
+        # TODO get this to work for multiple LCs
+        lut_input_keys: Set[str] = set([   
+            key for lb in self.logic_clusters 
+                for key in lb.ble.lut.input_drivers.keys() 
+        ])
+
+        # for lb in self.logic_clusters:
+        #     for lut_in_key in lb.ble.lut.input_drivers.keys(): 
+        #         tb_lut_input_drivers.append(
+        #             lb.ble.lut.input_drivers[lut_in_key].driver
+        #         )
+        #         tb_lut_input_not_drivers.append(
+        #             lb.ble.lut.input_drivers[lut_in_key].not_driver
+        #         )
+
+        # tb_local_r_wire_loads
+        # tb_cb_muxes
+
+        # For each input key create a product of other circuits to get possible LUT configs
+        for input_key in lut_input_keys:
+            tb_cb_muxes: List[cb_mux_lib.ConnectionBlockMux] = [
+                cb_mux for cb_mux in self.cb_muxes
+            ]
+            tb_ffs: List[ble_lib.FlipFlop] = [ 
+                lb.ble.ff for lb in self.logic_clusters 
+            ]
+            # Assumes the driver loads are the same for all LUT inputs
+            tb_lut_in_drv_loads: List[ lut_lib.LUTInputDriverLoad ] = [
+                lb.ble.lut.input_driver_loads["a"] for lb in self.logic_clusters
+            ]
+            # For each instance of each driver of each key 
+            tb_lut_input_drivers: List[ lut_lib.LUTInputDriver] = [
+                lb.ble.lut.input_drivers[input_key].driver for lb in self.logic_clusters
+            ]
+            tb_lut_input_not_drivers: List[ lut_lib.LUTInputNotDriver] = [
+                lb.ble.lut.input_drivers[input_key].not_driver for lb in self.logic_clusters
+            ]
+            lut_driver_tb_in_ckts: List[tuple] = list(
+                itertools.product(
+                    tb_cb_muxes,
+                    tb_local_r_wire_loads,
+                    tb_ffs,
+                    tb_lut_input_drivers,
+                    tb_lut_input_not_drivers,
+                    tb_lut_in_drv_loads,
+                )
+            )
+            for tb_idx, in_ckt_combo in enumerate(lut_driver_tb_in_ckts):
+                cb_mux: cb_mux_lib.ConnectionBlockMux = in_ckt_combo[0]
+                local_r_wire_load: lb_lib.LocalRoutingWireLoad = in_ckt_combo[1]
+                ff: ble_lib.FlipFlop = in_ckt_combo[2]
+                lut_in_driver: lut_lib.LUTInputDriver = in_ckt_combo[3]
+                lut_in_not_driver: lut_lib.LUTInputNotDriver = in_ckt_combo[4]
+                lut_in_driver_load: lut_lib.LUTInputDriverLoad = in_ckt_combo[5]
+                lut_driver_tb = lut_lib.LUTInputDriverTB(
+                    id = tb_idx,
+                    not_flag = True,
+                    # DUT Circuits
+                    cb_mux = cb_mux,
+                    local_r_wire_load = local_r_wire_load,
+                    flip_flop = ff,
+                    lut_in_driver = lut_in_driver,
+                    lut_in_not_driver = lut_in_not_driver,
+                    lut_driver_load = lut_in_driver_load,
+                    # General SimTB args
+                    inc_libs = inc_libs,
+                    mode = gen_sim_mode,
+                    options = sim_options,
+                    # Pass in library of all subckts 
+                    subckt_lib = self.subckt_lib,
+                )
+                self.lut_in_driver_tbs[lut_in_driver.lut_input_key].append(lut_driver_tb)
+                lut_not_driver_tb = lut_lib.LUTInputDriverTB(
+                    id = tb_idx,
+                    not_flag = False,
+                    # DUT Circuits
+                    cb_mux = cb_mux,
+                    local_r_wire_load = local_r_wire_load,
+                    flip_flop = ff,
+                    lut_in_driver = lut_in_driver,
+                    lut_in_not_driver = lut_in_not_driver,
+                    lut_driver_load = lut_in_driver_load,
+                    # General SimTB args
+                    inc_libs = inc_libs,
+                    mode = gen_sim_mode,
+                    options = sim_options,
+                    # Pass in library of all subckts 
+                    subckt_lib = self.subckt_lib,
+                )
+                self.lut_in_not_driver_tbs[lut_in_driver.lut_input_key].append(lut_not_driver_tb)
+        
+        # LUT input driver with LUT Load
+        # TODO refactor this so its not so much duplicated code
+        if self.specs.use_fluts:
+            # We only want the product of lut_output_loads if we are NOT using fluts
+            # We only want the product of flip flops if our LUT input driver type is "default_rsel" || "reg_fb_rsel"
+            # TODO accomodate flip flop parameterization for now we assert that only a single FF type exists
+            assert len(tb_ffs) == 1, "Only a single flip flop type is supported for now"
+            lut_driver_lut_load_tb_in_ckts: List[tuple] = list(
+                itertools.product(
+                    tb_cb_muxes,
+                    tb_local_r_wire_loads,
+                    tb_lut_input_drivers,
+                    tb_ffs,
+                    tb_lut_input_not_drivers,
+                    tb_luts,
+                    # tb_lut_in_drv_loads,
+                    tb_flut_muxes,
+                )
+            )
+            lut_load_key = "flut_mux"
+        else:
+            lut_driver_lut_load_tb_in_ckts: List[tuple] = list(
+                itertools.product(
+                    tb_cb_muxes,
+                    tb_local_r_wire_loads,
+                    tb_lut_input_drivers,
+                    tb_ffs,
+                    tb_lut_input_not_drivers,
+                    tb_luts,
+                    tb_lut_output_loads,
+                )
+            )
+            lut_load_key = "lut_output_load"
+        for tb_idx, in_ckt_combo in enumerate(lut_driver_lut_load_tb_in_ckts):
+            cb_mux: cb_mux_lib.ConnectionBlockMux = in_ckt_combo[0]
+            local_r_wire_load: lb_lib.LocalRoutingWireLoad = in_ckt_combo[1]
+            lut_in_driver: lut_lib.LUTInputDriver = in_ckt_combo[2]
+            ff: ble_lib.FlipFlop = in_ckt_combo[3]
+            lut_in_not_driver: lut_lib.LUTInputNotDriver = in_ckt_combo[4]
+            lut: lut_lib.LUT = in_ckt_combo[5]
+            # lut_in_driver_load: lut_lib.LUTInputDriverLoad = in_ckt_combo[6]
+            if self.specs.use_fluts:
+                lut_output_load: ble_lib.FlutMux = in_ckt_combo[6]
+            else:
+                lut_output_load: ble_lib.LUTOutputLoad = in_ckt_combo[6]
+            lut_output_load_arg = {
+                lut_load_key: lut_output_load
+            }
+            # Create a custom mode for this tb as we want to sim to 16p
+            lut_driver_lut_load_tb_sim_mode: c_ds.SpSimMode = copy.deepcopy(base_sim_mode)
+            lut_driver_lut_load_tb_sim_mode.sim_time = c_ds.Value(16, units = sb_mux_sim_mode.sim_time.units) # ns
+
+            # TODO make sure the RISE=1 is ok previously was RISE=2 for first meas statement
+            lut_driver_lut_load_tb = lut_lib.LUTInputDriverLUTLoadTB(
+                id = tb_idx,
+                # DUT Circuits
+                cb_mux = cb_mux,
+                local_r_wire_load = local_r_wire_load,
+                lut_in_driver = lut_in_driver,
+                flip_flop = ff,
+                lut_in_not_driver = lut_in_not_driver,
+                lut = lut,
+                **lut_output_load_arg,
+                # General SimTB args
+                inc_libs = inc_libs,
+                mode = lut_driver_lut_load_tb_sim_mode,
+                options = sim_options,
+                # Pass in library of all subckts 
+                subckt_lib = self.subckt_lib,
+            )
+            self.lut_in_driver_lut_load_tbs[lut_in_driver.lut_input_key].append(lut_driver_lut_load_tb)
+        if self.specs.enable_carry_chain:
+            # Carry Chain
+            for cc in self.carry_chains:
+                cc: carry_chain_lib.CarryChain
+                # Create a custom mode for this tb as we want to sim to 16p
+                cc_sim_mode: c_ds.SpSimMode = copy.deepcopy(base_sim_mode)
+                cc_sim_mode.sim_time = c_ds.Value(26, units = sb_mux_sim_mode.sim_time.units) # ns
+                cc_tb = carry_chain_lib.CarryChainTB(
+                    id = tb_idx,
+                    # DUT Circuits
+                    FA_carry_chain = cc, 
+                    # General SimTB args
+                    inc_libs = inc_libs,
+                    mode = cc_sim_mode,
+                    options = sim_options,
+                    # Pass in library of all subckts 
+                    subckt_lib = self.subckt_lib,
+                )
+                self.carry_chain_tbs.append(cc_tb)
+            cc_periph_in_ckts = list(
+                itertools.product(
+                    self.carry_chains,
+                    self.carry_chain_periphs,
+                    self.carry_chain_muxes,
+                )
+            )
+            # CC Peripheials
+            for ckt_combo in cc_periph_in_ckts:
+                cc: carry_chain_lib.CarryChain = ckt_combo[0]
+                cc_periph: carry_chain_lib.CarryChainPer = ckt_combo[1]
+                cc_mux: carry_chain_lib.CarryChainMux = ckt_combo[2]
+                cc_periph_tb = carry_chain_lib.CarryChainPerTB(
+                    id = tb_idx,
+                    # TB Circuits
+                    FA_carry_chain = cc, 
+                    carry_chain_periph = cc_periph,
+                    carry_chain_mux = cc_mux,
+                    # General SimTB args
+                    inc_libs = inc_libs,
+                    mode = cc_sim_mode,
+                    options = sim_options,
+                    # Pass in library of all subckts 
+                    subckt_lib = self.subckt_lib,
+                )
+                self.carry_chain_per_tbs.append(cc_periph_tb)
+            cc_inter_in_ckts = list(
+                itertools.product(
+                    self.carry_chains,
+                    self.carry_chain_inter_clusters,
+                )
+            )
+            # CC Interconnect
+            for ckt_combo in cc_inter_in_ckts:
+                cc: carry_chain_lib.CarryChain = ckt_combo[0]
+                cc_inter: carry_chain_lib.CarryChainInterCluster = ckt_combo[1]
+                cc_inter_tb = carry_chain_lib.CarryChainInterClusterTB(
+                    id = tb_idx,
+                    # TB Circuits
+                    FA_carry_chain = cc, 
+                    carry_chain_inter = cc_inter,
+                    # General SimTB args
+                    inc_libs = inc_libs,
+                    mode = cc_sim_mode,
+                    options = sim_options,
+                    # Pass in library of all subckts 
+                    subckt_lib = self.subckt_lib,
+                )
+                self.carry_chain_inter_tbs.append(cc_inter_tb)
+            # Use product of all possible input circuits to create these TBs
+            cc_mux_in_ckts = list(
+                itertools.product(
+                    self.carry_chains,
+                    self.carry_chain_muxes,
+                    self.carry_chain_periphs,
+                    tb_lut_output_loads,
+                    tb_gen_ble_output_loads,
+                )
+            )
+            # CC Mux
+            for tb_idx, in_ckt_combo in enumerate(cc_mux_in_ckts):
+                fa_cc: carry_chain_lib.CarryChain = in_ckt_combo[0]
+                cc_mux: carry_chain_lib.CarryChainMux = in_ckt_combo[1]
+                carry_chain_periph: carry_chain_lib.CarryChainPer = in_ckt_combo[2]
+                lut_output_load: ble_lib.LUTOutputLoad = in_ckt_combo[3]
+                gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = in_ckt_combo[4]
+                cc_mux = carry_chain_lib.CarryChainMuxTB(
+                    id = tb_idx,
+                    # TB Circuits
+                    FA_carry_chain = fa_cc,
+                    carry_chain_mux = cc_mux,
+                    carry_chain_periph = carry_chain_periph,
+                    lut_output_load = lut_output_load,
+                    gen_ble_output_load = gen_ble_output_load,
+                    # General SimTB args
+                    inc_libs = inc_libs,
+                    mode = gen_sim_mode, # 4ns sim time
+                    options = sim_options,
+                    # Pass in library of all subckts 
+                    subckt_lib = self.subckt_lib,
+                )
+                self.carry_chain_mux_tbs.append(cc_mux)
+            if self.specs.carry_chain_type == "skip":
+                cc_in_ckts = list(
+                    itertools.product(
+                        tb_luts,
+                        self.carry_chains,
+                        self.carry_chain_skip_ands,
+                        self.carry_chain_skip_muxes,
+                        self.carry_chain_muxes,
+                    )
+                )
+                for tb_idx, in_ckt_combo in enumerate(cc_in_ckts):
+                    lut: lut_lib.LUT = in_ckt_combo[0]
+                    cc: carry_chain_lib.CarryChain = in_ckt_combo[1]
+                    cc_and: carry_chain_lib.CarryChainSkipAnd = in_ckt_combo[2]
+                    cc_skip_mux: carry_chain_lib.CarryChainSkipMux = in_ckt_combo[3]
+                    cc_mux: carry_chain_lib.CarryChainMuxTB = in_ckt_combo[4]
+                    # CC Skip And
+                    cc_and_tb = carry_chain_lib.CarryChainSkipAndTB(
+                        id = tb_idx,
+                        # TB Circuits
+                        lut = lut,
+                        FA_carry_chain = cc,
+                        carry_chain_and = cc_and,
+                        carry_chain_skip_mux = cc_skip_mux,
+                        carry_chain_mux = cc_mux,
+                        # General SimTB args
+                        inc_libs = inc_libs,
+                        mode = cc_sim_mode, # 4ns sim time
+                        options = sim_options,
+                        # Pass in library of all subckts 
+                        subckt_lib = self.subckt_lib,
+                    )
+                    self.carry_chain_skip_and_tbs.append(cc_and_tb)
+                    # CC Skip Mux
+                    cc_skip_mux_tb = carry_chain_lib.CarryChainSkipAndTB(
+                        id = tb_idx,
+                        # TB Circuits
+                        lut = lut,
+                        FA_carry_chain = cc,
+                        carry_chain_and = cc_and,
+                        carry_chain_skip_mux = cc_skip_mux,
+                        carry_chain_mux = cc_mux,
+                        # General SimTB args
+                        inc_libs = inc_libs,
+                        mode = cc_sim_mode, # 4ns sim time
+                        options = sim_options,
+                        # Pass in library of all subckts 
+                        subckt_lib = self.subckt_lib,
+                    )
+                    self.carry_chain_skip_and_tbs.append(cc_skip_mux_tb)
+
+        
+        
         # Generate top-level files. These top-level files are the files that COFFE uses to measure 
         # the delay of FPGA circuitry
         for sb_mux_tb in self.sb_mux_tbs:
@@ -1183,22 +1825,49 @@ class FPGA:
         for cb_mux_tb in self.cb_mux_tbs:
             cb_mux_tb.generate_top()
         
-        self.logic_cluster.generate_top(self.subckt_lib)
+        for local_mux_tb in self.local_mux_tbs:
+            local_mux_tb.generate_top()
 
-        #   _    ___   ___ ___ ___    ___ _   _   _ ___ _____ ___ ___ 
-        #  | |  / _ \ / __|_ _/ __|  / __| | | | | / __|_   _| __| _ \
-        #  | |_| (_) | (_ || | (__  | (__| |_| |_| \__ \ | | | _||   /
-        #  |____\___/ \___|___\___|  \___|____\___/|___/ |_| |___|_|_\
-                                                            
+        for local_ble_out_tb in self.local_ble_output_tbs:
+            local_ble_out_tb.generate_top()
+        
+        for gen_ble_out_tb in self.general_ble_output_tbs:
+            gen_ble_out_tb.generate_top()
 
-        if self.specs.enable_carry_chain == 1:
-            self.carrychain.generate_top()
-            self.carrychainperf.generate_top()
-            self.carrychainmux.generate_top(self.min_len_wire)
-            self.carrychaininter.generate_top()
+        for lut_tb in self.lut_tbs:
+            lut_tb.generate_top()
+        
+        for flut_mux_tb in self.flut_mux_tbs:
+            flut_mux_tb.generate_top()
+
+        # For each driver input "a", "b" ... 
+        for lut_in_driver_tbs in self.lut_in_driver_tbs.values():
+            # for each parameterized instance of input on e.g. "a", generate tb
+            for lut_in_driver_tb in lut_in_driver_tbs:
+                lut_in_driver_tb.generate_top()
+
+        for lut_in_not_driver_tbs in self.lut_in_not_driver_tbs.values():
+            for lut_in_not_driver_tb in lut_in_not_driver_tbs:
+                lut_in_not_driver_tb.generate_top()
+        
+        for lut_in_driver_lut_load_tbs in self.lut_in_driver_lut_load_tbs.values():
+            for lut_in_driver_lut_load_tb in lut_in_driver_lut_load_tbs:
+                lut_in_driver_lut_load_tb.generate_top()
+        
+        if self.specs.enable_carry_chain:
+            for cc_tb in self.carry_chain_tbs:
+                cc_tb.generate_top()
+            for cc_per_tb in self.carry_chain_per_tbs:
+                cc_per_tb.generate_top()
+            for cc_inter_tb in self.carry_chain_inter_tbs:
+                cc_inter_tb.generate_top()
+            for cc_mux_tb in self.carry_chain_mux_tbs:
+                cc_mux_tb.generate_top()
             if self.specs.carry_chain_type == "skip":
-                self.carrychainand.generate_top()
-                self.carrychainskipmux.generate_top()
+                for cc_and_tb in self.carry_chain_skip_and_tbs:
+                    cc_and_tb.generate_top()
+                for cc_skip_mux_tb in self.carry_chain_skip_mux_tbs:
+                    cc_skip_mux_tb.generate_top()
 
         # RAM
         if self.specs.enable_bram_block == 1:
@@ -1218,6 +1887,783 @@ class FPGA:
     
         print("")
             
+
+    def update_area(self):
+        """ This function updates self.area_dict. It passes area_dict to member objects (like sb_mux)
+            to update their area. Then, with an up-to-date area_dict it, calculate total tile area. """
+        
+        # We use the self.transistor_sizes to compute area. This dictionary has the form 'name': 'size'
+        # And it knows the transistor sizes of all transistors in the FPGA
+        # We first need to calculate the area for each transistor.
+        # This function stores the areas in the transistor_area_list
+        self._update_area_per_transistor()
+        # Now, we have to update area_dict and width_dict with the new transistor area values
+        # for the basic subcircuits which are inverteres, ptran, tgate, restorers and transistors
+        self._update_area_and_width_dicts()
+        #I found that printing width_dict here and comparing against golden results was helpful
+        #self.debug_print("width_dict")
+
+        # Calculate area of SRAM
+        self.area_dict["sram"] = self.specs.sram_cell_area * self.specs.min_width_tran_area
+        self.area_dict["ramsram"] = 5 * self.specs.min_width_tran_area
+        # MTJ in terms of min transistor width
+        self.area_dict["rammtj"] = 1.23494 * self.specs.min_width_tran_area
+        self.area_dict["mininv"] =  3 * self.specs.min_width_tran_area
+        self.area_dict["ramtgate"] =  3 * self.area_dict["mininv"]
+
+        # Call Area calculation functions for all FPGA circuit objects
+        for sb_mux in self.sb_muxes:
+            sb_mux.update_area(self.area_dict, self.width_dict)
+        for cb_mux in self.cb_muxes:
+            cb_mux.update_area(self.area_dict, self.width_dict)
+
+        if self.specs.enable_carry_chain:
+            for carry_chain_periph in self.carry_chain_periphs:
+                carry_chain_periph.update_area(self.area_dict, self.width_dict)
+            for carry_chain_mux in self.carry_chain_muxes:
+                carry_chain_mux.update_area(self.area_dict, self.width_dict)
+            for carry_chain_inter in self.carry_chain_inter_clusters:
+                carry_chain_inter.update_area(self.area_dict, self.width_dict)
+            for carry_chain in self.carry_chains:
+                carry_chain.update_area(self.area_dict, self.width_dict)
+            if self.specs.carry_chain_type == "skip":
+                for carry_chain_skip_and in self.carry_chain_skip_ands:
+                    carry_chain_skip_and.update_area(self.area_dict, self.width_dict)
+                for carry_chain_skip_mux in self.carry_chain_skip_muxes:
+                    carry_chain_skip_mux.update_area(self.area_dict, self.width_dict)
+
+        # TODO bring the local mux update area out here and decouple with logic cluster
+        # for local_mux in self.local_muxes:
+        #     local_mux.update_area(self.area_dict)
+        for logic_cluster in self.logic_clusters:
+            logic_cluster.update_area(self.area_dict, self.width_dict)
+        
+        hardblock: hb_lib._hard_block
+        for hardblock in self.hardblocklist:
+            hardblock.update_area(self.area_dict, self.width_dict)
+        
+        if self.specs.enable_bram_block == 1:
+            self.RAM.update_area(self.area_dict, self.width_dict)
+
+        # SB Muxes
+        # Calculate total area of switch block
+        # switch_block_area: float = 0
+        # switch_block_area_no_sram: float = 0
+        # switch_block_avg_area: float = 0
+        # # weighted avg area of switch blocks based on percentage of SB mux occurances
+        # # Add up areas of all switch blocks of all types
+        # for i, sb_mux in enumerate(self.sb_muxes):
+        #     # For weighted average use the number of tracks per wire length corresponding SB / total tracks as the weight 
+        #     # Weight Factor * SB Mux Area w/ SRAM
+        #     switch_block_avg_area += ((sb_mux.num_per_tile) / sum([sb_mux.num_per_tile for sb_mux in self.sb_muxes])) * self.area_dict[sb_mux.name]
+        #     switch_block_area += sb_mux.num_per_tile * self.area_dict[sb_mux.name + "_sram"]
+        #     switch_block_area_no_sram += sb_mux.num_per_tile * self.area_dict[sb_mux.name]
+        
+        # # SB should never have area of 0 after this point
+        # assert switch_block_area != 0 and switch_block_area_no_sram != 0 and switch_block_avg_area != 0, "Switch block area is 0, error in SB area calculation"
+        # self.area_dict["sb_mux_avg"] = switch_block_avg_area # avg_sb_mux area with NO SRAM 
+        # self.area_dict["sb_total_no_sram"] = switch_block_area_no_sram
+        # self.area_dict["sb_total"] = switch_block_area
+        # self.width_dict["sb_total"] = math.sqrt(switch_block_area)
+
+        # # CB Muxes
+        # connection_block_area: float = 0
+        # connection_block_area_no_sram: float = 0
+        # connection_block_avg_area: float = 0 
+        # for cb_mux in self.cb_muxes:
+        #     connection_block_avg_area += ((cb_mux.num_per_tile) / sum([cb_mux.num_per_tile for cb_mux in self.cb_muxes])) * self.area_dict[cb_mux.name]
+        #     connection_block_area += cb_mux.num_per_tile * self.area_dict[cb_mux.name + "_sram"]
+        #     connection_block_area_no_sram += cb_mux.num_per_tile * self.area_dict[cb_mux.name]
+        
+        # assert connection_block_area != 0 and switch_block_area_no_sram != 0 and switch_block_avg_area != 0, "Connection block area is 0, error in CB area calculation"
+        # self.area_dict["cb_total"] = connection_block_area
+        # self.area_dict["cb_total_no_sram"] = connection_block_area_no_sram
+        # self.width_dict["cb_total"] = math.sqrt(connection_block_area)
+
+        # Switch Block Muxes
+        self.sb_mux.set_block_tile_area(self.area_dict, self.width_dict)
+        # Connection Block Muxes
+        self.cb_mux.set_block_tile_area(self.area_dict, self.width_dict)
+        # Local Muxes
+        self.local_mux.set_block_tile_area(self.area_dict, self.width_dict)
+
+        # Total Lut area 
+        # TODO update for multi ckt support
+        lut_area: float = self.specs.N * self.area_dict["lut_and_drivers"]
+        lut_area_no_sram: float = self.specs.N * (self.area_dict["lut_and_drivers"] - (2**self.specs.K) * self.area_dict["sram"])
+        lut_area_sram: float = self.specs.N * (2**self.specs.K) * self.area_dict["sram"]
+        self.area_dict["lut_total"] = lut_area
+        self.width_dict["lut_total"] = math.sqrt(lut_area)
+        
+        # Total FF area
+        # TODO update for multi ckt support
+        ff_area: float = self.specs.N * self.area_dict[self.logic_clusters[0].ble.ff.name] # TODO sp_name update
+        if self.specs.use_fluts:
+            ff_area *= 2
+        self.area_dict["ff_total"] = ff_area
+        self.width_dict["ff_total"] = math.sqrt(ff_area)
+        
+        # Total BLE area
+        # TODO update for multi ckt support
+        ble_output_area: float = self.specs.N * self.area_dict["ble_output"] # TODO sp_name update
+        self.area_dict["ble_output_total"] = ble_output_area
+        self.width_dict["ble_output_total"] = math.sqrt(ble_output_area)
+
+        # TODO add multi wire len support rather than just choosing first index of carry chain
+        # Why is the peripheral cc area not included in this? TODO figure out
+        cc: carry_chain_lib.CarryChain = self.carry_chains[0]
+        cc_skip_and: carry_chain_lib.CarryChainSkipAnd = self.carry_chain_skip_ands[0]
+        cc_skip_mux: carry_chain_lib.CarryChainSkipMux = self.carry_chain_skip_muxes[0]
+        cc_mux: carry_chain_lib.CarryChainMux = self.carry_chain_muxes[0]
+        cc_inter: carry_chain_lib.CarryChainInterCluster = self.carry_chain_inter_clusters[0]
+
+        # If uninitialized logic block height
+        if not self.lb_height:
+            # Calculate area of logic cluster
+            cluster_area = self.local_mux.block_area + self.specs.N * self.area_dict["ble"]
+            if self.specs.enable_carry_chain:
+                cluster_area += self.specs.N * self.area_dict[f"{cc_inter.sp_name}"]
+            # Init these here to keep our csv dimensions consistent
+            self.area_dict["cc_area_total"] = 0
+            self.width_dict["cc_area_total"] = 0
+
+            self.area_dict["ffableout_area_total"] = 0
+            self.width_dict["ffableout_area_total"] = 0
+        else:
+            # FF ble output area
+            ff_ble_output_area: float = ff_area + self.specs.N * self.area_dict["ble_output"] # TODO sp_name update
+            cc_area_total: float = 0.0
+            self.skip_size: int = 5
+            self.carry_skip_periphery_count = int(math.floor ((self.specs.N * self.specs.FAs_per_flut) // self.skip_size))
+            if self.specs.enable_carry_chain == 1:
+                cc_area_total =  self.specs.N * (self.area_dict[f"{cc.sp_name}"] * self.specs.FAs_per_flut + (self.specs.FAs_per_flut) * self.area_dict[f"{cc_mux.sp_name}"])
+                if not (self.carry_skip_periphery_count == 0 or self.specs.carry_chain_type == "ripple"):
+                    cc_area_total += ((self.area_dict[f"{cc_skip_and.sp_name}"] + self.area_dict[f"{cc_skip_mux.sp_name}"]) * self.carry_skip_periphery_count)
+                cc_area_total += self.area_dict[f"{cc_inter.sp_name}"]
+            # Set Carry Chain total area
+            self.area_dict["cc_area_total"] = cc_area_total
+            self.width_dict["cc_area_total"] = math.sqrt(cc_area_total)
+            
+            self.area_dict["ffableout_area_total"] = ff_ble_output_area
+            self.width_dict["ffableout_area_total"] = math.sqrt(ff_ble_output_area)
+
+            cluster_area: float = self.local_mux.block_area + ff_ble_output_area + cc_area_total + lut_area
+
+        self.area_dict["logic_cluster"] = cluster_area
+        self.width_dict["logic_cluster"] = math.sqrt(cluster_area)
+
+        if self.specs.enable_carry_chain == 1:
+            # Calculate Carry Chain Area
+            # already included in bles, extracting for the report
+            carry_chain_area: float = self.specs.N * ( self.specs.FAs_per_flut * self.area_dict[f"{cc.sp_name}"] + (self.specs.FAs_per_flut) * self.area_dict[f"{cc_mux.sp_name}"]) + self.area_dict[f"{cc_inter.sp_name}"]
+            if self.specs.carry_chain_type == "skip":
+                self.carry_skip_periphery_count = int(math.floor((self.specs.N * self.specs.FAs_per_flut) / self.skip_size))
+                carry_chain_area += self.carry_skip_periphery_count *(self.area_dict[f"{cc_skip_and.sp_name}"] + self.area_dict[f"{cc_skip_mux.sp_name}"])
+            self.area_dict["total_carry_chain"] = carry_chain_area
+
+        # Calculate tile area
+        tile_area: float = self.sb_mux.block_area + self.cb_mux.block_area + cluster_area
+        self.area_dict["tile"] = tile_area
+        self.width_dict["tile"] = math.sqrt(tile_area)
+
+        # Block RAM updates
+        if self.specs.enable_bram_block == 1:
+            # TODO update this for multi wire types
+            # Calculate RAM area:
+
+            # LOCAL MUX + FF area
+            RAM_local_mux_area = self.RAM.RAM_local_mux.num_per_tile * self.area_dict[self.RAM.RAM_local_mux.name + "_sram"] + self.area_dict[self.logic_clusters[0].ble.ff.name] # TODO update for multi ckt support
+            self.area_dict["ram_local_mux_total"] = RAM_local_mux_area
+            self.width_dict["ram_local_mux_total"] = math.sqrt(RAM_local_mux_area)
+
+            # SB and CB in the RAM tile:
+            RAM_area =(RAM_local_mux_area + self.area_dict[self.cb_mux.name + "_sram"] * self.RAM.ram_inputs + (2** (self.RAM.conf_decoder_bits + 3)) * self.area_dict[self.sb_mux.name + "_sram"]) 
+            RAM_SB_area = 2 ** (self.RAM.conf_decoder_bits + 3) * self.area_dict[self.sb_mux.name + "_sram"] 
+            RAM_CB_area =  self.area_dict[self.cb_mux.name + "_sram"] * self.RAM.ram_inputs 
+
+
+            self.area_dict["level_shifters"] = self.area_dict["level_shifter"] * self.RAM.RAM_local_mux.num_per_tile
+            self.area_dict["RAM_SB"] = RAM_SB_area
+            self.area_dict["RAM_CB"] = RAM_CB_area
+            # Row decoder area calculation
+ 
+            RAM_decoder_area = 0.0
+            RAM_decoder_area += self.area_dict["rowdecoderstage0"]
+            #if there is a predecoder, add its area
+            if self.RAM.valid_row_dec_size3 == 1:
+                RAM_decoder_area += self.area_dict["rowdecoderstage13"]
+            #if there is a predecoder, add its area
+            if self.RAM.valid_row_dec_size2 == 1:
+                RAM_decoder_area += self.area_dict["rowdecoderstage12"]
+            #if there is a predecoder, add its area
+            RAM_decoder_area += self.area_dict["rowdecoderstage3"]
+            # There are two decoders in a dual port circuit:
+            RAM_area += RAM_decoder_area * 2 
+            # add the actual array area to total RAM area
+            self.area_dict["memorycell_total"] = self.area_dict["memorycell"]
+            RAM_area += self.area_dict["memorycell_total"]
+
+            if self.RAM.memory_technology == "SRAM":
+            # add precharge, write driver, and sense amp area to total RAM area
+                self.area_dict["precharge_total"] = (self.area_dict[self.RAM.precharge.name] * 2* (2**(self.RAM.conf_decoder_bits+self.RAM.col_decoder_bits))) * self.number_of_banks
+                # several components will be doubled for the largest decoder size to prevent a large amount of delay.
+                if self.RAM.row_decoder_bits == 9:
+                    self.area_dict["precharge_total"] = 2 * self.area_dict["precharge_total"]
+                self.area_dict["samp_total"] = self.area_dict[self.RAM.samp.name] * 2* 2**(self.RAM.conf_decoder_bits) * self.number_of_banks 
+                self.area_dict["writedriver_total"] = self.area_dict[self.RAM.writedriver.name] * 2* 2**(self.RAM.conf_decoder_bits) * self.number_of_banks 
+                RAM_area += (self.area_dict["precharge_total"] + self.area_dict["samp_total"] + self.area_dict["writedriver_total"])
+                self.area_dict["columndecoder_total"] = ((self.area_dict["ramtgate"] * 4 *  (2**(self.RAM.conf_decoder_bits+self.RAM.col_decoder_bits))) / (2**(self.RAM.col_decoder_bits))) + self.area_dict["columndecoder"] * 2 
+            
+            else:
+                # In case of MTJ, banks can share sense amps so we don't have mutlitplication by two
+                self.area_dict["samp_total"] = self.area_dict["mtj_subcircuits_sa"] * 2**(self.RAM.conf_decoder_bits) * self.number_of_banks 
+                # Write driver can't be shared:
+                self.area_dict["writedriver_total"] = self.area_dict["mtj_subcircuits_writedriver"] * 2* 2**(self.RAM.conf_decoder_bits) * self.number_of_banks 
+                self.area_dict["cs_total"] = self.area_dict["mtj_subcircuits_cs"] * 2* 2**(self.RAM.conf_decoder_bits +self.RAM.col_decoder_bits) * self.number_of_banks 
+                if self.RAM.row_decoder_bits == 9:
+                    self.area_dict["cs_total"] = 2 * self.area_dict["cs_total"]
+
+                self.area_dict["columndecoder_total"] = self.area_dict["columndecoder"] * 2 
+                RAM_area +=  self.area_dict["samp_total"] + self.area_dict["writedriver_total"] + self.area_dict["cs_total"]
+
+            self.area_dict["columndecoder_sum"] = self.area_dict["columndecoder_total"] * self.number_of_banks 
+            RAM_area += self.area_dict["columndecoder_sum"]
+            #configurable decoder:
+            RAM_configurabledecoder_area = self.area_dict[self.RAM.configurabledecoderi.name + "_sram"]
+            if self.RAM.cvalidobj1 == 1:
+                RAM_configurabledecoder_area += self.area_dict[self.RAM.configurabledecoder3ii.name]
+            if self.RAM.cvalidobj2 == 1:
+                RAM_configurabledecoder_area += self.area_dict[self.RAM.configurabledecoder2ii.name]
+            self.area_dict["configurabledecoder_wodriver"] = RAM_configurabledecoder_area
+            self.width_dict["configurabledecoder_wodriver"] = math.sqrt(self.area_dict["configurabledecoder_wodriver"])
+            RAM_configurabledecoder_area += self.area_dict[self.RAM.configurabledecoderiii.name]
+            if self.number_of_banks == 2:
+                RAM_configurabledecoder_area = RAM_configurabledecoder_area * 2
+            RAM_area += 2 * RAM_configurabledecoder_area 
+
+            # add the output crossbar area:
+            RAM_area += self.area_dict[self.RAM.pgateoutputcrossbar.name + "_sram"] 
+            # add the wordline drivers:
+            RAM_wordlinedriver_area = self.area_dict[self.RAM.wordlinedriver.name] * self.number_of_banks
+            # we need 2 wordline drivers per row, since there are 2 wordlines in each row to control 2 BRAM ports, respectively
+            RAM_wordlinedriver_area = RAM_wordlinedriver_area * 2 
+            RAM_area += self.area_dict["level_shifters"]
+            RAM_area += RAM_wordlinedriver_area
+
+            # write into dictionaries:
+            self.area_dict["wordline_total"] = RAM_wordlinedriver_area
+            self.width_dict["wordline_total"] = math.sqrt(RAM_wordlinedriver_area)
+            self.area_dict["configurabledecoder"] = RAM_configurabledecoder_area
+            self.width_dict["configurabledecoder"] = math.sqrt(RAM_configurabledecoder_area)
+            self.area_dict["decoder"] = RAM_decoder_area 
+            self.area_dict["decoder_total"] = RAM_decoder_area * 2 
+            self.width_dict["decoder"] = math.sqrt(RAM_decoder_area)
+            self.area_dict["ram"] = RAM_area
+            self.area_dict["ram_core"] = RAM_area - RAM_SB_area - RAM_CB_area
+            self.width_dict["ram"] = math.sqrt(RAM_area) 
+
+        if self.lb_height:
+            self.compute_distance()
+
+        # Area logging
+        self.update_area_cnt += 1
+
+    def compute_distance(self):
+        """ This function computes distances for different stripes for the floorplanner:
+
+        """
+        # todo: move these to user input
+        self.stripe_order = ["sb_sram","sb","sb", "cb", "cb_sram","ic_sram", "ic","lut_sram", "lut", "cc","ffble", "lut", "lut_sram", "ic", "ic_sram", "cb_sram", "cb", "sb","sb", "sb_sram"]
+        #self.stripe_order = ["cb", "cb_sram","ic_sram", "ic","lut_sram", "lut", "cc","ffble", "sb", "sb_sram"]
+        self.span_stripe_fraction = 10
+
+
+        self.num_cb_stripes = 0
+        self.num_sb_stripes = 0
+        self.num_ic_stripes = 0
+        self.num_lut_stripes = 0
+        self.num_ffble_stripes = 0
+        self.num_cc_stripes = 0
+        self.num_cbs_stripes = 0
+        self.num_sbs_stripes = 0
+        self.num_ics_stripes = 0
+        self.num_luts_stripes = 0
+        #find the number of each stripe type in the given arrangement:
+        for item in self.stripe_order:
+            if item == "sb":
+                self.num_sb_stripes =  self.num_sb_stripes + 1
+            elif item == "cb":
+                self.num_cb_stripes =  self.num_cb_stripes + 1
+            elif item == "ic":
+                self.num_ic_stripes =  self.num_ic_stripes + 1
+            elif item == "lut":
+                self.num_lut_stripes =  self.num_lut_stripes + 1
+            elif item == "cc":
+                self.num_cc_stripes =  self.num_cc_stripes + 1
+            elif item == "ffble":
+                self.num_ffble_stripes =  self.num_ffble_stripes + 1
+            elif item == "sb_sram":
+                self.num_sbs_stripes =  self.num_sbs_stripes + 1
+            elif item == "cb_sram":
+                self.num_cbs_stripes =  self.num_cbs_stripes + 1
+            elif item == "ic_sram":
+                self.num_ics_stripes =  self.num_ics_stripes + 1
+            elif item == "lut_sram":
+                self.num_luts_stripes =  self.num_luts_stripes + 1
+
+        # Set widths of various blocks in a tile
+        self.sb_mux.set_block_widths(self.area_dict, self.num_sb_stripes, self.lb_height)
+        self.cb_mux.set_block_widths(self.area_dict, self.num_cb_stripes, self.lb_height)
+        self.local_mux.set_block_widths(self.area_dict, self.num_ic_stripes, self.lb_height)
+
+        # measure the width of each stripe:
+        self.w_sb = self.sb_mux.stripe_avg_width
+        self.w_cb = self.cb_mux.stripe_avg_width
+        
+        self.w_ic = self.local_mux.stripe_avg_width
+        # TODO implement lut in blocks
+        self.w_lut = (self.specs.N * self.area_dict["lut_and_drivers"] - self.specs.N * (2**self.specs.K) * self.area_dict["sram"]) / (self.num_lut_stripes * self.lb_height)
+        # TODO fix the mode breaking stuff
+        # if self.specs.enable_carry_chain == 1:
+        self.w_cc = self.area_dict["cc_area_total"] / (self.num_cc_stripes * self.lb_height)
+        self.w_ffble = self.area_dict["ffableout_area_total"] / (self.num_ffble_stripes * self.lb_height)
+        
+        # These are SRAM widths from subcircuits
+        self.w_ssb = self.sb_mux.stripe_avg_sram_width
+        self.w_scb = self.cb_mux.stripe_avg_sram_width
+        self.w_sic = self.local_mux.stripe_avg_sram_width
+        self.w_slut = (self.specs.N * (2**self.specs.K) * self.area_dict["sram"]) / (self.num_luts_stripes * self.lb_height)
+
+        # create a temporary dictionary of stripe width to use in distance calculation:
+        self.dict_real_widths = {}
+        self.dict_real_widths["sb_sram"] = self.w_ssb
+        self.dict_real_widths["sb"] = self.w_sb
+        self.dict_real_widths["cb"] = self.w_cb
+        self.dict_real_widths["cb_sram"] = self.w_scb
+        self.dict_real_widths["ic_sram"] = self.w_sic
+        self.dict_real_widths["ic"] = self.w_ic
+        self.dict_real_widths["lut_sram"] = self.w_slut
+        self.dict_real_widths["lut"] = self.w_lut
+        #if self.specs.enable_carry_chain == 1:
+        self.dict_real_widths["cc"] = self.w_cc
+        self.dict_real_widths["ffble"] = self.w_ffble
+
+        # what distances do we need?
+        self.d_cb_to_ic = 0.0 # Used in Logic Cluster update_wires
+        self.d_ic_to_lut = 0.0 # Unused
+        self.d_lut_to_cc = 0.0 # Unused
+        self.d_cc_to_ffble = 0.0 # Unused
+        self.d_ffble_to_sb = 0.0 # Used in Cluster Output Load
+        self.d_ffble_to_ic = 0.0 # Used in Logic Cluster 
+
+        # worst-case distance between two stripes:
+        for index1, item1 in enumerate(self.stripe_order):
+            for index2, item2 in enumerate(self.stripe_order):
+                if item1 != item2:
+                    if (item1 == "cb" and item2 == "ic") or (item1 == "ic" and item2 == "cb"):
+                        if index1 < index2:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            for i in range(index1 + 1, index2):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                        else:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            for i in range(index2 + 1, index1):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                        if self.d_cb_to_ic < distance_temp:
+                            self.d_cb_to_ic = distance_temp
+
+                    if (item1 == "lut" and item2 == "ic") or (item1 == "ic" and item2 == "lut"):
+                        if index1 < index2:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            for i in range(index1 + 1, index2):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                        else:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            for i in range(index2 + 1, index1):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                        if self.d_ic_to_lut < distance_temp:
+                            self.d_ic_to_lut = distance_temp
+
+                    if (item1 == "lut" and item2 == "cc") or (item1 == "cc" and item2 == "lut"):
+                        if index1 < index2:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            for i in range(index1 + 1, index2):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                        else:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            for i in range(index2 + 1, index1):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                        if self.d_lut_to_cc < distance_temp:
+                            self.d_lut_to_cc = distance_temp
+
+                    if (item1 == "ffble" and item2 == "cc") or (item1 == "cc" and item2 == "ffble"):
+                        if index1 < index2:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            for i in range(index1 + 1, index2):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                        else:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            for i in range(index2 + 1, index1):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                        if self.d_cc_to_ffble < distance_temp:
+                            self.d_cc_to_ffble = distance_temp                                                                                    
+
+                    if (item1 == "ffble" and item2 == "sb") or (item1 == "sb" and item2 == "ffble"):
+                        if index1 < index2:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            for i in range(index1 + 1, index2):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                        else:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            for i in range(index2 + 1, index1):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                        if self.d_ffble_to_sb < distance_temp:
+                            self.d_ffble_to_sb = distance_temp
+
+                    if (item1 == "ffble" and item2 == "ic") or (item1 == "ic" and item2 == "ffble"):
+                        if index1 < index2:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            for i in range(index1 + 1, index2):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                        else:
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            for i in range(index2 + 1, index1):
+                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                        if self.d_ffble_to_ic < distance_temp:
+                            self.d_ffble_to_ic = distance_temp       
+        # Compute Dist logging
+        self.compute_distance_cnt += 1
+
+
+    def update_wires(self):
+        """ This function updates self.wire_lengths and self.wire_layers. It passes wire_lengths and wire_layers to member 
+            objects (like sb_mux) to update their wire lengths and layers. """
+        
+        # Update wire lengths and layers for all subcircuits
+        if not self.lb_height:
+            # Iterate over parameterized ckts AND list of load circuits
+            sb_mux: sb_mux_lib.SwitchBlockMux
+            for sb_mux in self.sb_muxes:
+                sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, ratio = 1.0)
+            cb_mux: cb_mux_lib.ConnectionBlockMux
+            for cb_mux in self.cb_muxes:
+                cb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, ratio = 1.0)
+            init_num_cb_stripes: int = 2
+            init_num_sb_stripes: int = 2
+            # Routing Wire Loads
+            gen_r_wire_load: gen_r_load_lib.RoutingWireLoad
+            for gen_r_wire_load in self.gen_routing_wire_loads:
+                gen_r_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, init_num_cb_stripes, init_num_sb_stripes)
+            gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad
+            for gen_ble_output_load in self.gen_ble_output_loads:
+                gen_ble_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)
+            # Logic clusters
+            for logic_cluster in self.logic_clusters:
+                logic_cluster.update_wires(
+                    self.width_dict, 
+                    self.wire_lengths, 
+                    self.wire_layers, 
+                    ic_ratio = 1.0,
+                    lut_ratio = 1.0
+                )
+        else:
+            # These ratios seem to be in units of stripes per switch block 
+            sb_ratio: float = (self.lb_height / (self.sb_mux.total_num_per_tile / self.num_sb_stripes)) / self.dict_real_widths["sb"]
+            if sb_ratio < 1.0:
+                sb_ratio = 1 / sb_ratio
+            
+            #if the ratio is larger than 2.0, we can look at this stripe as two stripes put next to each other and partly fix the ratio:
+                
+            cb_ratio: float = (self.lb_height / (self.cb_mux.total_num_per_tile / self.num_cb_stripes)) / self.dict_real_widths["cb"]
+            if cb_ratio < 1.0:
+                cb_ratio = 1 / cb_ratio
+                
+            #if the ratio is larger than 2.0, we can look at this stripe as two stripes put next to each other and partly fix the ratio:
+
+            ic_ratio: float = (self.lb_height / (self.local_mux.total_num_per_tile / self.num_ic_stripes)) / self.dict_real_widths["ic"]
+            if ic_ratio < 1.0:
+                ic_ratio = 1 / ic_ratio
+                
+            #if the ratio is larger than 2.0, we can look at this stripe as two stripes put next to each other and partly fix the ratio:			
+
+            lut_ratio: float = (self.lb_height / (self.specs.N / self.num_lut_stripes)) / self.dict_real_widths["lut"]
+            if lut_ratio < 1.0:
+                lut_ratio = 1 / lut_ratio
+            
+
+            # Iterate over parameterized ckts AND list of load circuits
+            sb_mux: sb_mux_lib.SwitchBlockMux
+            for sb_mux in self.sb_muxes:
+                sb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, sb_ratio)
+            cb_mux: cb_mux_lib.ConnectionBlockMux
+            for cb_mux in self.cb_muxes:
+                cb_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, cb_ratio)
+            # Routing Wire Loads
+            gen_r_wire_load: gen_r_load_lib.RoutingWireLoad
+            for gen_r_wire_load in self.gen_routing_wire_loads:
+                gen_r_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.num_sb_stripes, self.num_cb_stripes)
+            gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad
+            for gen_ble_output_load in self.gen_ble_output_loads:
+                gen_ble_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)
+            # Logic clusters
+            for logic_cluster in self.logic_clusters:
+                logic_cluster.update_wires(
+                    self.width_dict, 
+                    self.wire_lengths, 
+                    self.wire_layers, 
+                    ic_ratio, 
+                    lut_ratio,
+                    self.d_ffble_to_ic,
+                    self.d_cb_to_ic + self.lb_height,
+                )
+        
+        if self.specs.enable_carry_chain == 1:
+            for carry_chain in self.carry_chains:
+                carry_chain.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)
+            for carry_chain_periph in self.carry_chain_periphs:
+                carry_chain_periph.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)
+            for carry_chain_mux in self.carry_chain_muxes:
+                carry_chain_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)
+            for carry_chain_inter in self.carry_chain_inter_clusters:
+                carry_chain_inter.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)
+            if self.specs.carry_chain_type == "skip":
+                for carry_chain_and in self.carry_chain_skip_ands:
+                    carry_chain_and.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)
+                for carry_chain_skip_mux in self.carry_chain_skip_muxes:
+                    carry_chain_skip_mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)
+
+        if self.specs.enable_bram_block == 1:
+            self.RAM.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)
+
+        for hardblock in self.hardblocklist:
+            hardblock.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)  
+            hardblock.mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)   
+
+        # Update Wires logging
+        self.update_wires_cnt += 1
+
+    def update_wire_rc(self):
+        """ This function updates self.wire_rc_dict based on the FPGA's self.wire_lengths and self.wire_layers."""
+            
+        # Calculate R and C for each wire
+        for wire, length in self.wire_lengths.items():
+            # Get wire layer
+            layer: int = self.wire_layers[wire]
+            # Get R and C per unit length for wire layer
+            rc: Tuple[ float ] = self.metal_stack[layer]
+            # Calculate total wire R and C
+            resistance: float = rc[0] * length
+            capacitance: float = rc[1] * length / 2
+            # Add to wire_rc dictionary
+            self.wire_rc_dict[wire] = (resistance, capacitance) 
+
+    
+
+    def update_delays(self, spice_interface: spice.SpiceInterface):
+        """ 
+        Get the HSPICE delays for each subcircuit. 
+        This function returns "False" if any of the HSPICE simulations failed.
+        """
+        
+        print("*** UPDATING DELAYS ***")
+        crit_path_delay = 0
+        valid_delay = True
+
+        # Run HSPICE on all subcircuits and collect the total tfall and trise for that 
+        # subcircuit. We are only doing a single run on HSPICE so we expect the result
+        # to be in [0] of the spice_meas dictionary. We check to make sure that the 
+        # HSPICE simulation was successful by checking if any of the SPICE measurements
+        # were "failed". If that is the case, we set the delay of that subcircuit to 1
+        # second and set our valid_delay flag to False.
+
+        # Create parameter dict of all current transistor sizes and wire rc
+        parameter_dict = {}
+        for tran_name, tran_size in self.transistor_sizes.items():
+            if not self.specs.use_finfet:
+                parameter_dict[tran_name] = [1e-9 * tran_size * self.specs.min_tran_width]
+            else :
+                parameter_dict[tran_name] = [tran_size]
+
+        for wire_name, rc_data in self.wire_rc_dict.items():
+            parameter_dict[wire_name + "_res"] = [rc_data[0]]
+            parameter_dict[wire_name + "_cap"] = [rc_data[1]*1e-15]
+
+        # Run HSPICE on all subcircuits and collect the total tfall and trise for that 
+        # subcircuit. We are only doing a single run on HSPICE so we expect the result
+        # to be in [0] of the spice_meas dictionary. We check to make sure that the 
+        # HSPICE simulation was successful by checking if any of the SPICE measurements
+        # were "failed". If that is the case, we set the delay of that subcircuit to 1
+        # second and set our valid_delay flag to False.
+
+        sp_out_meas = { 
+            "trise": 0,
+            "tfall": 0,
+            "delay": 0,
+            "power": 0,
+        }
+        # SB MUX
+        sim_tbs(self.sb_mux_tbs, spice_interface, parameter_dict)
+
+        # sb_mux_meas: Dict[
+        #     sb_mux_lib.SwitchBlockMuxTB, Dict[str, float]
+        # ] = defaultdict(lambda: sp_out_meas)
+        # for sb_mux_tb in self.sb_mux_tbs:
+        #     print(f"Updating delay for {sb_mux_tb.dut_ckt.sp_name} with TB {sb_mux_tb.tb_fname.strip('.sp')}")
+        #     spice_meas = spice_interface.run(sb_mux_tb.sp_fpath, parameter_dict)
+        #     if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+        #         valid_delay = False
+        #         tfall = 1
+        #         trise = 1
+        #     else :  
+        #         tfall = float(spice_meas["meas_total_tfall"][0])
+        #         trise = float(spice_meas["meas_total_trise"][0])
+        #     if tfall < 0 or trise < 0 :
+        #         valid_delay = False
+        #     sb_mux_meas[sb_mux_tb]["trise"] = trise
+        #     sb_mux_meas[sb_mux_tb]["tfall"] = tfall
+        #     sb_mux_meas[sb_mux_tb]["delay"] = max(tfall, trise)
+        #     sb_mux_meas[sb_mux_tb]["power"] = float(spice_meas["meas_avg_power"][0])
+        
+        # CB MUX
+        cb_mux_meas: Dict[
+            cb_mux_lib.ConnectionBlockMuxTB, Dict[str, float]
+        ] = defaultdict(lambda: sp_out_meas)
+        for cb_mux_tb in self.cb_mux_tbs:
+            print(f"Updating delay for {cb_mux_tb.dut_ckt.sp_name} with TB {cb_mux_tb.tb_fname.strip('.sp')}")
+            spice_meas = spice_interface.run(cb_mux_tb.sp_fpath, parameter_dict)
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            cb_mux_meas[cb_mux_tb]["trise"] = trise
+            cb_mux_meas[cb_mux_tb]["tfall"] = tfall
+            cb_mux_meas[cb_mux_tb]["delay"] = max(tfall, trise)
+            cb_mux_meas[cb_mux_tb]["power"] = float(spice_meas["meas_avg_power"][0])
+
+        # Local MUX
+        local_mux_meas: Dict[
+            lb_lib.LocalMuxTB, Dict[str, float]
+        ] = defaultdict(lambda: sp_out_meas)
+        for local_mux_tb in self.local_mux_tbs:
+            print(f"Updating delay for {local_mux_tb.dut_ckt.sp_name} with TB {local_mux_tb.tb_fname.strip('.sp')}")
+            spice_meas = spice_interface.run(local_mux_tb.sp_fpath, parameter_dict)
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            local_mux_meas[local_mux_tb]["trise"] = trise
+            local_mux_meas[local_mux_tb]["tfall"] = tfall
+            local_mux_meas[local_mux_tb]["delay"] = max(tfall, trise)
+            local_mux_meas[local_mux_tb]["power"] = float(spice_meas["meas_avg_power"][0])
+        
+        # Local BLE Output
+        local_ble_output_meas: Dict[
+            ble_lib.LocalBLEOutputTB, Dict[str, float]
+        ] = defaultdict(lambda: sp_out_meas)
+        for local_ble_output_tb in self.local_ble_output_tbs:
+            print(f"Updating delay for {local_ble_output_tb.dut_ckt.sp_name} with TB {local_ble_output_tb.tb_fname.strip('.sp')}")
+            spice_meas = spice_interface.run(local_ble_output_tb.sp_fpath, parameter_dict)
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            local_ble_output_meas[local_ble_output_tb]["trise"] = trise
+            local_ble_output_meas[local_ble_output_tb]["tfall"] = tfall
+            local_ble_output_meas[local_ble_output_tb]["delay"] = max(tfall, trise)
+            local_ble_output_meas[local_ble_output_tb]["power"] = float(spice_meas["meas_avg_power"][0])
+        
+        # General BLE Output
+        gen_ble_output_meas: Dict[
+            ble_lib.GeneralBLEOutputTB, Dict[str, float]
+        ] = defaultdict(lambda: sp_out_meas)
+        for gen_ble_output_tb in self.gen_ble_output_tbs:
+
+
+
+
+
+        
+        
+
+
+    def print_specs(self):
+
+        print("|------------------------------------------------------------------------------|")
+        print("|   FPGA Architecture Specs                                                    |")
+        print("|------------------------------------------------------------------------------|")
+        print("")
+        print("  Number of BLEs per cluster (N): " + str(self.specs.N))
+        print("  LUT size (K): " + str(self.specs.K))
+        print("  Channel width (W): " + str(self.specs.W))
+        # print("  Wire segment length (L): " + str(self.specs.L))
+        print("  Number cluster inputs (I): " + str(self.specs.I))
+        print("  Number of BLE outputs to general routing: " + str(self.specs.num_ble_general_outputs))
+        print("  Number of BLE outputs to local routing: " + str(self.specs.num_ble_local_outputs))
+        print("  Number of cluster outputs: " + str(self.specs.num_cluster_outputs))
+        print("  Switch block flexibility (Fs): " + str(self.specs.Fs))
+        print("  Cluster input flexibility (Fcin): " + str(self.specs.Fcin))
+        print("  Cluster output flexibility (Fcout): " + str(self.specs.Fcout))
+        print("  Local MUX population (Fclocal): " + str(self.specs.Fclocal))
+        print("")
+        print("|------------------------------------------------------------------------------|")
+        print("")
+        
+        
+    def print_details(self, report_fpath: str):
+
+        utils.print_and_write(report_fpath, "|------------------------------------------------------------------------------|")
+        utils.print_and_write(report_fpath, "|   FPGA Implementation Details                                                |")
+        utils.print_and_write(report_fpath, "|------------------------------------------------------------------------------|")
+        utils.print_and_write(report_fpath, "")
+
+        for sb_mux in self.sb_muxes:
+            sb_mux.print_details(report_fpath)
+        for cb_mux in self.cb_muxes:
+            cb_mux.print_details(report_fpath)
+        for gen_r_wire_load in self.gen_routing_wire_loads:
+            gen_r_wire_load.print_details(report_fpath)
+        for gen_ble_output_load in self.gen_ble_output_loads:
+            gen_ble_output_load.print_details(report_fpath)
+        for logic_cluster in self.logic_clusters:
+            logic_cluster.print_details(report_fpath)
+
+        if self.specs.enable_bram_block == 1:
+            self.RAM.print_details(report_fpath)
+        for hb in self.hardblocklist:
+            hb.print_details(report_fpath)
+
+        utils.print_and_write(report_fpath, "|------------------------------------------------------------------------------|")
+        utils.print_and_write(report_fpath, "")
+
+        return
+
 
     def _create_lib_files(self):
         """ Create SPICE library files and add headers. """
@@ -1410,104 +2856,6 @@ class FPGA:
 
         # Now, update self.transistor_sizes with these new sizes
         self.transistor_sizes.update(new_sizes)
-      
-      
-    def _update_area_per_transistor(self):
-        """ We use self.transistor_sizes to calculate area
-            Using the area model, we calculate the transistor area in minimum width transistor areas.
-            We also calculate area in nm and transistor width in nm. Nanometer values are needed for wire length calculations.
-            For each transistor, this data forms a tuple (tran_name, tran_channel_width_nm, tran_drive_strength, tran_area_min_areas, tran_area_nm, tran_width_nm)
-            The FPGAs transistor_area_list is updated once these values are computed."""
-        
-        # Initialize transistor area list
-        tran_area_list = []
-        
-        # For each transistor, calculate area
-        for tran_name, tran_size in self.transistor_sizes.items():
-                # Get transistor drive strength (drive strength is = xMin width)
-                tran_drive = tran_size
-                # Get tran area in min transistor widths
-                tran_area = self._area_model(tran_name, tran_drive)
-                # Get area in nm square
-                tran_area_nm = tran_area*self.specs.min_width_tran_area
-                # Get width of transistor in nm
-                tran_width = math.sqrt(tran_area_nm)
-                # Add this as a tuple to the tran_area_list
-                # TODO: tran_size and tran_drive are the same thing?!
-                tran_area_list.append((tran_name, tran_size, tran_drive, tran_area, 
-                                                tran_area_nm, tran_width))    
-                                                                                   
-        # Assign list to FPGA object
-        self.transistor_area_list = tran_area_list
-        
-
-    def _update_area_and_width_dicts(self):
-        """ Calculate area for basic subcircuits like inverters, pass transistor, 
-            transmission gates, etc. Update area_dict and width_dict with this data."""
-        
-        # Initialize component area list of tuples (component name, component are, component width)
-        comp_area_list = []
-        
-        # Create a dictionary to store component sizes for multi-transistor components
-        comp_dict = {}
-        
-        # For each transistor in the transistor_area_list
-        # tran is a tuple having the following formate (tran_name, tran_channel_width_nm, 
-        # tran_drive_strength, tran_area_min_areas, tran_area_nm, tran_width_nm)
-        for tran in self.transistor_area_list:
-            # those components should have an nmos and a pmos transistors in them
-            if "inv_" in tran[0] or "tgate_" in tran[0]:
-                # Get the component name; transistors full name example: inv_lut_out_buffer_2_nmos.
-                # so the component name after the next two lines will be inv_lut_out_buffe_2.
-                comp_name = tran[0].replace("_nmos", "")
-                comp_name = comp_name.replace("_pmos", "")
-                
-                # If the component is already in the dictionary
-                if comp_name in comp_dict:
-                    if "_nmos" in tran[0]:
-                        # tran[4] is tran_area_nm
-                        comp_dict[comp_name]["nmos"] = tran[4]
-                    else:
-                        comp_dict[comp_name]["pmos"] = tran[4]
-                        
-                    # At this point we should have both NMOS and PMOS sizes in the dictionary
-                    # We can calculate the area of the inverter or tgate by doing the sum
-                    comp_area = comp_dict[comp_name]["nmos"] + comp_dict[comp_name]["pmos"]
-                    comp_width = math.sqrt(comp_area)
-                    comp_area_list.append((comp_name, comp_area, comp_width))                 
-                else:
-                    # Create a dict for this component to store nmos and pmos sizes
-                    comp_area_dict = {}
-                    # Add either the nmos or pmos item
-                    if "_nmos" in tran[0]:
-                        comp_area_dict["nmos"] = tran[4]
-                    else:
-                        comp_area_dict["pmos"] = tran[4]
-                        
-                    # Add this inverter to the inverter dictionary    
-                    comp_dict[comp_name] = comp_area_dict
-            # those components only have one transistor in them
-            elif "ptran_" in tran[0] or "rest_" in tran[0] or "tran_" in tran[0]:   
-                # Get the comp name
-                comp_name = tran[0].replace("_nmos", "")
-                comp_name = comp_name.replace("_pmos", "")               
-                # Add this to comp_area_list directly
-                comp_area_list.append((comp_name, tran[4], tran[5]))            
-        
-        # Convert comp_area_list to area_dict and width_dict
-        area_dict = {}
-        width_dict = {}
-        for component in comp_area_list:
-            area_dict[component[0]] = component[1]
-            width_dict[component[0]] = component[2]
-        
-        # Set the FPGA object area and width dict
-        self.area_dict = area_dict
-        self.width_dict = width_dict
-  
-        return
-
-
 
 
     def _area_model(self, tran_name: str, tran_size: int) -> float:

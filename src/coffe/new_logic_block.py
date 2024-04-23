@@ -2,15 +2,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field, InitVar
 
 import math, os, sys
-from typing import List, Dict, Any, Tuple, Union, Type
+import re
 
+from typing import List, Dict, Any, Tuple, Union, Type
+import src.common.spice_parser as sp_parser
 import src.coffe.data_structs as c_ds
+import src.common.utils as rg_utils
+import src.common.data_structs as rg_ds
 import src.coffe.utils as utils
 import src.coffe.mux as mux
 
+import src.coffe.new_sb_mux as sb_mux_lib
+import src.coffe.new_gen_routing_loads as gen_r_load_lib
 import src.coffe.new_ble as ble_lib
 import src.coffe.new_lut as lut_lib
 
+import src.coffe.new_carry_chain as cc_lib
 import src.coffe.constants as consts
 
 @dataclass
@@ -53,15 +60,160 @@ class LocalMux(mux.Mux2Lvl):
     
     def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], ratio: float):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
-
+        super().update_wires(width_dict, wire_lengths, wire_layers, ratio)
         # Update wire lengths
-        wire_lengths["wire_" + self.sp_name + "_L1"] = width_dict[self.sp_name] * ratio
-        wire_lengths["wire_" + self.sp_name + "_L2"] = width_dict[self.sp_name] * ratio
-        # Update wire layers
-        wire_layers["wire_" + self.sp_name + "_L1"] = consts.LOCAL_WIRE_LAYER
-        wire_layers["wire_" + self.sp_name + "_L2"] = consts.LOCAL_WIRE_LAYER
+        # wire_lengths["wire_" + self.sp_name + "_L1"] = width_dict[self.sp_name] * ratio
+        # wire_lengths["wire_" + self.sp_name + "_L2"] = width_dict[self.sp_name] * ratio
+        # # Update wire layers
+        # wire_layers["wire_" + self.sp_name + "_L1"] = consts.LOCAL_WIRE_LAYER
+        # wire_layers["wire_" + self.sp_name + "_L2"] = consts.LOCAL_WIRE_LAYER
+
+    def print_details(self, report_fpath: str):
+        """ Print switch block details """
+
+        utils.print_and_write(report_fpath, "  LOCAL MUX DETAILS:")
+        super().print_details(report_fpath)
 
 
+@dataclass
+class LocalMuxTB(c_ds.SimTB):
+    """
+    The Local Mux testbench
+    """
+
+    # Simulated path is from the output of CB Mux at end of a wire load to input of local mux
+    start_sb_mux: sb_mux_lib.SwitchBlockMux = None
+    gen_r_wire_load: gen_r_load_lib.RoutingWireLoad = None
+    local_r_wire_load: LocalRoutingWireLoad = None
+    lut_input_driver: lut_lib.LUTInputDriver = None
+
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    
+    # Initialized in __post_init__
+    dut_ckt: LocalMux = None
+    def __hash__(self):
+        return super().__hash__()    
+
+    def __post_init__(self, subckt_lib: Dict[str, rg_ds.SpSubCkt]):
+        super().__post_init__()
+        self.meas_points = []
+        pwr_v_node: str = "vdd_local_mux"
+
+        # Define the standard voltage sources for the simulation
+        # STIM PULSE Voltage SRC
+        self.stim_vsrc: c_ds.SpVoltageSrc = c_ds.SpVoltageSrc(
+                name = "IN",
+                out_node = "n_in",
+                type = "PULSE",
+                init_volt = c_ds.Value(0),
+                peak_volt = c_ds.Value(name = self.supply_v_param), # TODO get this from defined location
+                pulse_width = c_ds.Value(2), # ns
+                period = c_ds.Value(4), # ns
+        )
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc: c_ds.SpVoltageSrc = c_ds.SpVoltageSrc(
+            name = "_LOCAL_MUX",
+            out_node = pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+            
+        # Initialize the DUT from our inputted wire loads
+        self.dut_ckt = self.local_r_wire_load.local_mux
+        self.top_insts = [
+            # Mux taking STIM input and driving the source routing wire load
+            rg_ds.SpSubCktInst(
+                name = f"X{self.start_sb_mux.sp_name}_on_1",
+                subckt = subckt_lib[f"{self.start_sb_mux.sp_name}_on"],
+                conns = { 
+                    "n_in": "n_in",
+                    "n_out": "n_1_1",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node
+                }
+            ),
+            # Routing Wire Load, driven by start mux and terminates with CB mux driving logic cluster
+            # Power VDD attached to the terminal CB mux as this is our DUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.gen_r_wire_load.sp_name}_1",
+                subckt = subckt_lib[self.gen_r_wire_load.sp_name],
+                conns = {
+                    "n_in": "n_1_1",
+                    "n_out": "n_hang_1",
+                    "n_cb_out": "n_1_2",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                    "n_vdd_sb_mux_on": self.vdd_node,
+                    "n_vdd_cb_mux_on": self.vdd_node
+                }
+            ),
+            # Local Routing Wire Load, driven by general routing wire load and terminates with LUT input driver
+            rg_ds.SpSubCktInst(
+                name = f"X{self.local_r_wire_load.sp_name}_1",
+                subckt = subckt_lib[self.local_r_wire_load.sp_name],
+                conns = {
+                    "n_in" : "n_1_2",
+                    "n_out" : "n_1_3",
+                    "n_gate" : self.sram_vdd_node,
+                    "n_gate_n" : self.sram_vss_node,
+                    "n_vdd" : self.vdd_node,
+                    "n_gnd" : self.gnd_node,
+                    "n_vdd_local_mux_on" : pwr_v_node,
+                }
+            ),
+            # LUT Input Driver
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut_input_driver.name}_1",
+                subckt = subckt_lib[self.lut_input_driver.sp_name],
+                conns = {
+                    "n_in": "n_1_3",
+                    "n_out": "n_hang_2",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_rsel": "n_hang_3",
+                    "n_not_input": "n_hang_4",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),   
+        ]
+
+    def generate_top(self) -> str:
+        dut_sp_name: str = self.dut_ckt.sp_name
+
+        # Instance path from our TB to the ON Local Mux inst
+        local_mux_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts, 
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+                for re_str in [
+                    r"local_routing_wire_load(?:.*)_1",
+                    r"local_mux(?:.*)_on", # TODO update the naming convension of terminal local mux
+                ]
+            ],
+            []
+        )
+
+        delay_names = [
+            f"inv_{dut_sp_name}_1",
+            "total",
+        ]
+        trig_node: str = ".".join(
+            [inst.name for inst in local_mux_path] + ["n_in"]
+        )
+        targ_nodes: List[str] = [
+            "n_1_3",
+            "n_1_3",
+        ]
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = "n_1_1",
+        )
 
 
 @dataclass
@@ -199,17 +351,21 @@ class LocalRoutingWireLoad(c_ds.LoadCircuit):
         self.off_inputs_per_wire = self.mux_inputs_per_wire - self.on_inputs_per_wire - self.partial_inputs_per_wire
 
 
-    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], local_routing_wire_load_length: float):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], local_routing_wire_load_length: float = None):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
         # TODO get wire keys from self.wire_names, assert that we update all keys in self.wire_names
-
+        wire_loc_routing: str = rg_utils.get_unique_obj(
+            self.wire_names,
+            rg_utils.str_match_condition,
+            "wire_local_routing",
+        )
         # Update wire lengths
-        wire_lengths["wire_local_routing"] = width_dict["logic_cluster"]
-        if local_routing_wire_load_length != 0:
-            wire_lengths["wire_local_routing"] = local_routing_wire_load_length
+        wire_lengths[wire_loc_routing] = width_dict["logic_cluster"]
+        if local_routing_wire_load_length:
+            wire_lengths[wire_loc_routing] = local_routing_wire_load_length
         # Update wire layers
-        wire_layers["wire_local_routing"] = consts.LOCAL_WIRE_LAYER
+        wire_layers[wire_loc_routing] = consts.LOCAL_WIRE_LAYER
 
 
 @dataclass
@@ -227,7 +383,7 @@ class LocalBLEOutputLoad(c_ds.LoadCircuit):
         # Open SPICE file for appending
         spice_file = open(spice_filename, 'a')
         
-        wire_loc_ble_out_fb = f"wire_local_ble_output_{self.get_param_str()}_feedback"
+        wire_loc_ble_out_fb = f"wire_local_ble_output_feedback_{self.get_param_str()}"
 
         spice_file.write("******************************************************************************************\n")
         spice_file.write("* Local BLE output load\n")
@@ -250,15 +406,21 @@ class LocalBLEOutputLoad(c_ds.LoadCircuit):
         self.wire_names = self.generate_local_ble_output_load(subcircuit_filename)
     
     
-    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], ble_ic_dis: float):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], ble_ic_dis: float = None):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
         # Update wire lengths
-        wire_lengths["wire_local_ble_output_feedback"] = width_dict["logic_cluster"]
-        if ble_ic_dis != 0:
-            wire_lengths["wire_local_ble_output_feedback"] = ble_ic_dis
+        wire_loc_ble_out_fb: str = rg_utils.get_unique_obj(
+            self.wire_names,
+            rg_utils.str_match_condition,
+            "wire_local_ble_output_feedback",
+        )
+        
+        wire_lengths[wire_loc_ble_out_fb] = width_dict["logic_cluster"]
+        if ble_ic_dis:
+            wire_lengths[wire_loc_ble_out_fb] = ble_ic_dis
         # Update wire layers
-        wire_layers["wire_local_ble_output_feedback"] = consts.LOCAL_WIRE_LAYER
+        wire_layers[wire_loc_ble_out_fb] = consts.LOCAL_WIRE_LAYER
 
 
 @dataclass
@@ -298,8 +460,20 @@ class LogicCluster(c_ds.CompoundCircuit):
     local_routing_wire_load: LocalRoutingWireLoad = None # Local Routing Wire Load
     ble: ble_lib.BLE = None # BLE sizeable circuit
     local_ble_output_load: LocalBLEOutputLoad = None # Output load of BLE load circuit
+    
+    # Carry Chain
+    cc_mux: cc_lib.CarryChainMux = None
+    cc: cc_lib.CarryChain = None
+    cc_skip_and: cc_lib.CarryChainSkipAnd = None
+    cc_skip_mux: cc_lib.CarryChainSkipMux = None
 
     def __post_init__(self):
+        # Create Local Mux
+        self.local_mux = LocalMux(
+            id = 0,
+            num_per_tile = self.num_local_mux_per_tile,
+            required_size = self.local_mux_size_required,
+        )
         # Create BLE
         self.ble = ble_lib.BLE(
             id = 0,
@@ -313,15 +487,16 @@ class LogicCluster(c_ds.CompoundCircuit):
             enable_carry_chain = self.enable_carry_chain,
             FAs_per_flut = self.FAs_per_flut,
             carry_skip_periphery_count = self.carry_skip_periphery_count,
+            # Circuit Dependancies
+            cc = self.cc,
+            cc_mux = self.cc_mux,
+            cc_skip_and = self.cc_skip_and,
+            cc_skip_mux = self.cc_skip_mux,
+            local_mux = self.local_mux,
             # Transistor Parameters
             use_tgate = self.use_tgate,
             use_finfet = self.use_finfet,
             use_fluts = self.use_fluts,
-        )
-        # Create Local Mux
-        self.local_mux = LocalMux(
-            id = 0,
-            required_size = self.local_mux_size_required,
         )
         # Create Local Routing Wire Load (load on a single wire going into local muxes)
         self.local_routing_wire_load = LocalRoutingWireLoad(
@@ -343,7 +518,18 @@ class LogicCluster(c_ds.CompoundCircuit):
         #     self.gen_ble_output_load
         # )
 
+    def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]):
+        self.ble.update_area(area_dict, width_dict)
+        self.local_mux.update_area(area_dict, width_dict) 
 
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], ic_ratio: float, lut_ratio: float, ble_ic_dis: float = None, local_routing_wire_load_length: float = None):
+        """ Update wires of things inside the logic cluster. """
+        
+        # Call wire update functions of member objects.
+        self.ble.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
+        self.local_mux.update_wires(width_dict, wire_lengths, wire_layers, ic_ratio)
+        self.local_routing_wire_load.update_wires(width_dict, wire_lengths, wire_layers, local_routing_wire_load_length)
+        self.local_ble_output_load.update_wires(width_dict, wire_lengths, wire_layers, ble_ic_dis)
 
     def generate(self, subcircuits_filename: str, min_tran_width, specs: c_ds.Specs) -> Dict[str, int | float]:
         print("Generating logic cluster")
@@ -360,4 +546,8 @@ class LogicCluster(c_ds.CompoundCircuit):
         
         return init_tran_sizes
 
+
+    def print_details(self, report_file):
+        self.local_mux.print_details(report_file)
+        self.ble.print_details(report_file)
 

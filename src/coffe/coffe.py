@@ -2,9 +2,10 @@ import os
 import sys
 import argparse
 import time
-import src.coffe.fpga as fpga
+# import src.coffe.fpga as fpga
+import src.coffe.new_fpga as fpga
 import src.coffe.spice as spice
-import src.coffe.tran_sizing as tran_sizing
+import src.coffe.new_tran_sizing as tran_sizing
 import src.coffe.utils as utils
 import src.coffe.vpr as coffe_vpr
 import datetime
@@ -47,8 +48,13 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     total_start_time = time.time()
 
     # Create an FPGA instance
-    fpga_inst = fpga.FPGA(coffe_info, args, spice_interface, telemetry_file_path)
-                        
+    fpga_inst = fpga.FPGA(coffe_info, args, spice_interface, telemetry_file_path)   
+    #     coffe_info = coffe_info,
+    #     run_options = args,
+    #     spice_interface = spice_interface
+    # )
+        #coffe_info, args, spice_interface) #, telemetry_file_path)                 
+    
     ###############################################################
     ## GENERATE FILES
     ###############################################################
@@ -57,7 +63,7 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     os.chdir(arch_folder)  
 
     # Generate FPGA and associated SPICE files
-    fpga_inst.generate(is_size_transistors, size_hb_interfaces) 
+    fpga_inst.generate(size_hb_interfaces) 
 
     # Go back to the base directory
     os.chdir(default_dir)
