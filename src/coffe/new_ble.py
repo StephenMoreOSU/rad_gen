@@ -28,6 +28,9 @@ class LocalBLEOutput(mux.Mux2to1):
     name: str = "local_ble_output"
     delay_weight: float = consts.DELAY_WEIGHT_LOCAL_BLE_OUTPUT
     
+    def __hash__(self) -> int:
+        return super().__hash__()
+
     def __post_init__(self):
         return super().__post_init__()
 
@@ -69,7 +72,7 @@ class LocalBLEOutput(mux.Mux2to1):
 class LocalBLEOutputTB(c_ds.SimTB):
     lut: lut_lib.LUT = None
     lut_output_load: LUTOutputLoad = None
-    gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = None
+    local_ble_output_load: lb_lib.LocalBLEOutputLoad = None
 
     subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
     
@@ -78,7 +81,7 @@ class LocalBLEOutputTB(c_ds.SimTB):
     local_out_node: str = None
     general_out_node: str = None
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return super().__hash__()
 
     def __post_init__(self, subckt_lib: Dict[str, rg_ds.SpSubCkt]):
@@ -96,7 +99,7 @@ class LocalBLEOutputTB(c_ds.SimTB):
         )
         
         # Initialize the DUT from our inputted wire loads
-        self.dut_ckt = self.lut_output_load.ble_outputs.general_output
+        self.dut_ckt = self.lut_output_load.ble_outputs.local_output
         
         if self.lut.use_tgate:
             lut_conns: Dict[str, str] = {
@@ -151,13 +154,12 @@ class LocalBLEOutputTB(c_ds.SimTB):
                     "n_vdd_general_output_on": self.vdd_node,
                 }
             ),
-            # GENERAL BLE OUTPUT LOAD
+            # LOCAL BLE OUTPUT LOAD
             rg_ds.SpSubCktInst(
-                name = f"X{self.gen_ble_output_load.sp_name}",
-                subckt = subckt_lib[self.gen_ble_output_load.sp_name],
+                name = f"X{self.local_ble_output_load.sp_name}",
+                subckt = subckt_lib[self.local_ble_output_load.sp_name],
                 conns = {
-                    "n_1_1": self.general_out_node,
-                    "n_out": "n_hang_1",
+                    "n_in": self.local_out_node,
                     "n_gate": self.sram_vdd_node,
                     "n_gate_n": self.sram_vss_node,
                     "n_vdd": self.vdd_node,
@@ -192,12 +194,12 @@ class LocalBLEOutputTB(c_ds.SimTB):
             [inst.name for inst in loc_ble_out_load_path] + ["n_1_2"]
         )
         delay_names: List[str] = [
+            # f"inv_{dut_sp_name}_1",
             f"inv_{dut_sp_name}_1",
-            f"inv_{dut_sp_name}_2",
             f"total",
         ]
         targ_nodes: List[str] = [
-            meas_loc_ble_out_in_node, 
+            # meas_loc_ble_out_in_node, 
             meas_loc_ble_out_term_node,
             meas_loc_ble_out_term_node,
         ]
@@ -219,6 +221,9 @@ class GeneralBLEOutput(mux.Mux2to1):
     
     def __post_init__(self):
         super().__post_init__()
+
+    def __hash__(self) -> int:
+        return super().__hash__()
 
     def generate(self, subckt_lib_fpath: str) -> Dict[str, int | float]:
         # Call Parent Mux generate, does correct generation but has incorrect initial tx sizes
@@ -267,7 +272,7 @@ class GeneralBLEOutputTB(c_ds.SimTB):
     local_out_node: str = None
     general_out_node: str = None
     
-    def __hash__(self):
+    def __hash__(self) -> int:
         return super().__hash__()
     
     def __post_init__(self, subckt_lib: Dict[str, rg_ds.SpSubCkt]):
@@ -418,6 +423,9 @@ class FlipFlop(c_ds.SizeableCircuit):
     t_clk_to_q: float = None
     use_finfet: bool = None
     use_tgate: bool = None
+
+    def __hash__(self) -> int:
+        return super().__hash__()
 
     def __post__init__(self):
         # Initialize times to basically NULL for the cost function == 1
@@ -934,6 +942,9 @@ class LUTOutputLoad(c_ds.LoadCircuit):
     # Child Subckts
     ble_outputs: BLE = None
 
+    def __hash__(self) -> int:
+        return super().__hash__()
+    
     def __post_init__(self):
         super().__post_init__()
 
@@ -989,47 +1000,66 @@ class LUTOutputLoad(c_ds.LoadCircuit):
 class FlutMux(mux.Mux2to1):
     name: str = "flut_mux"
 
+    delay_weight: float = consts.DELAY_WEIGHT_LUT_FRAC
+    # Circuit Dependencies
+    lut: lut_lib.LUT = None # used in update_wires
+    
+    def __hash__(self) -> int:
+        return super().__hash__()
+    
     def __post_init__(self):
         super().__post_init__()
 
     def generate(self, subckt_lib_fpath: str) -> Dict[str, int | float]:
-            # Call Parent Mux generate, does correct generation but has incorrect initial tx sizes
-            self.initial_transistor_sizes = super().generate(subckt_lib_fpath)
-            # Set initial transistor sizes to values appropriate for an SB mux
-            for tx_name in self.initial_transistor_sizes:
-                # Set size of transistors making up switches
-                # nmos
-                if f"{self.sp_name}_nmos" in tx_name:
-                    self.initial_transistor_sizes[tx_name] = 2
-                # pmos
-                elif f"{self.sp_name}_pmos" in tx_name:
-                    self.initial_transistor_sizes[tx_name] = 2
-                # Set 1st stage inverter pmos
-                elif "inv" in tx_name and "_1_pmos" in tx_name:
-                    self.initial_transistor_sizes[tx_name] = 1
-                # Set 1st stage inverter nmos
-                elif "inv" in tx_name and "_1_nmos" in tx_name:
-                    self.initial_transistor_sizes[tx_name] = 1
-                # Set 2nd stage inverter pmos
-                elif "inv" in tx_name and "_2_pmos" in tx_name:
-                    self.initial_transistor_sizes[tx_name] = 5
-                # Set 2nd stage inverter nmos
-                elif "inv" in tx_name and "_2_nmos" in tx_name:
-                    self.initial_transistor_sizes[tx_name] = 5
-                # Set level restorer if this is a pass transistor mux
-                elif "rest" in tx_name:
-                    self.initial_transistor_sizes[tx_name] = 1
-                
-            # Assert that all transistors in this mux have been updated with initial_transistor_sizes
-            assert set(list(self.initial_transistor_sizes.keys())) == set(self.transistor_names)
+        # Call Parent Mux generate, does correct generation but has incorrect initial tx sizes
+        self.initial_transistor_sizes = super().generate(subckt_lib_fpath)
+        # Set initial transistor sizes to values appropriate for an SB mux
+        for tx_name in self.initial_transistor_sizes:
+            # Set size of transistors making up switches
+            # nmos
+            if f"{self.sp_name}_nmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 2
+            # pmos
+            elif f"{self.sp_name}_pmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 2
+            # Set 1st stage inverter pmos
+            elif "inv" in tx_name and "_1_pmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 1
+            # Set 1st stage inverter nmos
+            elif "inv" in tx_name and "_1_nmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 1
+            # Set 2nd stage inverter pmos
+            elif "inv" in tx_name and "_2_pmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 5
+            # Set 2nd stage inverter nmos
+            elif "inv" in tx_name and "_2_nmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 5
+            # Set level restorer if this is a pass transistor mux
+            elif "rest" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 1
             
-            # Will be dict of ints if FinFET or discrete Tx, can be floats if bulk
-            return self.initial_transistor_sizes
+        # Assert that all transistors in this mux have been updated with initial_transistor_sizes
+        assert set(list(self.initial_transistor_sizes.keys())) == set(self.transistor_names)
+        
+        self.wire_names.append("wire_lut_to_flut_mux") # TODO update for multi ckt support
+        # Will be dict of ints if FinFET or discrete Tx, can be floats if bulk
+        return self.initial_transistor_sizes
+
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]) -> List[str]:
+        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
+        super().update_wires(width_dict, wire_lengths, wire_layers)
+
+        # Update wire lengths
+        wire_lengths["wire_lut_to_flut_mux"] = width_dict[self.lut.name] #TODO change to sp_name
+        
+        # Update wire layers
+        wire_layers["wire_lut_to_flut_mux"] = consts.LOCAL_WIRE_LAYER
     
 @dataclass
 class FlutMuxTB(c_ds.SimTB):
     lut: lut_lib.LUT = None
     flut_mux: FlutMux = None
+    cc: cc_lib.CarryChain = None # Used to find wire length key
     cc_mux: cc_lib.CarryChainMux = None
     lut_output_load: LUTOutputLoad = None
     gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = None
@@ -1139,8 +1169,8 @@ class FlutMuxTB(c_ds.SimTB):
                         "n_out": "n_1_4",
                     },
                     param_values = {
-                        "Rw": "wire_carry_chain_5_res",
-                        "Cw": "wire_carry_chain_5_cap",
+                        "Rw": f"wire_{self.cc.sp_name}_5_res",
+                        "Cw": f"wire_{self.cc.sp_name}_5_cap",
                     }
                 ),
                 # CC Mux
@@ -1256,6 +1286,9 @@ class BLE(c_ds.CompoundCircuit):
     # Local Mux (required by lut input area calculation)
     local_mux: lb_lib.LocalMux = None
 
+    def __hash__(self) -> int:
+        return super().__hash__()
+
     def __post_init__(self):
         # TODO update this to be consistent, this is weird case where base name is different from sp_name
         self.sp_name = f"ble_outputs_{self.get_param_str()}" 
@@ -1283,12 +1316,6 @@ class BLE(c_ds.CompoundCircuit):
             num_general_outputs = self.num_general_outputs,
             ble_outputs = self,
         )
-        # Fracturable LUT mux (2:1)
-        if self.use_fluts:
-            self.fmux = FlutMux(
-                id = 0,
-                use_tgate = self.use_tgate
-            )
         # LUT
         self.lut = lut_lib.LUT(
             id = 0,
@@ -1300,6 +1327,13 @@ class BLE(c_ds.CompoundCircuit):
             use_tgate = self.use_tgate,
             local_mux = self.local_mux,
         )
+        # Fracturable LUT mux (2:1)
+        if self.use_fluts:
+            self.fmux = FlutMux(
+                id = 0,
+                use_tgate = self.use_tgate,
+                lut = self.lut
+            )
 
     def generate_ble_outputs(self, spice_filename: str) -> List[str]:
         """ Create the BLE outputs block. Contains 'num_local_out' local outputs and 'num_gen_out' general outputs. """

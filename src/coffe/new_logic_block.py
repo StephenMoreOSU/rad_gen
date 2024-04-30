@@ -398,7 +398,7 @@ class LocalBLEOutputLoad(c_ds.LoadCircuit):
         
         # Create a list of all wires used in this subcircuit
         wire_names_list = []
-        wire_names_list.append("wire_local_ble_output_feedback")
+        wire_names_list.append(wire_loc_ble_out_fb)
         
         return wire_names_list
 
@@ -473,6 +473,8 @@ class LogicCluster(c_ds.CompoundCircuit):
             id = 0,
             num_per_tile = self.num_local_mux_per_tile,
             required_size = self.local_mux_size_required,
+            use_driver = False,
+            use_tgate = self.use_tgate,
         )
         # Create BLE
         self.ble = ble_lib.BLE(

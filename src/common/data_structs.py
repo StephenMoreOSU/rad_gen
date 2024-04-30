@@ -2485,7 +2485,7 @@ class Ic3dCLI(ParentCLI):
     """
     cli_args: List[GeneralCLI] = field(default_factory = lambda: [
         GeneralCLI(key = "input_config_path", shortcut = "-ic" , datatype = str, help_msg = "path to ic_3d subtool specific configuration file"),
-        GeneralCLI(key = "debug_spice", shortcut = "-ds" , datatype = str, nargs = "*", help_msg = "takes in directory(ies) named according to tile of spice sim, runs sim, opens waveforms and param settings for debugging"),
+        GeneralCLI(key = "debug_spice", shortcut = "-ds" , datatype = str, nargs = "*", help_msg = "takes in path(s) named according to tile of spice sim, runs sim, opens waveforms and param settings for debugging"),
         GeneralCLI(key = "pdn_modeling", shortcut = "-pm", datatype = bool, action = "store_true", help_msg = "runs the PDN modeling flow"),
         GeneralCLI(key = "buffer_dse", shortcut = "-bd", datatype = bool, action = "store_true", help_msg = "runs the buffer DSE flow"),
         GeneralCLI(key = "buffer_sens_study", shortcut = "-bs", datatype = bool, action = "store_true", help_msg = "runs the buffer sensitivity study flow (sweeps parameters for buffer chain wire load, plots results)"),

@@ -35,10 +35,12 @@ class LUTInputDriver(c_ds.SizeableCircuit):
     # Update wire dependancies -> basically circuits that would be required to estimate the layout of wires within the self circuit
     local_mux: lb_lib.LocalMux = None
 
+    def __hash__(self) -> int:
+        return super().__hash__()
+    
     def __post_init__(self):
         self.name = f"lut_{self.lut_input_key}_driver"
         super().__post_init__()
-
 
     def generate(self, subcircuit_filename: str) -> Dict[str, float | int]:
         """ Generate SPICE netlist based on type of LUT input driver. """
@@ -188,8 +190,10 @@ class LUTInputDriverTB(c_ds.SimTB):
     
     # Initialized in __post_init__
     dut_ckt: LUTInputDriver | LUTInputNotDriver = None
-    def __hash__(self):
+    
+    def __hash__(self) -> int:
         return super().__hash__()
+    
     def __post_init__(self, subckt_lib: Dict[str, rg_ds.SpSubCkt]):
         super().__post_init__()
         assert self.lut_in_driver.lut_input_key == self.lut_in_not_driver.lut_input_key
@@ -387,7 +391,7 @@ class LUTInputDriverTB(c_ds.SimTB):
         )
 
 @dataclass
-class LUTInputDriverLUTLoadTB(c_ds.SimTB):
+class LUTInputTB(c_ds.SimTB):
     cb_mux: cb_mux_lib.ConnectionBlockMux = None
     local_r_wire_load: lb_lib.LocalRoutingWireLoad = None
     lut_in_driver: LUTInputDriver = None
@@ -402,8 +406,10 @@ class LUTInputDriverLUTLoadTB(c_ds.SimTB):
     
     # Initialized in __post_init__
     dut_ckt: LUTInputDriver | LUTInputNotDriver = None
-    def __hash__(self):
+
+    def __hash__(self) -> int:
         return super().__hash__()
+    
     def __post_init__(self, subckt_lib: Dict[str, rg_ds.SpSubCkt]):
         super().__post_init__()
         assert self.lut_in_driver.lut_input_key == self.lut_in_not_driver.lut_input_key
@@ -452,11 +458,11 @@ class LUTInputDriverLUTLoadTB(c_ds.SimTB):
                         # Not input
                         lut_conns[key] = "n_1_4"
                         # input
-                        lut_conns[key.replace("_n", "")] = "n_1_3"
+                        lut_conns[key.replace("_n", "")] = "n_3_1"
                         break
                 else:
                     if not "_n" in key:
-                        lut_conns[key] = "n_1_3"
+                        lut_conns[key] = "n_3_1"
                         break
         # Define the standard voltage sources for the simulation
         sram_stim_vsrc = c_ds.SpVoltageSrc(
@@ -493,7 +499,7 @@ class LUTInputDriverLUTLoadTB(c_ds.SimTB):
         ]
 
         # Init DUT
-        self.dut_ckt = self.lut
+        self.dut_ckt = self.lut_in_driver
 
         # # Check if this is a lut driver or lut not 
         # if self.not_flag:
@@ -511,7 +517,7 @@ class LUTInputDriverLUTLoadTB(c_ds.SimTB):
                 name = f"X{self.cb_mux.sp_name}_on",
                 subckt = subckt_lib[f"{self.cb_mux.sp_name}_on"],
                 conns = {
-                    "n_in": "n_in",
+                    "n_in": "n_in_gate",
                     "n_out": "n_1_1",
                     "n_gate": self.sram_vdd_node,
                     "n_gate_n": self.sram_vss_node,
@@ -539,7 +545,7 @@ class LUTInputDriverLUTLoadTB(c_ds.SimTB):
                 subckt = subckt_lib[self.lut_in_driver.sp_name], #TODO change to sp name
                 conns = {
                     "n_in": "n_1_2",
-                    "n_out": "n_1_3",
+                    "n_out": "n_3_1",
                     "n_gate": self.sram_vdd_node,
                     "n_gate_n": self.sram_vss_node,
                     "n_rsel": "n_rsel",
@@ -640,7 +646,6 @@ class LUTInputDriverLUTLoadTB(c_ds.SimTB):
             ]
 
     def generate_top(self) -> str:
-        dut_sp_name: str = self.dut_ckt.sp_name
         trig_node: str = "n_3_1"
         delay_names: List[str] = [
             "total"
@@ -653,13 +658,54 @@ class LUTInputDriverLUTLoadTB(c_ds.SimTB):
             ".MEASURE TRAN meas_current2 INTEGRAL I(V_LUT) FROM=9ns TO=11ns",
             ".MEASURE TRAN meas_avg_power PARAM = '-((meas_current1 + meas_current2)/4n)*supply_v'",
         ]
+
+        for i, meas_name in enumerate(delay_names):
+            for trans_state in ["rise", "fall"]:
+                trig_trans: bool = trans_state == "rise"
+                delay_idx: int = i
+                targ_node: str = targ_nodes[delay_idx]
+                inv_idx: int = i + 1 
+
+                # Rise and fall combo, based on how many inverters in the chain
+                # If its even we set both to rise or both to fall
+                if inv_idx % 2 == 0:
+                    rise_fall_combo: Tuple[bool] = (trig_trans, trig_trans)
+                else:
+                    rise_fall_combo: Tuple[bool] = (not trig_trans, trig_trans)
+
+                delay_bounds: Dict[str, c_ds.SpDelayBound] = {
+                    del_str: c_ds.SpDelayBound(
+                        probe = c_ds.SpNodeProbe(
+                            node = node,
+                            type = "voltage",
+                        ),
+                        eval_cond = self.delay_eval_cond,
+                        rise = rise_fall_combo[i],
+                    ) for (i, node), del_str in zip(enumerate([trig_node, targ_node]), ["trig", "targ"])
+                }
+                # Hacky way to set the num_trans for the fist trise meaure TODO clean up
+                if i == 0 and trans_state == "fall":
+                    delay_bounds["trig"].num_trans = 2
+                if i == 0 and trans_state == "rise":
+                    delay_bounds["trig"].rise = True
+                    delay_bounds["targ"].rise = True
+                # Create measurement object
+                measurement = c_ds.SpMeasure(
+                    value = c_ds.Value(
+                        name = f"{self.meas_val_prefix}_{meas_name}_t{trans_state}",
+                    ),
+                    trig = delay_bounds["trig"],
+                    targ = delay_bounds["targ"],
+                )
+                self.meas_points.append(measurement)
+
         # Base class generate top does all common functionality 
         return super().generate_top(
             delay_names = delay_names,
             trig_node = trig_node, 
             targ_nodes = targ_nodes,
             low_v_node = "n_out",
-            tb_fname = f"lut_load_id_{self.lut.id}_tb_{self.id}",
+            tb_fname = f"{self.lut_in_driver.sp_name}_with_lut_tb_{self.id}", # TODO reformat to a uniform naming convention
             pwr_meas_lines = cust_pwr_meas_lines,
         )
 
@@ -675,6 +721,9 @@ class LUTInputNotDriver(c_ds.SizeableCircuit):
     type: str = None # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
     delay_weight: float = None         # Delay weight in a representative critical path
     use_tgate: bool = None
+
+    def __hash__(self) -> int:
+        return super().__hash__()
 
     def __post_init__(self):
         self.name = f"lut_{self.lut_input_key}_driver_not"
@@ -746,6 +795,9 @@ class LUTInput(c_ds.CompoundCircuit):
     driver: LUTInputDriver = None
     not_driver: LUTInputNotDriver = None
     type: str = None # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
+
+    def __hash__(self) -> int:
+        return super().__hash__()
 
     def __post_init__(self):
         # super().__post_init__()
@@ -827,6 +879,9 @@ class LUTInputDriverLoad(c_ds.LoadCircuit):
     use_tgate: bool = None
     use_fluts: bool = None
 
+    def __hash__(self) -> int:
+        return super().__hash__()
+
     def __post_init__(self):
         # self.sp_name = f"lut_{self.name}_driver_load" 
         super().__post_init__()
@@ -901,7 +956,8 @@ class LUT(c_ds.SizeableCircuit):
     input_drivers: Dict[str, LUTInput] = field(default_factory=dict)
     input_driver_loads: Dict[str, LUTInputDriverLoad] = field(default_factory=dict)
     
-
+    def __hash__(self) -> int:
+        return super().__hash__()
 
     def __post_init__(self):
         # This should just set our sp_name and other common functionality to all sizeable circuits
@@ -980,13 +1036,13 @@ class LUT(c_ds.SizeableCircuit):
         """ Generate LUT SPICE netlist based on LUT size. """
         
         # Generate LUT differently based on K
-        tempK = self.K
+        tempK: int = self.K
 
         # *TODO: this - 1 should depend on the level of fracturability
         #        if the level is one a 6 lut will be two 5 luts if its
         #        a 6 lut will be four 4 input luts
         if self.use_fluts:
-            tempK = self.K - 1
+            tempK: int = self.K - 1
 
         if tempK == 6:
             init_tran_sizes = self._generate_6lut(subcircuit_filename, min_tran_width, self.use_tgate, self.use_finfet, self.use_fluts)
@@ -1546,8 +1602,10 @@ class LUTTB(c_ds.SimTB):
     dut_ckt: LUT = None
     local_out_node: str = None
     general_out_node: str = None
-    def __hash__(self):
+    
+    def __hash__(self) -> int:
         return super().__hash__()
+    
     def __post_init__(self, subckt_lib):
         super().__post_init__()
         self.meas_points = []
@@ -1566,7 +1624,7 @@ class LUTTB(c_ds.SimTB):
         if self.lut.use_tgate:
             lut_conns: Dict[str, str] = {
                 "n_in": "n_in",
-                "n_out": "n_1_1",
+                "n_out": "n_out",
                 "n_a": self.vdd_node,
                 "n_a_n": self.gnd_node,
                 "n_b": self.vdd_node,
@@ -1585,7 +1643,7 @@ class LUTTB(c_ds.SimTB):
         else:
             lut_conns: Dict[str, str] = {
                 "n_in": "n_in",
-                "n_out": "n_1_1",
+                "n_out": "n_out",
                 "n_a": self.vdd_node,
                 "n_a_n": self.gnd_node,
                 "n_b": self.vdd_node,
@@ -1606,7 +1664,7 @@ class LUTTB(c_ds.SimTB):
                 name = f"X{self.lut_output_load.sp_name}",
                 subckt = subckt_lib[self.lut_output_load.sp_name],
                 conns = {
-                    "n_in": "n_1_1",
+                    "n_in": "n_out",
                     "n_local_out": self.local_out_node,
                     "n_general_out": self.general_out_node,
                     "n_gate": self.sram_vdd_node,
@@ -1629,27 +1687,31 @@ class LUTTB(c_ds.SimTB):
             ],
             [] # You need to pass in an empty list to init function, if you don't weird things will happen (like getting previous results from other function calls)
         )
+
+        # K basically reduced by 1 if we use a fracturable LUT
+        tempK: int = self.dut_ckt.K
+        if self.dut_ckt.use_fluts:
+            tempK -= 1
+
         sram_drv_1_out_node: str = ".".join(
             [inst.name for inst in lut_path] + ["n_1_1"]
         )
         sram_drv_2_out_node: str = ".".join(
             [inst.name for inst in lut_path] + ["n_2_1"]
         )
-        node_str: str = "n_5_1" if self.dut_ckt.K == 4 else "n_6_1"
+        node_str: str = "n_5_1" if tempK == 4 else "n_6_1"
         lut_int_buff_1_out_node: str = ".".join(
             [inst.name for inst in lut_path] + [node_str]
         )
-        node_str: str = "n_6_1" if self.dut_ckt.K == 4 else "n_7_1"
+        node_str: str = "n_6_1" if tempK == 4 else "n_7_1"
         lut_int_buff_2_out_node: str = ".".join(
             [inst.name for inst in lut_path] + [node_str]
         )
-        node_str: str = "n_9_1" if self.dut_ckt.K == 4 else "n_11_1"
+        node_str: str = "n_9_1" if tempK == 4 else "n_11_1"
         lut_out_buff_1_out_node: str = ".".join(
             [inst.name for inst in lut_path] + [node_str]
         )
-        lut_out_buff_2_out_node: str = ".".join(
-            [inst.name for inst in lut_path] + ["n_out"]
-        )
+        lut_out_buff_2_out_node: str = "n_out"
 
         delay_names: str = [
             f"inv_{dut_sp_name}_sram_driver_1",
@@ -1671,7 +1733,8 @@ class LUTTB(c_ds.SimTB):
             "n_out",
         ]
 
-        if self.dut_ckt.K == 6:
+
+        if tempK == 6:
             add_nodes: List[str] = [
                 "n_3_1",
                 "n_4_1",
@@ -1686,8 +1749,8 @@ class LUTTB(c_ds.SimTB):
             delay_names += [
                 f"info_{dut_sp_name}_node_{i+1}" for i in range(len(add_nodes))
             ]
-            trig_node: str = "n_in"
-            low_v_node: str = "n_out"
+        trig_node: str = "n_in"
+        low_v_node: str = "n_out"
         
         return super().generate_top(
             delay_names = delay_names,

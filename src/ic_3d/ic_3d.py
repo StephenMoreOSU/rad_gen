@@ -569,35 +569,56 @@ def run_pdn_modeling(ic_3d_info: rg_ds.Ic3d):
 
 
 def run_spice_debug(spProcess: rg_ds.SpProcess) -> Tuple[pd.DataFrame, dict, Dict[str, List[Dict[int, float]]] ]:
+    """
+        From input spProcess, runs the spice simulation and returns the parsed results and plot if possible
+    """
     res = rg_ds.Regexes()
     sp_sim_settings = rg_ds.SpGlobalSimSettings()
     
     buff_dse.run_spice(sp_process = spProcess)
-    parse_flags = {
-        "plot": True,
-        "measure": True,
-        "gen_params": True,
-    }
-    plot_df, measurements, _, gen_params = buff_dse.parse_spice(res, spProcess, parse_flags)
-    # Unit conversion
-    plot_df["time"] = buff_dse.unit_conversion(sp_sim_settings.unit_lookup_factors["time"], plot_df["time"], sp_sim_settings.abs_unit_lookups )
-    for key in plot_df.columns[1:]:
-        plot_df[key] = buff_dse.unit_conversion(sp_sim_settings.unit_lookup_factors["voltage"], plot_df[key], sp_sim_settings.abs_unit_lookups )
-    
-    fig = go.Figure()
+    try:
+        parse_flags = {
+            "plot": True,
+            "measure": True,
+            "gen_params": True,
+        }
+        plot_df, measurements, _, gen_params = buff_dse.parse_spice(res, spProcess, parse_flags)
+        # Unit conversion
+        plot_df["time"] = buff_dse.unit_conversion(sp_sim_settings.unit_lookup_factors["time"], plot_df["time"], sp_sim_settings.abs_unit_lookups )
+        for key in plot_df.columns[1:]:
+            plot_df[key] = buff_dse.unit_conversion(sp_sim_settings.unit_lookup_factors["voltage"], plot_df[key], sp_sim_settings.abs_unit_lookups )
 
-    # Add traces for each element being plotted
-    for col in plot_df.columns:
-        if col != "time":
-            fig.add_trace(go.Scatter(x=plot_df["time"], y=plot_df[col], name=col))
+        fig = go.Figure()
 
-    # This will be invalid if the user wants to look at something other than voltage
-    fig.update_layout(
-        title=f"Spice {spProcess.title} Waveforms @ {spProcess.sp_file}",
-        xaxis_title=f"Time (s)", # ({sp_sim_settings.unit_lookup_factors['time']}s)", 
-        yaxis_title=f"Voltage (V)", #({sp_sim_settings.unit_lookup_factors['voltage']}V)",
-    )
-    fig.show()
+        # Add traces for each element being plotted
+        for col in plot_df.columns:
+            if col != "time":
+                fig.add_trace(go.Scatter(x=plot_df["time"], y=plot_df[col], name=col))
+
+        for meas in measurements:
+            if meas.get('trig'):
+                fig.add_vline(x=meas['trig'], line_dash="dash", line_color="green")
+            if meas.get('targ'):
+                fig.add_vline(x=meas['targ'], line_dash="dash", line_color="red")
+
+
+        # This will be invalid if the user wants to look at something other than voltage
+        fig.update_layout(
+            title=f"Spice {spProcess.title} Waveforms @ {spProcess.sp_file}",
+            xaxis_title=f"Time (s)", # ({sp_sim_settings.unit_lookup_factors['time']}s)", 
+            yaxis_title=f"Voltage (V)", #({sp_sim_settings.unit_lookup_factors['voltage']}V)",
+        )
+        fig.show()
+
+    except:
+        parse_flags = {
+            "plot": False,
+            "measure": True,
+            "gen_params": True,
+        }
+        plot_df, measurements, _, gen_params = buff_dse.parse_spice(res, spProcess, parse_flags)
+
+
     # assuming all measurements are delays we can convert to ps
     meas_df = pd.DataFrame(measurements)
     for l in rg_utils.get_df_output_lines(meas_df):

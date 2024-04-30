@@ -30,6 +30,9 @@ class CarryChainMux(mux.Mux2to1):
     use_fluts: bool = False
     use_tgate: bool = False
     
+    def __hash__(self) -> int:
+        return super().__hash__()
+
     # assert use_fluts
     def generate(self, subckt_lib_fpath: str) -> Dict[str, int | float]:
         # Call Parent Mux generate, does correct generation but has incorrect initial tx sizes
@@ -85,8 +88,9 @@ class CarryChainMuxTB(c_ds.SimTB):
     # Initialized in __post_init__
     dut_ckt: CarryChainMux = None
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return super().__hash__()
+    
     def __post_init__(self, subckt_lib):
         super().__post_init__()
         self.meas_points = []
@@ -211,7 +215,7 @@ class CarryChainMuxTB(c_ds.SimTB):
         ]
     def generate_top(self):
         dut_sp_name: str = self.dut_ckt.name # TODO update to sp_name
-        trig_node: str = "n_3_1"
+        trig_node: str = "n_1_4"
         delay_names: List[str] = [
             f"inv_{dut_sp_name}_1",
             f"inv_{dut_sp_name}_2",
@@ -252,6 +256,9 @@ class CarryChainPer(c_ds.SizeableCircuit):
     use_finfet: bool = None
     use_tgate: bool = None
 
+    def __hash__(self) -> int:
+        return super().__hash__()
+
     def generate(self, subcircuit_filename: str) -> Dict[str, int | float]:
         """ Generate the SPICE netlists."""  
 
@@ -290,7 +297,7 @@ class CarryChainPerTB(c_ds.SimTB):
     # Initialized in __post_init__
     dut_ckt: CarryChain = None
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return super().__hash__()
 
     def __post_init__(self, subckt_lib):
@@ -306,8 +313,8 @@ class CarryChainPerTB(c_ds.SimTB):
             name = "IN",
             out_node = "n_in",
             type = "PULSE",
-            init_volt = c_ds.Value(name = self.supply_v_param),
-            peak_volt = c_ds.Value(0), # V
+            init_volt = c_ds.Value(0),
+            peak_volt = c_ds.Value(name = self.supply_v_param), # V
             pulse_width = c_ds.Value(2), # ns
             period = c_ds.Value(4), # ns
         )
@@ -368,7 +375,7 @@ class CarryChainPerTB(c_ds.SimTB):
                 subckt = subckt_lib[self.carry_chain_periph.sp_name], 
                 conns = {
                     "n_in": "n_1_3",
-                    "n_out": "n_1_4",
+                    "n_out": "n_out",
                     "n_vdd": pwr_v_node,
                     "n_gnd": self.gnd_node,
                 }
@@ -378,8 +385,8 @@ class CarryChainPerTB(c_ds.SimTB):
                 name = f"X{self.carry_chain_mux.sp_name}", 
                 subckt = subckt_lib[self.carry_chain_mux.sp_name], 
                 conns = {
-                    "n_in": "n_1_4",
-                    "n_out": "n_1_5",
+                    "n_in": "n_out",
+                    "n_out": "n_out_2",
                     "n_gate": self.vdd_node,
                     "n_gate_n": self.gnd_node,
                     "n_vdd": pwr_v_node,
@@ -398,12 +405,14 @@ class CarryChainPerTB(c_ds.SimTB):
             "n_out",
             "n_out",
         ]
+        meas_inv_list: List[bool] = [False] * len(delay_names)
         # Base class generate top does all common functionality 
         return super().generate_top(
             delay_names = delay_names,
             trig_node = trig_node, 
             targ_nodes = targ_nodes,
             low_v_node = self.gnd_node, # TODO figure out why tf we are measuring the low value of gnd...
+            meas_inv_list = meas_inv_list,
         )
 
 
@@ -422,6 +431,9 @@ class CarryChain(c_ds.SizeableCircuit):
 
     # Circuit Dependancies
     carry_chain_periph: CarryChainPer = None
+
+    def __hash__(self) -> int:
+        return super().__hash__()
 
     def generate(self, subcircuit_filename: str) -> Dict[str, int | float]:
         """ Generate Carry chain SPICE netlists."""  
@@ -467,6 +479,7 @@ class CarryChain(c_ds.SizeableCircuit):
         wire_layers["wire_" + self.sp_name + "_1"] = consts.LOCAL_WIRE_LAYER
         wire_lengths["wire_" + self.sp_name + "_2"] = width_dict[self.sp_name] # Wire for input B
         wire_layers["wire_" + self.sp_name + "_2"] = consts.LOCAL_WIRE_LAYER
+        # TODO update below "local_cluster" call to the width dict for multi ckt support
         if self.FAs_per_flut == 1:
             wire_lengths["wire_" + self.sp_name + "_3"] = width_dict["logic_cluster"]/(2 * self.cluster_size) # Wire for input Cin
         else:
@@ -492,8 +505,9 @@ class CarryChainTB(c_ds.SimTB):
     # Initialized in __post_init__
     dut_ckt: CarryChain = None
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return super().__hash__()
+    
     def __post_init__(self, subckt_lib):
         super().__post_init__()
         self.meas_points = []
@@ -594,7 +608,7 @@ class CarryChainTB(c_ds.SimTB):
         ]
     def generate_top(self):
         dut_sp_name: str = self.dut_ckt.sp_name # TODO update to sp_name
-        trig_node: str = "n_3_1"
+        trig_node: str = "n_1_1"
         delay_names: List[str] = [
             f"inv_{dut_sp_name}_1",
             f"inv_{dut_sp_name}_2",
@@ -605,7 +619,7 @@ class CarryChainTB(c_ds.SimTB):
             self.top_insts, 
             [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
                 for re_str in [
-                    r"carry_chain_dut",
+                    r"carry_chain_(?:.*)dut",
                 ]
             ],
             []
@@ -615,6 +629,7 @@ class CarryChainTB(c_ds.SimTB):
             "n_sum_out",
             "n_1_2",
         ]
+        meas_inv_list: List[bool] = [True] + [False] * (len(delay_names)-1)
         cust_pwr_meas_lines: List[str] = [
             f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.",
             f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
@@ -627,6 +642,7 @@ class CarryChainTB(c_ds.SimTB):
             targ_nodes = targ_nodes,
             low_v_node = "gnd", # TODO figure out why tf we are measuring the low value of gnd...
             pwr_meas_lines = cust_pwr_meas_lines,
+            meas_inv_list = meas_inv_list,
         )
 
 @dataclass
@@ -644,6 +660,9 @@ class CarryChainSkipAnd(c_ds.SizeableCircuit):
     cluster_size: int = None
     nand1_size: int = None
     nand2_size: int = None
+
+    def __hash__(self) -> int:
+        return super().__hash__()
 
     def __post_init__(self):
         super().__post_init__()
@@ -669,21 +688,22 @@ class CarryChainSkipAnd(c_ds.SizeableCircuit):
 
         self.transistor_names, self.wire_names = lut_subcircuits.generate_skip_and_tree(subcircuit_filename, self.sp_name, self.use_finfet, self.nand1_size, self.nand2_size)
 
-        self.initial_transistor_sizes["inv_nand"+str(self.nand1_size)+"_xcarry_chain_and_1_nmos"] = 1
-        self.initial_transistor_sizes["inv_nand"+str(self.nand1_size)+"_xcarry_chain_and_1_pmos"] = 1
-        self.initial_transistor_sizes["inv_xcarry_chain_and_2_nmos"] = 1
-        self.initial_transistor_sizes["inv_xcarry_chain_and_2_pmos"] = 1
-        self.initial_transistor_sizes["inv_nand"+str(self.nand2_size)+"_xcarry_chain_and_3_nmos"] = 1
-        self.initial_transistor_sizes["inv_nand"+str(self.nand2_size)+"_xcarry_chain_and_3_pmos"] = 1
-        self.initial_transistor_sizes["inv_xcarry_chain_and_4_nmos"] = 1
-        self.initial_transistor_sizes["inv_xcarry_chain_and_4_pmos"] = 1
+
+        self.initial_transistor_sizes["inv_nand"+str(self.nand1_size)+f"_{self.sp_name}_1_nmos"] = 1
+        self.initial_transistor_sizes["inv_nand"+str(self.nand1_size)+f"_{self.sp_name}_1_pmos"] = 1
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_2_nmos"] = 1
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_2_pmos"] = 1
+        self.initial_transistor_sizes["inv_nand"+str(self.nand2_size)+f"_{self.sp_name}_3_nmos"] = 1
+        self.initial_transistor_sizes["inv_nand"+str(self.nand2_size)+f"_{self.sp_name}_3_pmos"] = 1
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_4_nmos"] = 1
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_4_pmos"] = 1
 
         return self.initial_transistor_sizes
 
     def update_area(self, area_dict, width_dict):
         """ Calculate Carry Chain area and update dictionaries. """
-        area_1 = (area_dict["inv_nand"+str(self.nand1_size)+"_xcarry_chain_and_1"] + area_dict["inv_xcarry_chain_and_2"])* int(math.ceil(float(int(self.skip_size/self.nand1_size))))
-        area_2 = area_dict["inv_nand"+str(self.nand2_size)+"_xcarry_chain_and_3"] + area_dict["inv_xcarry_chain_and_4"]
+        area_1 = (area_dict["inv_nand"+str(self.nand1_size)+f"_{self.sp_name}_1"] + area_dict[f"inv_{self.sp_name}_2"])* int(math.ceil(float(int(self.skip_size/self.nand1_size))))
+        area_2 = area_dict["inv_nand"+str(self.nand2_size)+f"_{self.sp_name}_3"] + area_dict[f"inv_{self.sp_name}_4"]
         area = area_1 + area_2
         area_with_sram = area
         width = math.sqrt(area)
@@ -716,8 +736,10 @@ class CarryChainSkipAndTB(c_ds.SimTB):
     
     # Initialized in __post_init__
     dut_ckt: CarryChainSkipAnd = None
-    def __hash__(self):
+    
+    def __hash__(self) -> int:
         return super().__hash__()
+    
     def __post_init__(self, subckt_lib):
         super().__post_init__()
         self.meas_points = []
@@ -808,7 +830,7 @@ class CarryChainSkipAndTB(c_ds.SimTB):
             ),
             # Carry Chain Skip Mux
             rg_ds.SpSubCktInst(
-                name = f"X{self.carry_chain_skip_mux.sp_name[1:]}", 
+                name = f"X{self.carry_chain_skip_mux.sp_name}", 
                 subckt = subckt_lib[self.carry_chain_skip_mux.sp_name], 
                 conns = {
                     "n_in": "n_1_3",
@@ -835,7 +857,7 @@ class CarryChainSkipAndTB(c_ds.SimTB):
         ]
     def generate_top(self):
         dut_sp_name: str = self.dut_ckt.name # TODO update to sp_name
-        trig_node: str = "n_2_1"
+        trig_node: str = "n_1_2"
         delay_names: List[str] = [
             f"inv_nand_{self.carry_chain_and.nand1_size}_{self.carry_chain_and.sp_name}_1",
             f"inv_nand_{self.carry_chain_and.nand1_size}_{self.carry_chain_and.sp_name}_2",
@@ -887,6 +909,9 @@ class CarryChainInterCluster(c_ds.SizeableCircuit):
     carry_chain_type: str = None # Ripple or skip?
     inter_wire_length: float = None # Length of wire between Cout of a cluster and Cin of the next cluster
 
+    def __hash__(self) -> int:
+        return super().__hash__()
+
     def generate(self, subcircuit_filename: str) -> Dict[str, int | float]:
         """ Generate Carry chain SPICE netlists."""  
 
@@ -925,8 +950,10 @@ class CarryChainInterClusterTB(c_ds.SimTB):
     
     # Initialized in __post_init__
     dut_ckt: CarryChainSkipAnd = None
-    def __hash__(self):
-        return super().__hash__()    
+    
+    def __hash__(self) -> int:
+        return super().__hash__() 
+    
     def __post_init__(self, subckt_lib):
         super().__post_init__()
         self.meas_points = []
@@ -1055,6 +1082,9 @@ class CarryChainSkipMux(mux.Mux2to1):
 
     carry_chain_type: str = None # Ripple or skip?
 
+    def __hash__(self) -> int:
+        return super().__hash__()
+
     def update_wires(self, width_dict: Dict[str, int], wire_lengths: Dict[str, float], wire_layers: Dict[str, int]):
         """ Update the wires of the mux. """
         # Update the wires of the mux
@@ -1073,8 +1103,10 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
     
     # Initialized in __post_init__
     dut_ckt: CarryChainSkipAnd = None
-    def __hash__(self):
-        return super().__hash__()    
+    
+    def __hash__(self) -> int:
+        return super().__hash__()
+      
     def __post_init__(self, subckt_lib):
         super().__post_init__()
         self.meas_points = []
@@ -1123,12 +1155,12 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
         )
         # DUT DC Voltage Source
         self.dut_dc_vsrc = c_ds.SpVoltageSrc(
-            name = "_CC_AND",
+            name = "_CC_SKIP_MUX",
             out_node = self.pwr_v_node,
             init_volt = c_ds.Value(name = self.supply_v_param),
         )
         # Init DUT
-        self.dut_ckt = self.carry_chain_and
+        self.dut_ckt = self.carry_chain_skip_mux
 
         self.top_insts = [
             # LUT
@@ -1159,7 +1191,7 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
                 conns = {
                     "n_in": "n_1_2",
                     "n_out": "n_1_3",
-                    "n_vdd": self.pwr_v_node,
+                    "n_vdd": self.vdd_node,
                     "n_gnd": self.gnd_node,
                 }
             ),
@@ -1172,7 +1204,7 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
                     "n_out": "n_1_4",
                     "n_gate": self.vdd_node,
                     "n_gate_n": self.gnd_node,
-                    "n_vdd": self.vdd_node,
+                    "n_vdd": self.pwr_v_node,
                     "n_gnd": self.gnd_node,
                 }
             ),
@@ -1190,6 +1222,7 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
                 }
             ),
         ]
+
     def generate_top(self):
         dut_sp_name: str = self.dut_ckt.name # TODO update to sp_name
         trig_node: str = "n_1_3"
@@ -1203,7 +1236,7 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
             self.top_insts, 
             [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
                 for re_str in [
-                    r"carry_chain_skip_mux(?:.*)_dut",
+                    r"carry_chain_mux_(?:.*)_dut",
                 ]
             ],
             []
@@ -1213,11 +1246,11 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
             "n_1_4",
             "n_1_4",
         ]
-        cust_pwr_meas_lines: List[str] = [
-            f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.",
-            f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
-            f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",
-        ]
+        # cust_pwr_meas_lines: List[str] = [
+        #     f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.",
+        #     f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
+        #     f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",
+        # ]
         tb_fname: str = f"{dut_sp_name}_tb_{self.id}"
         # Base class generate top does all common functionality 
         return super().generate_top(
@@ -1225,6 +1258,6 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
             trig_node = trig_node, 
             targ_nodes = targ_nodes,
             low_v_node = "n_general_out", # TODO figure out why tf we measure voltage of a floating node...
-            pwr_meas_lines = cust_pwr_meas_lines,
+            # pwr_meas_lines = cust_pwr_meas_lines,
             tb_fname = tb_fname,
         )

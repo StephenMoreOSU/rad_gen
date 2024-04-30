@@ -3,7 +3,7 @@ import sys
 import re
 
 
-from typing import List, Dict, Any, Tuple, Union
+from typing import List, Dict, Any, Tuple, Union, Set
 import src.common.data_structs as rg_ds
 import re
 
@@ -12,6 +12,34 @@ import argparse
 from dataclasses import dataclass
 
 
+
+def mod_sp_tb(sp_tb_fpath: str):
+    """
+        Modifies an exising spice testbench to support being parsed and plotted in radgen ecosystem
+    """
+    with open(sp_tb_fpath, "r") as f:
+        sp_tb_text = f.read()
+    
+    grab_targ_trig_probes: re.Pattern = re.compile(
+        r"(?<=(?:trig|targ)\s)\S+(?=\s)"
+        , re.IGNORECASE | re.MULTILINE
+    )
+    targ_trig_probes: List[str] = grab_targ_trig_probes.findall(sp_tb_text)
+    probe_set: Set[str] = set()
+    for probe in targ_trig_probes:
+        probe_set.add(probe)
+    
+    sp_print_line: str = ".PRINT " + " ".join(probe_set)
+
+    # Edit the tb file to insert print statements on found probes
+    if ".PRINT" not in sp_tb_text:
+        sp_tb_text = sp_tb_text.replace(".END", f"{sp_print_line}\n.END")
+    if "POST=1 INGOLD=1 NODE=1 LIST=1" not in sp_tb_text:
+        sp_tb_text = sp_tb_text.replace(".OPTIONS BRIEF=1", f".OPTIONS BRIEF=1 POST=1 INGOLD=1 NODE=1 LIST=1")
+    with open(sp_tb_fpath, "w") as f:
+        f.write(sp_tb_text)
+        
+        
 
 def rec_find_inst(search_insts: List[rg_ds.SpSubCktInst], name_res: List[re.Pattern], found_insts: List[rg_ds.SpSubCktInst] = []):
     # The recursive function keeps traversing down insts tree until it finds the inst that matches names at [0],
@@ -155,8 +183,9 @@ def parse_cli_args(argv: List[str] = []):
     parser.add_argument("-i","--input_sp_files", nargs="*", type=str, help="Paths to input spice files")
     parser.add_argument("-d", "--dut_subckt_name", type=str, help="Name of the DUT subckt", default= None)
     parser.add_argument("-p", "--param_substr", type=str, help="Search for heirarchy of subckts containing this a parameter value with this substr", default= None)
-    parser.add_argument("-s", "--get_structs", action='store_true', help="Returns a dictionary of parsed spice subckts")
+    # parser.add_argument("-s", "--input_tb_sp_files", nargs="*", type=str, help="Paths to input spice testbench files, will look in these ")
     
+
     in_args = argv if argv else sys.argv[1:]
 
     return parser.parse_args(args = in_args)                        
@@ -184,7 +213,6 @@ subckt_hdr_parse_re: re.Pattern = re.compile("\.SUBCKT\s+" + \
     "((?:\w+=(?:\d+|\w+)\s*)+)?",
     re.IGNORECASE | re.MULTILINE
 )
-
 wspace_re: re.Pattern = re.compile(r"\s+")
 
 
@@ -270,7 +298,7 @@ def red_print(in_str: str):
 #   * "\n" at end of SUBCKT & ports definition
 #   * parameters are defined without spaces after "=" delim unless moving onto next parameter
 #       * Ex. "param1=1 param2=2" is valid, "param1= 1 param2=2" is not valid
-def main(argv: List[str] = [], kwargs: Dict[str, str] = {}):
+def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, rg_ds.SpSubCkt]:
     args = parse_cli_args(argv)
     spice_fpaths = [ os.path.abspath(os.path.expanduser(fpath)) for fpath in args.input_sp_files ]
     # start with just atomic libs
@@ -309,11 +337,31 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}):
                     
                     # Header parsing
                     subckt_lines: list = subckt_text.split("\n") # split up subckt into lines ()
-                    header_grps: re.Match = subckt_hdr_parse_re.search(subckt_lines[0]) # Take line at index 0 header definition
-                    # [0] is the whole match, [1] is first cap grp, etc ...
-                    subckt_name: str = header_grps[1]
-                    subckt_io_ports: list[str] = wspace_re.split(header_grps[2])
-                    subckt_params: list[str] = wspace_re.split(header_grps[3].strip()) if header_grps[3] else None
+                    ## header_grps: re.Match = subckt_hdr_parse_re.search(subckt_lines[0]) # Take line at index 0 header definition
+                    ## # [0] is the whole match, [1] is first cap grp, etc ...
+                    ## subckt_name: str = header_grps[1]
+                    ## subckt_io_ports: list[str] = wspace_re.split(header_grps[2])
+                    ## subckt_params: list[str] = wspace_re.split(header_grps[3].strip()) if header_grps[3] else None
+                    
+                    # If parameter in header we parse differently
+                    if param_delim in subckt_lines[0]:
+                        line_front, line_back = first_occur_param_delim_re.split(subckt_lines[0], maxsplit=1)
+                        front_words: list = wspace_re.split(line_front)
+                        first_param_name: str = front_words.pop(-1)
+                        subckt_params: List[str] = wspace_re.split(
+                            f"{first_param_name}{param_delim}{line_back}".strip()
+                        )
+                        subckt_name: str = front_words[1]
+                        subckt_io_ports: List[str] = front_words[2:]
+                    else:
+                        # If not we can just use a simpler regex, was supposed to handle params but is broke could fix later
+                        header_grps: re.Match = subckt_hdr_parse_re.search(subckt_lines[0]) # Take line at index 0 header definition
+                        # [0] is the whole match, [1] is first cap grp, etc ...
+                        subckt_name: str = header_grps[1]
+                        subckt_io_ports: list[str] = wspace_re.split(header_grps[2])
+                        subckt_params = None
+                    
+
 
                     subkt_insts: list = []
                     # Instantiation Parsing

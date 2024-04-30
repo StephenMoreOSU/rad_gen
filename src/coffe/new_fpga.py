@@ -25,7 +25,7 @@ import src.coffe.load_subcircuits as load_subcircuits
 import src.coffe.memory_subcircuits as memory_subcircuits
 import src.coffe.utils as utils
 import src.coffe.cost as cost
-
+import src.coffe.constants as consts
 # from src.coffe.circuit_baseclasses import _SizableCircuit, _CompoundCircuit
 
 # Top level file generation module
@@ -53,7 +53,7 @@ import src.coffe.new_cb_mux as cb_mux_lib
 import src.coffe.new_lut as lut_lib
 import src.coffe.new_ble as ble_lib
 import src.coffe.new_logic_block as lb_lib
-import src.coffe.new_carry_chain as carry_chain_lib
+import src.coffe.new_carry_chain as cc_lib
 import src.coffe.ram as ram_lib
 import src.coffe.hardblock as hb_lib
 import src.coffe.constants as constants
@@ -206,21 +206,24 @@ def sim_tbs(
         Runs HSPICE on all testbenches in the list with the corresponding parameter dict
         Returns a dict hashed by each testbench with its corresponding results (delay, power)
     """
+    valid_delay: bool = True
     sp_out_meas = { 
-        "trise": 0,
-        "tfall": 0,
-        "delay": 0,
-        "power": 0,
+        "trise": None,
+        "tfall": None,
+        "delay": None,
+        "power": None,    
+        "valid": None,  # If the simulation was successful
     }
-    tb_meas: Dict[Type[c_ds.SimTB], Dict[str, float]] = defaultdict(lambda: sp_out_meas)
+    tb_meas: Dict[Type[c_ds.SimTB], Dict[str, float]] = defaultdict(lambda: copy.deepcopy(sp_out_meas))
     for tb in tbs:
         print(f"Updating delay for {tb.dut_ckt.sp_name} with TB {tb.tb_fname.strip('.sp')}")
         spice_meas = sp_interface.run(tb.sp_fpath, parameter_dict)
-        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+        if  spice_meas["meas_total_tfall"][0] == "failed" \
+                or spice_meas["meas_total_trise"][0] == "failed":
             valid_delay = False
             tfall = 1
             trise = 1
-        else :  
+        else:  
             tfall = float(spice_meas["meas_total_tfall"][0])
             trise = float(spice_meas["meas_total_trise"][0])
         if tfall < 0 or trise < 0:
@@ -229,7 +232,80 @@ def sim_tbs(
         tb_meas[tb]["tfall"] = tfall
         tb_meas[tb]["delay"] = max(tfall, trise)
         tb_meas[tb]["power"] = float(spice_meas["meas_avg_power"][0])
+        tb_meas[tb]["valid"] = valid_delay
     return tb_meas
+
+def set_ckt_meas(
+    delay_dict: Dict[str, float], 
+    in_tb_meas: Dict[
+        Type[c_ds.SimTB],
+        Dict[str, float],
+    ], 
+    set_flag: bool = True,
+    # merge_fn: Callable[[
+    #     Dict[
+    #             Type[c_ds.SimTB], Dict[str, float | bool]
+    #         ]
+    #     ], Dict[str, float]
+    # ],
+) -> Tuple[
+        float, 
+        Dict[ Type[c_ds.SizeableCircuit], Dict[str, float | bool]]
+]:
+    """
+        Takes result dictionary which is hashed by testbenches,
+            merges delays and power for each unique circuit to set them
+            merge function is specific to a testbench / subckt combo
+    """
+    # Calculate the portion of the critical path this circuit should contribute
+    repr_crit_path_delay: float = 0
+    # Find all unique circuits in testbenches
+    unique_ckts: Set[Type[c_ds.SizeableCircuit]] = set([tb.dut_ckt for tb in in_tb_meas.keys()])
+    merged_meas: Dict[Type[c_ds.SizeableCircuit] , Dict[str, float | bool]] = {}
+    # Iterate through results for these circuits across different TB environments and set the circuit delay + power
+    for ckt in unique_ckts:
+        # Get all the testbenches that have this circuit
+        tb_meas: Dict[Type[c_ds.SimTB], Dict[str, float | bool]] = {
+            tb: meas for tb, meas in in_tb_meas.items() if tb.dut_ckt == ckt
+        }
+        # Merge & Set the measurements for the circuit
+        # merge_fn(tb_meas) # The other unique ckts may or may not be needed depending on the merge fn
+        tfall: float = 0
+        trise: float = 0
+        delay: float = 0
+        pwr: float = 0
+        for tb in tb_meas.keys():
+            # We use a delay weight factor (required from user) to weight the delay of the subckt in this particular tb environment
+            # TODO initialize delay_weights somewhere
+            tfall += tb_meas[tb]["tfall"] / len(tb_meas.keys())
+            trise += tb_meas[tb]["trise"] / len(tb_meas.keys())
+            pwr += tb_meas[tb]["power"] * tb.power_weight # This may be unecessary TODO figure out
+        
+        delay = max(tfall, trise)
+        # Set the measurements for the circuit
+        if set_flag:
+            ckt.trise = trise
+            ckt.tfall = tfall
+            ckt.delay = delay
+            ckt.power = pwr
+        
+            delay_dict[ckt.sp_name] = delay
+        
+        # Return the merged TB measurements into a dict hashed by subckt objects
+        merged_meas[ckt] = {
+            "trise": trise,
+            "tfall": tfall,
+            "delay": delay,
+            "power": pwr,
+            "valid": all([tb_meas[tb]["valid"] for tb in tb_meas.keys()]) # TODO make sure its fine to invalidate other TB envs if one is invalid
+        }
+
+        # Now we account for the weight of a particular circuit in the repr crit path calculation
+        # If this weight is calculated specific to like SBs rather than L4 SBs we would want to divide it by the number of ckts to keep it fair
+        # TODO change the / len(unique_ckts) if we want to set all weights according to thier instance (SB Mux L4, L16... )
+        repr_crit_path_delay += (delay * ckt.delay_weight / len(unique_ckts) )
+    return repr_crit_path_delay, merged_meas
+
 
 
 @dataclass
@@ -334,31 +410,31 @@ class FPGA:
         default_factory=lambda: defaultdict(list)
     )
     # Lut Input Driver LUT Load TBs
-    lut_in_driver_lut_load_tbs: Dict[str, List[lut_lib.LUTInputDriverLUTLoadTB]] = field(
+    lut_input_tbs: Dict[str, List[lut_lib.LUTInputTB]] = field(
         default_factory=lambda: defaultdict(list)
     )
     # Carry Chain Mux TBs
-    carry_chain_mux_tbs: List[carry_chain_lib.CarryChainMuxTB] = field(
+    carry_chain_mux_tbs: List[cc_lib.CarryChainMuxTB] = field(
         default_factory=lambda: []
     )
     # Carry Chain Peripherial TBs
-    carry_chain_per_tbs: List[carry_chain_lib.CarryChainPerTB] = field(
+    carry_chain_per_tbs: List[cc_lib.CarryChainPerTB] = field(
         default_factory=lambda: []
     )
     # Carry Chain TBs
-    carry_chain_tbs: List[carry_chain_lib.CarryChainTB] = field(
+    carry_chain_tbs: List[cc_lib.CarryChainTB] = field(
         default_factory=lambda: []
     )
     # Carry Chain Mux Skip TBs
-    carry_chain_skip_and_tbs: List[carry_chain_lib.CarryChainSkipAndTB] = field(
+    carry_chain_skip_and_tbs: List[cc_lib.CarryChainSkipAndTB] = field(
         default_factory=lambda: []
     )
     # Carry Chain Inter Cluster TBs
-    carry_chain_inter_tbs: List[carry_chain_lib.CarryChainInterClusterTB] = field(
+    carry_chain_inter_tbs: List[cc_lib.CarryChainInterClusterTB] = field(
         default_factory=lambda: []
     )
     # Carry Chain Skip Mux TBs
-    carry_chain_skip_mux_tbs: List[carry_chain_lib.CarryChainSkipMuxTB] = field(
+    carry_chain_skip_mux_tbs: List[cc_lib.CarryChainSkipMuxTB] = field(
         default_factory=lambda: []
     )
 
@@ -409,6 +485,7 @@ class FPGA:
     luts: List[lut_lib.LUT] = None
 
     # LUT Input Drivers
+    lut_inputs: Dict[str, List[lut_lib.LUTInput]] = None
     lut_input_driver: Dict[str, c_ds.Block] = None
     lut_input_drivers: Dict[str, List[lut_lib.LUTInputDriver]] = None
     lut_input_not_driver: Dict[str, c_ds.Block] = None
@@ -416,12 +493,12 @@ class FPGA:
     lut_input_driver_loads: Dict[str, List[lut_lib.LUTInputDriverLoad]] = None
 
     # Carry Chain Circuits
-    carry_chains: List[carry_chain_lib.CarryChain] = None
-    carry_chain_periphs: List[carry_chain_lib.CarryChainPer] = None               
-    carry_chain_muxes: List[carry_chain_lib.CarryChainMux] = None
-    carry_chain_inter_clusters: List[carry_chain_lib.CarryChainInterCluster] = None
-    carry_chain_skip_ands: List[carry_chain_lib.CarryChainSkipAnd] = None
-    carry_chain_skip_muxes: List[carry_chain_lib.CarryChainSkipMux] = None
+    carry_chains: List[cc_lib.CarryChain] = None
+    carry_chain_periphs: List[cc_lib.CarryChainPer] = None               
+    carry_chain_muxes: List[cc_lib.CarryChainMux] = None
+    carry_chain_inter_clusters: List[cc_lib.CarryChainInterCluster] = None
+    carry_chain_skip_ands: List[cc_lib.CarryChainSkipAnd] = None
+    carry_chain_skip_muxes: List[cc_lib.CarryChainSkipMux] = None
 
     # Ram Circuits
     # TODO consolidate into a single object and conform to format used by other circuits
@@ -919,13 +996,13 @@ class FPGA:
             self.carry_chain_muxes = []
             self.carry_chain_inter_clusters = []
             if self.specs.enable_carry_chain == 1:
-                carrychainperiph = carry_chain_lib.CarryChainPer(
+                carrychainperiph = cc_lib.CarryChainPer(
                     id = 0,
                     use_tgate = self.specs.use_tgate,
                     use_finfet = self.specs.use_finfet, 
                 )
                 self.carry_chain_periphs.append(carrychainperiph)
-                carrychain = carry_chain_lib.CarryChain(
+                carrychain = cc_lib.CarryChain(
                     id = 0,
                     cluster_size = self.specs.N, 
                     FAs_per_flut = self.specs.FAs_per_flut,
@@ -933,14 +1010,14 @@ class FPGA:
                     carry_chain_periph = self.carry_chain_periphs[0], # TODO update for multi ckt support
                 )
                 self.carry_chains.append(carrychain)
-                carrychainmux = carry_chain_lib.CarryChainMux(
+                carrychainmux = cc_lib.CarryChainMux(
                     id = 0,
                     use_fluts = self.specs.use_fluts,
                     use_tgate = self.specs.use_tgate,
                     use_finfet = self.specs.use_finfet, 
                 )
                 self.carry_chain_muxes.append(carrychainmux)
-                carrychaininter = carry_chain_lib.CarryChainInterCluster(
+                carrychaininter = cc_lib.CarryChainInterCluster(
                     id = 0,
                     use_finfet = self.specs.use_finfet, 
                     carry_chain_type = self.specs.carry_chain_type,    
@@ -950,7 +1027,7 @@ class FPGA:
                 if self.specs.carry_chain_type == "skip":
                     self.carry_chain_skip_muxes = []
                     self.carry_chain_skip_ands = []
-                    carrychainand = carry_chain_lib.CarryChainSkipAnd(
+                    carrychainand = cc_lib.CarryChainSkipAnd(
                         id = 0,
                         use_tgate = self.specs.use_tgate,
                         use_finfet = self.specs.use_finfet, 
@@ -960,7 +1037,7 @@ class FPGA:
                         skip_size = self.skip_size,
                     )
                     self.carry_chain_skip_ands.append(carrychainand)
-                    carrychainskipmux = carry_chain_lib.CarryChainSkipMux(
+                    carrychainskipmux = cc_lib.CarryChainSkipMux(
                         id = 0,
                         use_tgate = self.specs.use_tgate,
                         use_finfet = self.specs.use_finfet, 
@@ -1032,14 +1109,17 @@ class FPGA:
             self.luts = [
                 lc.ble.lut for lc in self.logic_clusters
             ]
-            # Input Driver & Not input driver
+            # LUT Inputs & LUT Input Driver & LUT Not input driver
+            self.lut_inputs = defaultdict(list)
             self.lut_input_drivers = defaultdict(list)
             self.lut_input_not_drivers = defaultdict(list)
             for lc in self.logic_clusters:
                 lut_in: lut_lib.LUTInput
                 for lut_in in lc.ble.lut.input_drivers.values():
+                    self.lut_inputs[lut_in.lut_input_key].append(lut_in)
                     self.lut_input_drivers[lut_in.lut_input_key].append(lut_in.driver)
                     self.lut_input_not_drivers[lut_in.lut_input_key].append(lut_in.not_driver)
+                
 
 
 
@@ -1186,7 +1266,6 @@ class FPGA:
 
         parser_args = [
             "--input_sp_files",  self.basic_subcircuits_filename, self.subcircuits_filename,
-            "--get_structs",
         ]
         self.subckt_lib = sp_parser.main(parser_args)
 
@@ -1426,21 +1505,7 @@ class FPGA:
                 subckt_lib = self.subckt_lib,
             )
             self.general_ble_output_tbs.append(gen_ble_out_tb)
-            # Local BLE Output
-            local_ble_output_tb = ble_lib.LocalBLEOutputTB(
-                id = tb_idx,
-                # BLE Output Specific args
-                lut = lut,
-                lut_output_load = lut_output_load,
-                gen_ble_output_load = gen_ble_output_load,
-                # General SimTB args
-                inc_libs = inc_libs,
-                mode = gen_sim_mode,
-                options = sim_options,
-                # Pass in library of all subckts 
-                subckt_lib = self.subckt_lib,
-            )
-            self.local_ble_output_tbs.append(local_ble_output_tb)
+
             # LUT 
             lut_tb = lut_lib.LUTTB(
                 id = tb_idx,
@@ -1454,21 +1519,52 @@ class FPGA:
                 subckt_lib = self.subckt_lib,
             )
             self.lut_tbs.append(lut_tb)
+
+        loc_ble_out_tb_in_ckts: List[tuple] = list(
+            itertools.product(
+                tb_luts,
+                tb_lut_output_loads,
+                self.local_ble_output_loads,
+            )
+        )
+        for tb_idx, in_ckt_combo in enumerate(loc_ble_out_tb_in_ckts):
+            lut: lut_lib.LUT = in_ckt_combo[0]
+            lut_output_load: ble_lib.LUTOutputLoad = in_ckt_combo[1]
+            loc_ble_output_load: lb_lib.LocalBLEOutputLoad = in_ckt_combo[2]
+            # Local BLE Output
+            local_ble_output_tb = ble_lib.LocalBLEOutputTB(
+                id = tb_idx,
+                # BLE Output Specific args
+                lut = lut,
+                lut_output_load = lut_output_load,
+                local_ble_output_load = loc_ble_output_load,
+                # General SimTB args
+                inc_libs = inc_libs,
+                mode = gen_sim_mode,
+                options = sim_options,
+                # Pass in library of all subckts 
+                subckt_lib = self.subckt_lib,
+            )
+            self.local_ble_output_tbs.append(local_ble_output_tb)
         # FLUT MUXES 
         # The circuit deps for the FlutMuxTB are a superset of those in gen_ble_output
         # TODO perform this conditional check for fluts at the ble level for more flexibility
         if self.specs.use_fluts: 
             tb_flut_muxes: List[ble_lib.FlutMux] = [ lb.ble.fmux for lb in self.logic_clusters ]
-            tb_cc_muxes: List[carry_chain_lib.CarryChainMux]
+            tb_cc_muxes: List[cc_lib.CarryChainMux]
+            tb_ccs: List[cc_lib.CarryChain]
             if self.specs.enable_carry_chain:
                 tb_cc_muxes = self.carry_chain_muxes
+                tb_ccs = self.carry_chains
             else:
                 tb_cc_muxes = None
+                tb_ccs = None 
             flut_in_ckts: List[tuple] = list(
                 itertools.product(
                     tb_luts,
                     tb_flut_muxes,
                     tb_cc_muxes,
+                    tb_ccs,
                     tb_lut_output_loads,
                     tb_gen_ble_output_loads,
                 )
@@ -1476,14 +1572,16 @@ class FPGA:
             for tb_idx, in_ckt_combo in enumerate(flut_in_ckts):
                 lut : lut_lib.LUT = in_ckt_combo[0]
                 flut_mux: ble_lib.FlutMux = in_ckt_combo[1]
-                cc_mux: carry_chain_lib.CarryChainMux = in_ckt_combo[2]
-                lut_output_load: ble_lib.LUTOutputLoad = in_ckt_combo[3]
-                gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = in_ckt_combo[4]
+                cc_mux: cc_lib.CarryChainMux = in_ckt_combo[2]
+                cc: cc_lib.CarryChain = in_ckt_combo[3]
+                lut_output_load: ble_lib.LUTOutputLoad = in_ckt_combo[4]
+                gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = in_ckt_combo[5]
                 flut_mux_tb = ble_lib.FlutMuxTB(
                     id = tb_idx,
                     # BLE Output Specific args
                     lut = lut,
                     flut_mux = flut_mux,
+                    cc = cc,
                     cc_mux = cc_mux,
                     lut_output_load = lut_output_load,
                     gen_ble_output_load = gen_ble_output_load,
@@ -1591,86 +1689,86 @@ class FPGA:
                     subckt_lib = self.subckt_lib,
                 )
                 self.lut_in_not_driver_tbs[lut_in_driver.lut_input_key].append(lut_not_driver_tb)
-        
-        # LUT input driver with LUT Load
-        # TODO refactor this so its not so much duplicated code
-        if self.specs.use_fluts:
-            # We only want the product of lut_output_loads if we are NOT using fluts
-            # We only want the product of flip flops if our LUT input driver type is "default_rsel" || "reg_fb_rsel"
-            # TODO accomodate flip flop parameterization for now we assert that only a single FF type exists
-            assert len(tb_ffs) == 1, "Only a single flip flop type is supported for now"
-            lut_driver_lut_load_tb_in_ckts: List[tuple] = list(
-                itertools.product(
-                    tb_cb_muxes,
-                    tb_local_r_wire_loads,
-                    tb_lut_input_drivers,
-                    tb_ffs,
-                    tb_lut_input_not_drivers,
-                    tb_luts,
-                    # tb_lut_in_drv_loads,
-                    tb_flut_muxes,
-                )
-            )
-            lut_load_key = "flut_mux"
-        else:
-            lut_driver_lut_load_tb_in_ckts: List[tuple] = list(
-                itertools.product(
-                    tb_cb_muxes,
-                    tb_local_r_wire_loads,
-                    tb_lut_input_drivers,
-                    tb_ffs,
-                    tb_lut_input_not_drivers,
-                    tb_luts,
-                    tb_lut_output_loads,
-                )
-            )
-            lut_load_key = "lut_output_load"
-        for tb_idx, in_ckt_combo in enumerate(lut_driver_lut_load_tb_in_ckts):
-            cb_mux: cb_mux_lib.ConnectionBlockMux = in_ckt_combo[0]
-            local_r_wire_load: lb_lib.LocalRoutingWireLoad = in_ckt_combo[1]
-            lut_in_driver: lut_lib.LUTInputDriver = in_ckt_combo[2]
-            ff: ble_lib.FlipFlop = in_ckt_combo[3]
-            lut_in_not_driver: lut_lib.LUTInputNotDriver = in_ckt_combo[4]
-            lut: lut_lib.LUT = in_ckt_combo[5]
-            # lut_in_driver_load: lut_lib.LUTInputDriverLoad = in_ckt_combo[6]
+                    # LUT input driver with LUT Load
+            # TODO refactor this so its not so much duplicated code
             if self.specs.use_fluts:
-                lut_output_load: ble_lib.FlutMux = in_ckt_combo[6]
+                # We only want the product of lut_output_loads if we are NOT using fluts
+                # We only want the product of flip flops if our LUT input driver type is "default_rsel" || "reg_fb_rsel"
+                # TODO accomodate flip flop parameterization for now we assert that only a single FF type exists
+                assert len(tb_ffs) == 1, "Only a single flip flop type is supported for now"
+                lut_input_tb_in_ckts: List[tuple] = list(
+                    itertools.product(
+                        tb_cb_muxes,
+                        tb_local_r_wire_loads,
+                        tb_lut_input_drivers,
+                        tb_ffs,
+                        tb_lut_input_not_drivers,
+                        tb_luts,
+                        # tb_lut_in_drv_loads,
+                        tb_flut_muxes,
+                    )
+                )
+                lut_load_key = "flut_mux"
             else:
-                lut_output_load: ble_lib.LUTOutputLoad = in_ckt_combo[6]
-            lut_output_load_arg = {
-                lut_load_key: lut_output_load
-            }
-            # Create a custom mode for this tb as we want to sim to 16p
-            lut_driver_lut_load_tb_sim_mode: c_ds.SpSimMode = copy.deepcopy(base_sim_mode)
-            lut_driver_lut_load_tb_sim_mode.sim_time = c_ds.Value(16, units = sb_mux_sim_mode.sim_time.units) # ns
+                lut_input_tb_in_ckts: List[tuple] = list(
+                    itertools.product(
+                        tb_cb_muxes,
+                        tb_local_r_wire_loads,
+                        tb_lut_input_drivers,
+                        tb_ffs,
+                        tb_lut_input_not_drivers,
+                        tb_luts,
+                        tb_lut_output_loads,
+                    )
+                )
+                lut_load_key = "lut_output_load"
+            for tb_idx, in_ckt_combo in enumerate(lut_input_tb_in_ckts):
+                cb_mux: cb_mux_lib.ConnectionBlockMux = in_ckt_combo[0]
+                local_r_wire_load: lb_lib.LocalRoutingWireLoad = in_ckt_combo[1]
+                lut_in_driver: lut_lib.LUTInputDriver = in_ckt_combo[2]
+                ff: ble_lib.FlipFlop = in_ckt_combo[3]
+                lut_in_not_driver: lut_lib.LUTInputNotDriver = in_ckt_combo[4]
+                lut: lut_lib.LUT = in_ckt_combo[5]
+                # lut_in_driver_load: lut_lib.LUTInputDriverLoad = in_ckt_combo[6]
+                if self.specs.use_fluts:
+                    lut_output_load: ble_lib.FlutMux = in_ckt_combo[6]
+                else:
+                    lut_output_load: ble_lib.LUTOutputLoad = in_ckt_combo[6]
+                lut_output_load_arg = {
+                    lut_load_key: lut_output_load
+                }
+                # Create a custom mode for this tb as we want to sim to 16p
+                lut_input_tb_sim_mode: c_ds.SpSimMode = copy.deepcopy(base_sim_mode)
+                lut_input_tb_sim_mode.sim_time = c_ds.Value(16, units = sb_mux_sim_mode.sim_time.units) # ns
 
-            # TODO make sure the RISE=1 is ok previously was RISE=2 for first meas statement
-            lut_driver_lut_load_tb = lut_lib.LUTInputDriverLUTLoadTB(
-                id = tb_idx,
-                # DUT Circuits
-                cb_mux = cb_mux,
-                local_r_wire_load = local_r_wire_load,
-                lut_in_driver = lut_in_driver,
-                flip_flop = ff,
-                lut_in_not_driver = lut_in_not_driver,
-                lut = lut,
-                **lut_output_load_arg,
-                # General SimTB args
-                inc_libs = inc_libs,
-                mode = lut_driver_lut_load_tb_sim_mode,
-                options = sim_options,
-                # Pass in library of all subckts 
-                subckt_lib = self.subckt_lib,
-            )
-            self.lut_in_driver_lut_load_tbs[lut_in_driver.lut_input_key].append(lut_driver_lut_load_tb)
+                # TODO make sure the RISE=1 is ok previously was RISE=2 for first meas statement
+                lut_input_tb = lut_lib.LUTInputTB(
+                    id = tb_idx,
+                    # DUT Circuits
+                    cb_mux = cb_mux,
+                    local_r_wire_load = local_r_wire_load,
+                    lut_in_driver = lut_in_driver,
+                    flip_flop = ff,
+                    lut_in_not_driver = lut_in_not_driver,
+                    lut = lut,
+                    **lut_output_load_arg,
+                    # General SimTB args
+                    inc_libs = inc_libs,
+                    mode = lut_input_tb_sim_mode,
+                    options = sim_options,
+                    # Pass in library of all subckts 
+                    subckt_lib = self.subckt_lib,
+                )
+                self.lut_input_tbs[lut_in_driver.lut_input_key].append(lut_input_tb)
+
         if self.specs.enable_carry_chain:
             # Carry Chain
             for cc in self.carry_chains:
-                cc: carry_chain_lib.CarryChain
+                cc: cc_lib.CarryChain
                 # Create a custom mode for this tb as we want to sim to 16p
                 cc_sim_mode: c_ds.SpSimMode = copy.deepcopy(base_sim_mode)
                 cc_sim_mode.sim_time = c_ds.Value(26, units = sb_mux_sim_mode.sim_time.units) # ns
-                cc_tb = carry_chain_lib.CarryChainTB(
+                cc_tb = cc_lib.CarryChainTB(
                     id = tb_idx,
                     # DUT Circuits
                     FA_carry_chain = cc, 
@@ -1691,10 +1789,10 @@ class FPGA:
             )
             # CC Peripheials
             for ckt_combo in cc_periph_in_ckts:
-                cc: carry_chain_lib.CarryChain = ckt_combo[0]
-                cc_periph: carry_chain_lib.CarryChainPer = ckt_combo[1]
-                cc_mux: carry_chain_lib.CarryChainMux = ckt_combo[2]
-                cc_periph_tb = carry_chain_lib.CarryChainPerTB(
+                cc: cc_lib.CarryChain = ckt_combo[0]
+                cc_periph: cc_lib.CarryChainPer = ckt_combo[1]
+                cc_mux: cc_lib.CarryChainMux = ckt_combo[2]
+                cc_periph_tb = cc_lib.CarryChainPerTB(
                     id = tb_idx,
                     # TB Circuits
                     FA_carry_chain = cc, 
@@ -1716,9 +1814,9 @@ class FPGA:
             )
             # CC Interconnect
             for ckt_combo in cc_inter_in_ckts:
-                cc: carry_chain_lib.CarryChain = ckt_combo[0]
-                cc_inter: carry_chain_lib.CarryChainInterCluster = ckt_combo[1]
-                cc_inter_tb = carry_chain_lib.CarryChainInterClusterTB(
+                cc: cc_lib.CarryChain = ckt_combo[0]
+                cc_inter: cc_lib.CarryChainInterCluster = ckt_combo[1]
+                cc_inter_tb = cc_lib.CarryChainInterClusterTB(
                     id = tb_idx,
                     # TB Circuits
                     FA_carry_chain = cc, 
@@ -1743,12 +1841,12 @@ class FPGA:
             )
             # CC Mux
             for tb_idx, in_ckt_combo in enumerate(cc_mux_in_ckts):
-                fa_cc: carry_chain_lib.CarryChain = in_ckt_combo[0]
-                cc_mux: carry_chain_lib.CarryChainMux = in_ckt_combo[1]
-                carry_chain_periph: carry_chain_lib.CarryChainPer = in_ckt_combo[2]
+                fa_cc: cc_lib.CarryChain = in_ckt_combo[0]
+                cc_mux: cc_lib.CarryChainMux = in_ckt_combo[1]
+                carry_chain_periph: cc_lib.CarryChainPer = in_ckt_combo[2]
                 lut_output_load: ble_lib.LUTOutputLoad = in_ckt_combo[3]
                 gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = in_ckt_combo[4]
-                cc_mux = carry_chain_lib.CarryChainMuxTB(
+                cc_mux = cc_lib.CarryChainMuxTB(
                     id = tb_idx,
                     # TB Circuits
                     FA_carry_chain = fa_cc,
@@ -1776,12 +1874,12 @@ class FPGA:
                 )
                 for tb_idx, in_ckt_combo in enumerate(cc_in_ckts):
                     lut: lut_lib.LUT = in_ckt_combo[0]
-                    cc: carry_chain_lib.CarryChain = in_ckt_combo[1]
-                    cc_and: carry_chain_lib.CarryChainSkipAnd = in_ckt_combo[2]
-                    cc_skip_mux: carry_chain_lib.CarryChainSkipMux = in_ckt_combo[3]
-                    cc_mux: carry_chain_lib.CarryChainMuxTB = in_ckt_combo[4]
+                    cc: cc_lib.CarryChain = in_ckt_combo[1]
+                    cc_and: cc_lib.CarryChainSkipAnd = in_ckt_combo[2]
+                    cc_skip_mux: cc_lib.CarryChainSkipMux = in_ckt_combo[3]
+                    cc_mux: cc_lib.CarryChainMuxTB = in_ckt_combo[4]
                     # CC Skip And
-                    cc_and_tb = carry_chain_lib.CarryChainSkipAndTB(
+                    cc_and_tb = cc_lib.CarryChainSkipAndTB(
                         id = tb_idx,
                         # TB Circuits
                         lut = lut,
@@ -1791,14 +1889,14 @@ class FPGA:
                         carry_chain_mux = cc_mux,
                         # General SimTB args
                         inc_libs = inc_libs,
-                        mode = cc_sim_mode, # 4ns sim time
+                        mode = cc_sim_mode,
                         options = sim_options,
                         # Pass in library of all subckts 
                         subckt_lib = self.subckt_lib,
                     )
                     self.carry_chain_skip_and_tbs.append(cc_and_tb)
                     # CC Skip Mux
-                    cc_skip_mux_tb = carry_chain_lib.CarryChainSkipAndTB(
+                    cc_skip_mux_tb = cc_lib.CarryChainSkipMuxTB(
                         id = tb_idx,
                         # TB Circuits
                         lut = lut,
@@ -1808,12 +1906,12 @@ class FPGA:
                         carry_chain_mux = cc_mux,
                         # General SimTB args
                         inc_libs = inc_libs,
-                        mode = cc_sim_mode, # 4ns sim time
+                        mode = gen_sim_mode, # 4ns sim time
                         options = sim_options,
                         # Pass in library of all subckts 
                         subckt_lib = self.subckt_lib,
                     )
-                    self.carry_chain_skip_and_tbs.append(cc_skip_mux_tb)
+                    self.carry_chain_skip_mux_tbs.append(cc_skip_mux_tb)
 
         
         
@@ -1850,9 +1948,9 @@ class FPGA:
             for lut_in_not_driver_tb in lut_in_not_driver_tbs:
                 lut_in_not_driver_tb.generate_top()
         
-        for lut_in_driver_lut_load_tbs in self.lut_in_driver_lut_load_tbs.values():
-            for lut_in_driver_lut_load_tb in lut_in_driver_lut_load_tbs:
-                lut_in_driver_lut_load_tb.generate_top()
+        for lut_input_tbs in self.lut_input_tbs.values():
+            for lut_in_tb in lut_input_tbs:
+                lut_in_tb.generate_top()
         
         if self.specs.enable_carry_chain:
             for cc_tb in self.carry_chain_tbs:
@@ -2011,11 +2109,11 @@ class FPGA:
 
         # TODO add multi wire len support rather than just choosing first index of carry chain
         # Why is the peripheral cc area not included in this? TODO figure out
-        cc: carry_chain_lib.CarryChain = self.carry_chains[0]
-        cc_skip_and: carry_chain_lib.CarryChainSkipAnd = self.carry_chain_skip_ands[0]
-        cc_skip_mux: carry_chain_lib.CarryChainSkipMux = self.carry_chain_skip_muxes[0]
-        cc_mux: carry_chain_lib.CarryChainMux = self.carry_chain_muxes[0]
-        cc_inter: carry_chain_lib.CarryChainInterCluster = self.carry_chain_inter_clusters[0]
+        cc: cc_lib.CarryChain = self.carry_chains[0]
+        cc_skip_and: cc_lib.CarryChainSkipAnd = self.carry_chain_skip_ands[0]
+        cc_skip_mux: cc_lib.CarryChainSkipMux = self.carry_chain_skip_muxes[0]
+        cc_mux: cc_lib.CarryChainMux = self.carry_chain_muxes[0]
+        cc_inter: cc_lib.CarryChainInterCluster = self.carry_chain_inter_clusters[0]
 
         # If uninitialized logic block height
         if not self.lb_height:
@@ -2470,6 +2568,8 @@ class FPGA:
             self.wire_rc_dict[wire] = (resistance, capacitance) 
 
     
+        
+
 
     def update_delays(self, spice_interface: spice.SpiceInterface):
         """ 
@@ -2507,105 +2607,224 @@ class FPGA:
         # were "failed". If that is the case, we set the delay of that subcircuit to 1
         # second and set our valid_delay flag to False.
 
-        sp_out_meas = { 
-            "trise": 0,
-            "tfall": 0,
-            "delay": 0,
-            "power": 0,
-        }
         # SB MUX
-        sim_tbs(self.sb_mux_tbs, spice_interface, parameter_dict)
+        sb_mux_meas: Dict[
+            sb_mux_lib.SwitchBlockMuxTB, Dict[str, float | bool]
+        ] = sim_tbs(self.sb_mux_tbs, spice_interface, parameter_dict)
 
-        # sb_mux_meas: Dict[
-        #     sb_mux_lib.SwitchBlockMuxTB, Dict[str, float]
-        # ] = defaultdict(lambda: sp_out_meas)
-        # for sb_mux_tb in self.sb_mux_tbs:
-        #     print(f"Updating delay for {sb_mux_tb.dut_ckt.sp_name} with TB {sb_mux_tb.tb_fname.strip('.sp')}")
-        #     spice_meas = spice_interface.run(sb_mux_tb.sp_fpath, parameter_dict)
-        #     if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
-        #         valid_delay = False
-        #         tfall = 1
-        #         trise = 1
-        #     else :  
-        #         tfall = float(spice_meas["meas_total_tfall"][0])
-        #         trise = float(spice_meas["meas_total_trise"][0])
-        #     if tfall < 0 or trise < 0 :
-        #         valid_delay = False
-        #     sb_mux_meas[sb_mux_tb]["trise"] = trise
-        #     sb_mux_meas[sb_mux_tb]["tfall"] = tfall
-        #     sb_mux_meas[sb_mux_tb]["delay"] = max(tfall, trise)
-        #     sb_mux_meas[sb_mux_tb]["power"] = float(spice_meas["meas_avg_power"][0])
-        
+        # Sets delays + power in ckt objects 
+        crit_path_delay += set_ckt_meas(self.delay_dict, sb_mux_meas)[0]
+
+        # Define our function to merge measurments from different TBs
+        # def merge_sb_mux_meas(
+        #     dut_sb_mux_meas: Dict[ sb_mux_lib.SwitchBlockMuxTB, Dict[str, float | bool] ],
+        #     all_sb_muxes: List[sb_mux_lib.SwitchBlockMux]
+        # ):
+        #     """
+        #         Assumptions: Our dut_tb measurement combo will only have a single type of subckt dut in it 
+                
+        #         We need both our DUT SB Mux and others in the FPGA to understand wire type input freq
+        #     """
+        #     # Based on probability of the TB path being on critical path we weight measurements and avg
+        #     dut: sb_mux_lib.SwitchBlockMux = set(list(dut_sb_mux_meas.keys())).pop().dut_ckt
+        #     dut_sink: c_ds.GenRoutingWire = dut.sink_wire
+        #     tb: sb_mux_lib.SwitchBlockMuxTB
+        #     for tb, meas in dut_sb_mux_meas.items():
+        #         term_sb_mux: sb_mux_lib.SwitchBlockMux
+        #         for term_sb_mux in all_sb_muxes:
+        #             # Find all the SB Muxes which have a src wire of the same type as the DUT sink
+        #             if term_sb_mux == tb.sink_routing_wire_load.terminal_sb_mux:
+        #                 # We know this terminal mux is the one which we can get stats from
+
+
+        #                 assert any(wire == tb.dut_ckt.sink_wire for wire in term_sb_mux.src_wires), "Terminal mux must allow sink wire"
+                            
         # CB MUX
         cb_mux_meas: Dict[
-            cb_mux_lib.ConnectionBlockMuxTB, Dict[str, float]
-        ] = defaultdict(lambda: sp_out_meas)
-        for cb_mux_tb in self.cb_mux_tbs:
-            print(f"Updating delay for {cb_mux_tb.dut_ckt.sp_name} with TB {cb_mux_tb.tb_fname.strip('.sp')}")
-            spice_meas = spice_interface.run(cb_mux_tb.sp_fpath, parameter_dict)
-            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
-                valid_delay = False
-                tfall = 1
-                trise = 1
-            else :  
-                tfall = float(spice_meas["meas_total_tfall"][0])
-                trise = float(spice_meas["meas_total_trise"][0])
-            if tfall < 0 or trise < 0 :
-                valid_delay = False
-            cb_mux_meas[cb_mux_tb]["trise"] = trise
-            cb_mux_meas[cb_mux_tb]["tfall"] = tfall
-            cb_mux_meas[cb_mux_tb]["delay"] = max(tfall, trise)
-            cb_mux_meas[cb_mux_tb]["power"] = float(spice_meas["meas_avg_power"][0])
+            cb_mux_lib.ConnectionBlockMuxTB, Dict[str, float | bool]
+        ] = sim_tbs(self.cb_mux_tbs, spice_interface, parameter_dict)
+        # Sets delays + power in ckt objects 
+        crit_path_delay += set_ckt_meas(self.delay_dict, cb_mux_meas)[0]
 
-        # Local MUX
+        # LOCAL MUX
         local_mux_meas: Dict[
-            lb_lib.LocalMuxTB, Dict[str, float]
-        ] = defaultdict(lambda: sp_out_meas)
-        for local_mux_tb in self.local_mux_tbs:
-            print(f"Updating delay for {local_mux_tb.dut_ckt.sp_name} with TB {local_mux_tb.tb_fname.strip('.sp')}")
-            spice_meas = spice_interface.run(local_mux_tb.sp_fpath, parameter_dict)
-            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
-                valid_delay = False
-                tfall = 1
-                trise = 1
-            else :  
-                tfall = float(spice_meas["meas_total_tfall"][0])
-                trise = float(spice_meas["meas_total_trise"][0])
-            if tfall < 0 or trise < 0 :
-                valid_delay = False
-            local_mux_meas[local_mux_tb]["trise"] = trise
-            local_mux_meas[local_mux_tb]["tfall"] = tfall
-            local_mux_meas[local_mux_tb]["delay"] = max(tfall, trise)
-            local_mux_meas[local_mux_tb]["power"] = float(spice_meas["meas_avg_power"][0])
-        
+            lb_lib.LocalMuxTB, Dict[str, float | bool]
+        ] = sim_tbs(self.local_mux_tbs, spice_interface, parameter_dict)
+        # Sets delays + power in ckt objects 
+        crit_path_delay += set_ckt_meas(self.delay_dict, local_mux_meas)[0]
+
         # Local BLE Output
         local_ble_output_meas: Dict[
-            ble_lib.LocalBLEOutputTB, Dict[str, float]
-        ] = defaultdict(lambda: sp_out_meas)
-        for local_ble_output_tb in self.local_ble_output_tbs:
-            print(f"Updating delay for {local_ble_output_tb.dut_ckt.sp_name} with TB {local_ble_output_tb.tb_fname.strip('.sp')}")
-            spice_meas = spice_interface.run(local_ble_output_tb.sp_fpath, parameter_dict)
-            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
-                valid_delay = False
-                tfall = 1
-                trise = 1
-            else :  
-                tfall = float(spice_meas["meas_total_tfall"][0])
-                trise = float(spice_meas["meas_total_trise"][0])
-            if tfall < 0 or trise < 0 :
-                valid_delay = False
-            local_ble_output_meas[local_ble_output_tb]["trise"] = trise
-            local_ble_output_meas[local_ble_output_tb]["tfall"] = tfall
-            local_ble_output_meas[local_ble_output_tb]["delay"] = max(tfall, trise)
-            local_ble_output_meas[local_ble_output_tb]["power"] = float(spice_meas["meas_avg_power"][0])
-        
+           ble_lib.LocalBLEOutputTB, Dict[str, float | bool]
+        ] = sim_tbs(self.local_ble_output_tbs, spice_interface, parameter_dict)
+        # Sets delays + power in ckt objects 
+        crit_path_delay += set_ckt_meas(self.delay_dict, local_ble_output_meas)[0]
+
         # General BLE Output
         gen_ble_output_meas: Dict[
-            ble_lib.GeneralBLEOutputTB, Dict[str, float]
-        ] = defaultdict(lambda: sp_out_meas)
-        for gen_ble_output_tb in self.gen_ble_output_tbs:
+            ble_lib.GeneralBLEOutputTB, Dict[str, float | bool]
+        ] = sim_tbs(self.general_ble_output_tbs, spice_interface, parameter_dict)
+        # Sets delays + power in ckt objects 
+        crit_path_delay += set_ckt_meas(self.delay_dict, gen_ble_output_meas)[0]
+        
+        # Fracurable LUT MUX
+        # TODO make sure even if tbs are empty this is fine
+        flut_mux_meas: Dict[
+            ble_lib.FlutMuxTB, Dict[str, float | bool]
+        ] = sim_tbs(self.flut_mux_tbs, spice_interface, parameter_dict)
+        # Sets delays + power in ckt objects 
+        _, flut_mux_merged_meas = set_ckt_meas(self.delay_dict, flut_mux_meas)
+        
+        # LUT
+        lut_meas: Dict[
+            lut_lib.LUTTB, Dict[str, float | bool]
+        ] = sim_tbs(self.lut_tbs, spice_interface, parameter_dict)
+        # Sets delays + power in ckt objects 
+        _, lut_merged_meas = set_ckt_meas(self.delay_dict, lut_meas)
+        
+        # LUT Inputs
+        # Get delay for all paths through the LUT.
+        # We get delay for each path through the LUT as well as for the LUT input drivers.
+        lut_input_measures: Dict[
+            Dict[ lut_lib.LUTInputTB, Dict[str, float | bool] ]
+        ] = {}
+        lut_input_driver_meas: Dict[
+            lut_lib.LUTInputDriverTB, Dict[str, float | bool]
+        ] = {}
+        lut_input_not_driver_meas: Dict[
+                lut_lib.LUTInputDriverTB, Dict[str, float | bool]
+        ] = {}
+        # only sorting for clarity no real reason
+        for lut_in_key in sorted(list(self.lut_input_tbs.keys())):
+            # TODO update for multi ckt support
+            lut_input: lut_lib.LUTInput = self.lut_inputs[lut_in_key][0]
+            # LUT Input Driver with LUT loading
+            lut_input_meas: Dict[
+                lut_lib.LUTInputTB, Dict[str, float | bool]
+            ] = sim_tbs(self.lut_input_tbs[lut_in_key], spice_interface, parameter_dict)
+            lut_input_measures[lut_in_key] = lut_input_meas
+            # TODO make this cleaner, we are kinda doing a workaround way of setting values in the LUTInput obj
+            # Get merged delays but DONT set as we do a custom thing for LUT inputs 
+            _, lut_input_merged_meas = set_ckt_meas(self.delay_dict, lut_input_meas, set_flag = False)
+            # If we're on the fracturable input which is the last LUT input then we set the fmux delay for this input
+            if (lut_in_key == "f" and self.specs.use_fluts and self.specs.K == 6) or \
+                (lut_in_key == "e" and self.specs.use_fluts and self.specs.K == 5):
+                # TODO update for multi flut ckt support
+                lut_input.tfall = list(flut_mux_merged_meas.values())[0]["tfall"]
+                lut_input.trise = list(flut_mux_merged_meas.values())[0]["trise"]
+                lut_input.delay = max(lut_input.tfall, lut_input.trise)
+                self.delay_dict[lut_input.name] = lut_input.delay
+            else:    
+                # TODO update for multi ckt support
+                meas = list(lut_input_merged_meas.values())[0]
+                in_meas: Dict[str, float | bool] = copy.deepcopy(meas)
+                if self.specs.use_fluts:
+                    for del_key in ["tfall", "trise"]:
+                        in_meas[del_key] += list(flut_mux_merged_meas.values())[0][del_key]
+                    in_meas["delay"] = max(in_meas["tfall"], in_meas["trise"])
+                lut_input.set_fields(in_meas)
+                self.delay_dict[lut_input.name] = in_meas["delay"]
+
+            # LUT Input drivers
+            lut_input_driver_meas: Dict[
+                lut_lib.LUTInputDriverTB, Dict[str, float | bool]
+            ] = sim_tbs(self.lut_in_driver_tbs[lut_in_key], spice_interface, parameter_dict)
+            _, lut_in_drv_merged_meas = set_ckt_meas(self.delay_dict, lut_input_driver_meas)
 
 
+            # LUT Input Not drivers
+            lut_input_not_driver_meas: Dict[
+                lut_lib.LUTInputDriverTB, Dict[str, float | bool]
+            ] = sim_tbs(self.lut_in_not_driver_tbs[lut_in_key], spice_interface, parameter_dict)
+            _, lut_in_not_drv_merged_meas = set_ckt_meas(self.delay_dict, lut_input_not_driver_meas)
+
+            # Calculate lut delay
+            # TODO update for multi ckt support
+            lut_in_drv_delay: float = list(lut_in_drv_merged_meas.values())[0]["delay"]
+            lut_in_not_drv_delay: float = list(lut_in_not_drv_merged_meas.values())[0]["delay"]
+            lut_delay: float = lut_input.delay + max(lut_in_drv_delay, lut_in_not_drv_delay)
+            if self.specs.use_fluts:
+                # TODO update for multi ckt support
+                flut_mux: ble_lib.FlutMux = list(flut_mux_merged_meas.keys())[0]
+                lut_delay += flut_mux.delay 
+            
+            assert lut_delay > 0, f"LUT delay must be greater than 0 {lut_delay}"
+
+            # Add to critical path
+            crit_path_delay += lut_delay * lut_input.delay_weight
+        
+        # Add flut to critical
+        if self.specs.use_fluts:
+            # TODO update for multi ckt support
+            flut_mux: ble_lib.FlutMux = list(flut_mux_merged_meas.keys())[0]
+            crit_path_delay += flut_mux.delay * flut_mux.delay_weight
+
+        if self.specs.enable_carry_chain:
+            # Carry Chain
+            cc_meas: Dict[
+                cc_lib.CarryChainTB, Dict[str, float | bool]
+            ] = sim_tbs(self.carry_chain_tbs, spice_interface, parameter_dict)
+            # Sets delays + power in ckt objects
+            crit_path_delay += set_ckt_meas(self.delay_dict, cc_meas)[0]
+                        
+            # Carry Chain Peripherial
+            cc_periph_meas: Dict[
+                cc_lib.CarryChainPerTB, Dict[str, float | bool]
+            ] = sim_tbs(self.carry_chain_per_tbs, spice_interface, parameter_dict)
+            # Sets delays + power in ckt objects
+            crit_path_delay += set_ckt_meas(self.delay_dict, cc_periph_meas)[0]
+
+            # Carry Chain Mux
+            cc_mux_meas: Dict[
+                cc_lib.CarryChainMuxTB, Dict[str, float | bool]
+            ] = sim_tbs(self.carry_chain_mux_tbs, spice_interface, parameter_dict)
+            # Sets delays + power in ckt objects
+            crit_path_delay += set_ckt_meas(self.delay_dict, cc_mux_meas)[0]
+            
+            # Carry Chain Inter Cluster
+            cc_inter_meas: Dict[
+                cc_lib.CarryChainInterClusterTB, Dict[str, float | bool]
+            ] = sim_tbs(self.carry_chain_inter_tbs, spice_interface, parameter_dict)
+            # Sets delays + power in ckt objects
+            crit_path_delay += set_ckt_meas(self.delay_dict, cc_inter_meas)[0]
+
+            if self.specs.carry_chain_type == "skip":
+                # Carry Chain Skip AND
+                # TODO make sure even if tbs are empty this is fine
+                cc_skip_and_meas: Dict[
+                    cc_lib.CarryChainSkipAndTB, Dict[str, float | bool]
+                ] = sim_tbs(self.carry_chain_skip_and_tbs, spice_interface, parameter_dict)
+                # Sets delays + power in ckt objects
+                crit_path_delay += set_ckt_meas(self.delay_dict, cc_skip_and_meas)[0]
+
+                # Carry Chain Skip Mux
+                cc_skip_mux_meas: Dict[
+                    cc_lib.CarryChainSkipMuxTB, Dict[str, float | bool]
+                ] = sim_tbs(self.carry_chain_skip_mux_tbs, spice_interface, parameter_dict)
+                # Sets delays + power in ckt objects
+                crit_path_delay += set_ckt_meas(self.delay_dict, cc_skip_mux_meas)[0]
+
+        # Hardblocks
+        # TODO add hardblock support
+        # hardblock_meas: Dict[
+        #     hardblock_lib.HardBlockTB, Dict[str, float]
+        # ] = sim_tbs(self.hardblock_tbs, spice_interface, parameter_dict)
+
+        # RAM
+        # TODO figure out why all the RAM setting of critical path delay were commented out
+        if self.specs.enable_bram_block:
+            ram_valid = self.update_ram_delays(spice_interface, parameter_dict)
+
+        # After getting the delays across subckts and tesbenches we need to combine them for each subckt and assign it trise / tfall / delay / power values.
+        self.delay_dict["rep_crit_path"] = crit_path_delay
+
+
+
+
+            
+
+
+        
 
 
 
@@ -3050,3 +3269,394 @@ class FPGA:
 
 # # Make sure there are no duplicate gen_r_wire ids in gen_r_wires
 # assert len(gen_r_wires) == len(set([gen_r_wire["id"] for gen_r_wire in gen_r_wires])), "Duplicate gen_r_wire ids found in gen_r_wires"
+
+    def update_ram_delays(self, parameter_dict: Dict[str, List[str]], spice_interface: spice.SpiceInterface) -> bool:
+        # Local RAM MUX
+        print("  Updating delay for " + self.RAM.RAM_local_mux.name)
+        spice_meas = spice_interface.run(self.RAM.RAM_local_mux.top_spice_path, 
+                                         parameter_dict) 
+        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+            valid_delay = False
+            tfall = 1
+            trise = 1
+        else :  
+            tfall = float(spice_meas["meas_total_tfall"][0])
+            trise = float(spice_meas["meas_total_trise"][0])
+        if tfall < 0 or trise < 0 :
+            valid_delay = False
+        self.RAM.RAM_local_mux.tfall = tfall
+        self.RAM.RAM_local_mux.trise = trise
+        self.RAM.RAM_local_mux.delay = max(tfall, trise)
+        self.delay_dict[self.RAM.RAM_local_mux.name] = self.RAM.RAM_local_mux.delay
+        self.RAM.RAM_local_mux.power = float(spice_meas["meas_avg_power"][0])
+
+        #RAM decoder units
+        print("  Updating delay for " + self.RAM.rowdecoder_stage0.name)
+        spice_meas = spice_interface.run(self.RAM.rowdecoder_stage0.top_spice_path, parameter_dict) 
+        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+            valid_delay = False
+            tfall = 1
+            trise = 1
+        else :  
+            tfall = float(spice_meas["meas_total_tfall"][0])
+            trise = float(spice_meas["meas_total_trise"][0])
+        if tfall < 0 or trise < 0 :
+            valid_delay = False
+        self.RAM.rowdecoder_stage0.tfall = tfall
+        self.RAM.rowdecoder_stage0.trise = trise
+        self.RAM.rowdecoder_stage0.delay = max(tfall, trise)
+        #crit_path_delay += (self.RAM.rowdecoder_stage0.delay* self.RAM.delay_weight)
+        self.delay_dict[self.RAM.rowdecoder_stage0.name] = self.RAM.rowdecoder_stage0.delay
+        self.RAM.rowdecoder_stage0.power = float(spice_meas["meas_avg_power"][0])
+
+
+        if self.RAM.valid_row_dec_size2 == 1:
+            print("  Updating delay for " + self.RAM.rowdecoder_stage1_size2.name)
+            spice_meas = spice_interface.run(self.RAM.rowdecoder_stage1_size2.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.rowdecoder_stage1_size2.tfall = tfall
+            self.RAM.rowdecoder_stage1_size2.trise = trise
+            self.RAM.rowdecoder_stage1_size2.delay = max(tfall, trise)
+            #crit_path_delay += (self.RAM.rowdecoder_stage1_size2.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.rowdecoder_stage1_size2.name] = self.RAM.rowdecoder_stage1_size2.delay
+            self.RAM.rowdecoder_stage1_size2.power = float(spice_meas["meas_avg_power"][0])
+
+        if self.RAM.valid_row_dec_size3 == 1:
+            print("  Updating delay for " + self.RAM.rowdecoder_stage1_size3.name)
+            spice_meas = spice_interface.run(self.RAM.rowdecoder_stage1_size3.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.rowdecoder_stage1_size3.tfall = tfall
+            self.RAM.rowdecoder_stage1_size3.trise = trise
+            self.RAM.rowdecoder_stage1_size3.delay = max(tfall, trise)
+            #crit_path_delay += (self.RAM.rowdecoder_stage1_size3.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.rowdecoder_stage1_size3.name] = self.RAM.rowdecoder_stage1_size3.delay
+            self.RAM.rowdecoder_stage1_size3.power = float(spice_meas["meas_avg_power"][0])
+
+
+        print("  Updating delay for " + self.RAM.rowdecoder_stage3.name)
+        spice_meas = spice_interface.run(self.RAM.rowdecoder_stage3.top_spice_path, parameter_dict) 
+        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+            valid_delay = False
+            tfall = 1
+            trise = 1
+        else :  
+            tfall = float(spice_meas["meas_total_tfall"][0])
+            trise = float(spice_meas["meas_total_trise"][0])
+        if tfall < 0 or trise < 0 :
+            valid_delay = False
+        self.RAM.rowdecoder_stage3.tfall = tfall
+        self.RAM.rowdecoder_stage3.trise = trise
+        self.RAM.rowdecoder_stage3.delay = max(tfall, trise)
+        self.delay_dict[self.RAM.rowdecoder_stage3.name] = self.RAM.rowdecoder_stage3.delay
+        self.RAM.rowdecoder_stage3.power = float(spice_meas["meas_avg_power"][0])
+
+
+        if self.RAM.memory_technology == "SRAM":
+            print("  Updating delay for " + self.RAM.precharge.name)
+            spice_meas = spice_interface.run(self.RAM.precharge.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.precharge.tfall = tfall
+            self.RAM.precharge.trise = trise
+            self.RAM.precharge.delay = max(tfall, trise)
+            #crit_path_delay += (self.RAM.precharge.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.precharge.name] = self.RAM.precharge.delay
+            self.RAM.precharge.power = float(spice_meas["meas_avg_power"][0])
+
+            print("  Updating delay for " + self.RAM.samp_part2.name)
+            spice_meas = spice_interface.run(self.RAM.samp_part2.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.samp_part2.tfall = tfall
+            self.RAM.samp_part2.trise = trise 
+            self.RAM.samp_part2.delay = max(tfall, trise)
+
+            self.delay_dict[self.RAM.samp_part2.name] = self.RAM.samp_part2.delay
+            self.RAM.samp_part2.power = float(spice_meas["meas_avg_power"][0])
+
+            print("  Updating delay for " + self.RAM.samp.name)
+            spice_meas = spice_interface.run(self.RAM.samp.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.samp.tfall = tfall + self.RAM.samp_part2.tfall
+            self.RAM.samp.trise = trise + self.RAM.samp_part2.trise
+
+            self.RAM.samp.delay = max(tfall, trise)
+            #crit_path_delay += (self.RAM.samp.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.samp.name] = self.RAM.samp.delay
+            self.RAM.samp.power = float(spice_meas["meas_avg_power"][0])
+
+            print("  Updating delay for " + self.RAM.writedriver.name)
+            spice_meas = spice_interface.run(self.RAM.writedriver.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.writedriver.tfall = tfall
+            self.RAM.writedriver.trise = trise
+            self.RAM.writedriver.delay = max(tfall, trise)
+            #crit_path_delay += (self.RAM.writedriver.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.writedriver.name] = self.RAM.writedriver.delay
+            self.RAM.writedriver.power = float(spice_meas["meas_avg_power"][0])
+
+        else:
+            print("  Updating delay for " + self.RAM.bldischarging.name)
+            spice_meas = spice_interface.run(self.RAM.bldischarging.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.bldischarging.tfall = tfall
+            self.RAM.bldischarging.trise = trise
+            self.RAM.bldischarging.delay = max(tfall, trise)
+            #crit_path_delay += (self.RAM.bldischarging.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.bldischarging.name] = self.RAM.bldischarging.delay
+            self.RAM.bldischarging.power = float(spice_meas["meas_avg_power"][0])
+
+            print("  Updating delay for " + self.RAM.blcharging.name)
+            spice_meas = spice_interface.run(self.RAM.blcharging.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.blcharging.tfall = tfall
+            self.RAM.blcharging.trise = trise
+            self.RAM.blcharging.delay = max(tfall, trise)
+            #crit_path_delay += (self.RAM.blcharging.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.blcharging.name] = self.RAM.blcharging.delay
+            self.RAM.blcharging.power = float(spice_meas["meas_avg_power"][0])
+
+            self.RAM.target_bl = 0.99* float(spice_meas["meas_outputtarget"][0])
+
+            self.RAM._update_process_data()
+
+            print("  Updating delay for " + self.RAM.blcharging.name)
+            spice_meas = spice_interface.run(self.RAM.blcharging.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.blcharging.tfall = tfall
+            self.RAM.blcharging.trise = trise
+            self.RAM.blcharging.delay = max(tfall, trise)
+            #crit_path_delay += (self.RAM.blcharging.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.blcharging.name] = self.RAM.blcharging.delay
+            self.RAM.blcharging.power = float(spice_meas["meas_avg_power"][0])
+            self.RAM.target_bl = 0.99*float(spice_meas["meas_outputtarget"][0])
+
+            self.RAM._update_process_data()
+
+            print("  Updating delay for " + self.RAM.mtjsamp.name)
+            spice_meas = spice_interface.run(self.RAM.mtjsamp.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.mtjsamp.tfall = tfall
+            self.RAM.mtjsamp.delay = tfall
+            self.RAM.mtjsamp.trise = max(tfall, trise)
+            #crit_path_delay += (self.RAM.mtjsamp.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.mtjsamp.name] = self.RAM.mtjsamp.delay
+            self.RAM.mtjsamp.power = float(spice_meas["meas_avg_power"][0])
+
+    
+        print("  Updating delay for " + self.RAM.columndecoder.name)
+        spice_meas = spice_interface.run(self.RAM.columndecoder.top_spice_path, parameter_dict) 
+        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+            valid_delay = False
+            tfall = 1
+            trise = 1
+        else :  
+            tfall = float(spice_meas["meas_total_tfall"][0])
+            trise = float(spice_meas["meas_total_trise"][0])
+        if tfall < 0 or trise < 0 :
+            valid_delay = False
+        self.RAM.columndecoder.tfall = tfall
+        self.RAM.columndecoder.trise = trise
+        self.RAM.columndecoder.delay = max(tfall, trise)
+        #crit_path_delay += (self.RAM.columndecoder.delay* self.RAM.delay_weight)
+        self.delay_dict[self.RAM.columndecoder.name] = self.RAM.columndecoder.delay
+        self.RAM.columndecoder.power = float(spice_meas["meas_avg_power"][0])
+
+
+        print("  Updating delay for " + self.RAM.configurabledecoderi.name)
+        spice_meas = spice_interface.run(self.RAM.configurabledecoderi.top_spice_path, parameter_dict) 
+        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+            valid_delay = False
+            tfall = 1
+            trise = 1
+        else :  
+            tfall = float(spice_meas["meas_total_tfall"][0])
+            trise = float(spice_meas["meas_total_trise"][0])
+        if tfall < 0 or trise < 0 :
+            valid_delay = False
+        self.RAM.configurabledecoderi.tfall = tfall
+        self.RAM.configurabledecoderi.trise = trise
+        self.RAM.configurabledecoderi.delay = max(tfall, trise)
+        #crit_path_delay += (self.RAM.configurabledecoderi.delay* self.RAM.delay_weight)
+        self.delay_dict[self.RAM.configurabledecoderi.name] = self.RAM.configurabledecoderi.delay
+        self.RAM.configurabledecoderi.power = float(spice_meas["meas_avg_power"][0])
+
+
+        if self.RAM.cvalidobj1 ==1:
+            print("  Updating delay for " + self.RAM.configurabledecoder3ii.name)
+            spice_meas = spice_interface.run(self.RAM.configurabledecoder3ii.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.configurabledecoder3ii.tfall = tfall
+            self.RAM.configurabledecoder3ii.trise = trise
+            self.RAM.configurabledecoder3ii.delay = max(tfall, trise)
+            #crit_path_delay += (self.RAM.configurabledecoder3ii.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.configurabledecoder3ii.name] = self.RAM.configurabledecoder3ii.delay
+            self.RAM.configurabledecoder3ii.power = float(spice_meas["meas_avg_power"][0])
+
+
+        if self.RAM.cvalidobj2 ==1:
+            print("  Updating delay for " + self.RAM.configurabledecoder2ii.name)
+            spice_meas = spice_interface.run(self.RAM.configurabledecoder2ii.top_spice_path, parameter_dict) 
+            if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+                valid_delay = False
+                tfall = 1
+                trise = 1
+            else :  
+                tfall = float(spice_meas["meas_total_tfall"][0])
+                trise = float(spice_meas["meas_total_trise"][0])
+            if tfall < 0 or trise < 0 :
+                valid_delay = False
+            self.RAM.configurabledecoder2ii.tfall = tfall
+            self.RAM.configurabledecoder2ii.trise = trise
+            self.RAM.configurabledecoder2ii.delay = max(tfall, trise)
+            #crit_path_delay += (self.RAM.configurabledecoder2ii.delay* self.RAM.delay_weight)
+            self.delay_dict[self.RAM.configurabledecoder2ii.name] = self.RAM.configurabledecoder2ii.delay
+            self.RAM.configurabledecoder2ii.power = float(spice_meas["meas_avg_power"][0])
+
+        print("  Updating delay for " + self.RAM.configurabledecoderiii.name)
+        spice_meas = spice_interface.run(self.RAM.configurabledecoderiii.top_spice_path, parameter_dict) 
+        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+            valid_delay = False
+            tfall = 1
+            trise = 1
+        else :  
+            tfall = float(spice_meas["meas_total_tfall"][0])
+            trise = float(spice_meas["meas_total_trise"][0])
+        if tfall < 0 or trise < 0 :
+            valid_delay = False
+        self.RAM.configurabledecoderiii.tfall = tfall
+        self.RAM.configurabledecoderiii.trise = trise
+        self.RAM.configurabledecoderiii.delay = max(tfall, trise)
+        #crit_path_delay += (self.RAM.configurabledecoderiii.delay* self.RAM.delay_weight)
+        self.delay_dict[self.RAM.configurabledecoderiii.name] = self.RAM.configurabledecoderiii.delay
+        self.RAM.configurabledecoderiii.power = float(spice_meas["meas_avg_power"][0])
+  
+
+        print("  Updating delay for " + self.RAM.pgateoutputcrossbar.name)
+        spice_meas = spice_interface.run(self.RAM.pgateoutputcrossbar.top_spice_path, parameter_dict) 
+        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+            valid_delay = False
+            tfall = 1
+            trise = 1
+        else :  
+            tfall = float(spice_meas["meas_total_tfall"][0])
+            trise = float(spice_meas["meas_total_trise"][0])
+        if tfall < 0 or trise < 0 :
+            valid_delay = False
+        self.RAM.pgateoutputcrossbar.tfall = tfall
+        self.RAM.pgateoutputcrossbar.trise = trise
+        self.RAM.pgateoutputcrossbar.delay = max(tfall, trise)
+        #crit_path_delay += (self.RAM.pgateoutputcrossbar.delay* self.RAM.delay_weight)
+        self.delay_dict[self.RAM.pgateoutputcrossbar.name] = self.RAM.pgateoutputcrossbar.delay
+        self.RAM.pgateoutputcrossbar.power = float(spice_meas["meas_avg_power"][0])
+        # sets the our representative critical path
+        # self.delay_dict["rep_crit_path"] = crit_path_delay 
+
+        print("  Updating delay for " + self.RAM.wordlinedriver.name)
+        spice_meas = spice_interface.run(self.RAM.wordlinedriver.top_spice_path, parameter_dict) 
+        if spice_meas["meas_total_tfall"][0] == "failed" or spice_meas["meas_total_trise"][0] == "failed" :
+            valid_delay = False
+            tfall = 1
+            trise = 1
+        else :  
+            tfall = float(spice_meas["meas_total_tfall"][0])
+            trise = float(spice_meas["meas_total_trise"][0])
+        if tfall < 0 or trise < 0 :
+            valid_delay = False
+        self.RAM.wordlinedriver.tfall = tfall
+        self.RAM.wordlinedriver.trise = trise
+        self.RAM.wordlinedriver.delay = max(tfall, trise)
+        #crit_path_delay += (self.RAM.wordlinedriver.delay* self.RAM.delay_weight)
+        self.delay_dict[self.RAM.wordlinedriver.name] = self.RAM.wordlinedriver.delay
+        self.RAM.wordlinedriver.power = float(spice_meas["meas_avg_power"][0])
+        if self.RAM.wordlinedriver.wl_repeater == 1:
+            self.RAM.wordlinedriver.power *=2
+
+        return valid_delay

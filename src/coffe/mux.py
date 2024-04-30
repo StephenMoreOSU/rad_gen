@@ -25,8 +25,12 @@ class Mux2Lvl(c_ds.SizeableCircuit):
     level1_size: int                = None # Size of the first level of muxing
     level2_size: int                = None # Size of the second level of muxing
     use_tgate: bool                 = None # use pass transistor or transmission gates -> coming from Model class
+    use_driver: bool                = None # have two stage inv driver at the end of 
 
     def __post_init__(self):
+        # TODO clean up
+        if self.use_driver is None:
+            self.use_driver = True
         # Calculate level sizes and number of SRAMs per mux
         self.level2_size = int( math.sqrt( self.required_size ) )
         self.level1_size = int( math.ceil( float(self.required_size) / self.level2_size ) )
@@ -59,7 +63,10 @@ class Mux2Lvl(c_ds.SizeableCircuit):
         sp_name = self.get_sp_name()
 
         # Generate SPICE subcircuits
-        mux_subcircuits._generate_tgate_driver(spice_file, sp_name, self.implemented_size)
+        if self.use_driver:
+            mux_subcircuits._generate_tgate_driver(spice_file, sp_name, self.implemented_size)
+        else:
+            mux_subcircuits._generate_tgate_sense_only(spice_file, sp_name, self.implemented_size)
         mux_subcircuits._generate_tgate_2lvl_mux_off(spice_file, sp_name, self.implemented_size)
         mux_subcircuits._generate_tgate_2lvl_mux_partial(spice_file, sp_name, self.implemented_size, self.level1_size)
         mux_subcircuits._generate_tgate_2lvl_mux_on(spice_file, sp_name, self.implemented_size, self.level1_size, self.level2_size)
@@ -70,7 +77,10 @@ class Mux2Lvl(c_ds.SizeableCircuit):
         spice_file.write("******************************************************************************************\n")
         spice_file.write(".SUBCKT " + sp_name + "_on n_in n_out n_gate n_gate_n n_vdd n_gnd\n")
         spice_file.write("X" + sp_name + "_on_mux_only n_in n_1_1 n_gate n_gate_n n_vdd n_gnd " + sp_name + "_on_mux_only\n")
-        spice_file.write("X" + sp_name + "_driver n_1_1 n_out n_vdd n_gnd " + sp_name + "_driver\n")
+        if self.use_driver:
+            spice_file.write("X" + sp_name + "_driver n_1_1 n_out n_vdd n_gnd " + sp_name + "_driver\n")
+        else:
+            spice_file.write("X" + sp_name + "_sense n_1_1 n_out n_vdd n_gnd " + sp_name + "_sense\n")
         spice_file.write(".ENDS\n\n\n")
         
         # Close SPICE file
@@ -238,8 +248,10 @@ class Mux2Lvl(c_ds.SizeableCircuit):
         # Update the width & area dicts
         width_dict[sp_name] = width                           
         area_dict[sp_name] = area
+
         area_dict[f"{sp_name}_sram"] = area_with_sram
         width_dict[f"{sp_name}_sram"] = width_with_sram
+
 
     def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], ratio: float):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
@@ -290,6 +302,9 @@ class Mux2to1(c_ds.SizeableCircuit):
 
     def __post_init__(self):
         super().__post_init__()
+    
+    def __hash__(self):
+        return super().__hash__()
 
     def generate_ptran_2_to_1_mux(self, spice_filename: str) -> Tuple[ List[str], List[str] ]:
         """ Generate a 2:1 pass-transistor MUX with shared SRAM """

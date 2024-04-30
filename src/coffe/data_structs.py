@@ -49,6 +49,9 @@ class LoadCircuit():
     def __post_init__(self):
         self.sp_name = self.get_sp_name()    
 
+    def __hash__(self) -> int:
+        return id(self)
+
     def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         msg = "Function 'update_wires' must be overridden in class _SizableCircuit."
@@ -89,7 +92,9 @@ class SizeableCircuit():
     tfall: int | float                                 = 1      # Fall time for this subcircuit
     trise: int | float                                 = 1      # Rise time for this subcircuit
     delay: int | float                                 = 1      # Delay for this subcircuit
-    delay_weight: int | float                          = 1      # Delay weight in a representative critical path
+    delay_weight: int | float                          = 1      # Delay weight in a representative critical path -> specific to a type of circuit CB mux, SB mux etc
+    inst_delay_weight: int | float                     = 1      # Delay weight in a repr crit path, but for a specific instance of a subckt. -> sb_mux_id_0
+                                                                #   e.g. L4 driving SB mux may be on 90% of critical paths so we would have its inst weight be 90% 
     power: int | float                                 = 1      # Dynamic power for this subcircuit
 
     name: str                                          = None
@@ -106,6 +111,9 @@ class SizeableCircuit():
     def __post_init__(self):
         self.sp_name = self.get_sp_name()
 
+    def __hash__(self) -> int:
+        return id(self)
+
     def get_param_str(self) -> str:
         """ 
             Get the spice string for this subckt parameter
@@ -118,6 +126,13 @@ class SizeableCircuit():
             Get the string used in spice for this subckt name
         """
         return f"{self.name}_id_{self.id}"
+
+    def set_fields(self, fields: Dict[str, Any]):
+        """ 
+            Set the fields of this sizeable circuit from a dictionary
+        """
+        for field_name, field_val in fields.items():
+            setattr(self, field_name, field_val)
 
     def generate(self):
         """ Generate SPICE subcircuits.
@@ -156,6 +171,16 @@ class CompoundCircuit():
     
     def __post_init__(self):
         self.sp_name = self.get_sp_name() 
+
+    def __hash__(self) -> int:
+        return id(self)
+
+    def set_fields(self, fields: Dict[str, Any]):
+        """ 
+            Set the fields of this sizeable circuit from a dictionary
+        """
+        for field_name, field_val in fields.items():
+            setattr(self, field_name, field_val)
 
     def get_sp_name(self) -> str:
         """ 
@@ -261,6 +286,8 @@ class Value:
 
     def __post_init__(self, abs_val_flag: bool):
         # if we get the abs_val_flag, we assume the value is absolute and we decode it into the factors that exist in units
+        # if not self.units:
+        #     self.units = Units()
         if abs_val_flag:
             self.set_value(abs_val = self.value)
     
@@ -303,8 +330,12 @@ class Value:
             Get the spice string for this value with suffix
             Ex. "0.1n" | "1.0u" | "0.5m"
         """
-        return f"{self.value}{self.units.factor_suffix}"
-    
+        if self.units.factor_suffix is not None:
+            ret_val: str = f"{self.value}{self.units.factor_suffix}"
+        else:
+            raise ValueError("Units must have a factor_suffix set")
+        return ret_val
+
     def get_abs_val(self) -> float:
         """ 
             Get the absolute value of this value
@@ -566,13 +597,13 @@ class SimTB():
     # Unique TB identifier, required because sometimes we simulate the same CB in a different TB environment
     id: int = None
     # Data required to perform a top level simulation of a particular component
-    inc_libs: List[SpLib]                               = None
-    mode: SpSimMode                                         = None 
-    options: Dict[str, str]                                 = None 
+    inc_libs: List[SpLib]                                       = None
+    mode: SpSimMode                                             = None 
+    options: Dict[str, str]                                     = None 
     # Voltage sources used in the top level simulation
-    voltage_srcs: List[SpVoltageSrc]                         = None
-    stim_vsrc: SpVoltageSrc                                 = None
-    dut_dc_vsrc: SpVoltageSrc                             = None
+    voltage_srcs: List[SpVoltageSrc]                            = None
+    stim_vsrc: SpVoltageSrc                                     = None
+    dut_dc_vsrc: SpVoltageSrc                                   = None
     # Structs to generate .MEAS statements
     meas_points: List[SpMeasure]                                = None 
     node_prints: List[SpNodeProbe]                              = None
@@ -593,6 +624,9 @@ class SimTB():
     # dep_wire_names: List[str] = []
     # dep_tx_names: List[str] = []
     # dep_ckt_basenames: List[str] = []           # basename of subckt definitions that 
+
+    delay_weight: int | float = 1   # If there are multiple testbenches for the same circuit, this is the weight of each one on that circuits crit path delay contribution
+    power_weight: int | float = 1
 
     pwr_meas_clk_period: Value = field(
         default_factory = lambda: Value(
@@ -679,7 +713,12 @@ class SimTB():
             # These two args used for edge cases (lut driver w lut load)
             tb_fname: str = None,
             pwr_meas_lines: List[str] = None,
-            ) -> str:
+            # arg to describe if measurements are associated with a new inverter TODO clean up
+            #   basically if we're doing new measurement but its only going across a load then we don't need to invert the meas statements
+            meas_inv_list: List[bool] = None,
+            init_inv_idx: int = 0,
+            # Custom meas points for edge case (lut driver w lut load requires RISE=2) on trig of tfall
+        ) -> str:
         """
             Common functionality for child generation of SPICE Testbenches
         """
@@ -705,44 +744,56 @@ class SimTB():
                     type = "voltage",
                 )
             )
-        # Compressed format for generating measurement statements for each inverter and tfall / trise combo
-        # total trise / tfall is same as the last inverter
-        for i, meas_name in enumerate(delay_names):
-            for trans_state in ["rise", "fall"]:
-                # Define variables to determine which nodes to use for trig / targ in the case of rising / falling
-                trig_trans: bool = trans_state == "rise"
-                # Create delay index to deal with repeat of last inverter for total
-                delay_idx: int = i #if meas_name != "total" else len(delay_names) - 2
-                targ_node: str = targ_nodes[delay_idx]
-                # If we measure total delay we just use the index of the last inverter
-                inv_idx: int = i + 1 if meas_name != "total" else i
-                # Rise and fall combo, based on how many inverters in the chain
-                # If its even we set both to rise or both to fall
-                if inv_idx % 2 == 0:
-                    rise_fall_combo: Tuple[bool] = (trig_trans, trig_trans)
-                else:
-                    rise_fall_combo: Tuple[bool] = (not trig_trans, trig_trans)
 
-                delay_bounds: Dict[str, SpDelayBound] = {
-                    del_str: SpDelayBound(
-                        probe = SpNodeProbe(
-                            node = node,
-                            type = "voltage",
+        # Only generate measures if they don't already exist
+        if len(self.meas_points) == 0:
+            # Compressed format for generating measurement statements for each inverter and tfall / trise combo
+            # total trise / tfall is same as the last inverter
+            inv_idx: int = None
+            for i, meas_name in enumerate(delay_names):
+                # if meas_inv_list at i is true this means we increment the number of driver stages used, if its not we don't 
+                if meas_inv_list is not None:
+                    if inv_idx is None:
+                        inv_idx = init_inv_idx + 1 if meas_inv_list[i] else init_inv_idx
+                    else:
+                        inv_idx = inv_idx + 1 if meas_inv_list[i] else inv_idx
+                for trans_state in ["rise", "fall"]:
+                    # Define variables to determine which nodes to use for trig / targ in the case of rising / falling
+                    trig_trans: bool = trans_state == "rise"
+                    # Create delay index to deal with repeat of last inverter for total
+                    delay_idx: int = i #if meas_name != "total" else len(delay_names) - 2
+                    targ_node: str = targ_nodes[delay_idx]
+                    # If we measure total delay we just use the index of the last inverter
+
+                    if meas_inv_list is None:
+                        inv_idx = i + 1 if meas_name != "total" else i
+
+                    # Rise and fall combo, based on how many inverters in the chain
+                    # If its even we set both to rise or both to fall
+                    if inv_idx % 2 == 0:
+                        rise_fall_combo: Tuple[bool] = (trig_trans, trig_trans)
+                    else:
+                        rise_fall_combo: Tuple[bool] = (not trig_trans, trig_trans)
+
+                    delay_bounds: Dict[str, SpDelayBound] = {
+                        del_str: SpDelayBound(
+                            probe = SpNodeProbe(
+                                node = node,
+                                type = "voltage",
+                            ),
+                            eval_cond = self.delay_eval_cond,
+                            rise = rise_fall_combo[i],
+                        ) for (i, node), del_str in zip(enumerate([trig_node, targ_node]), ["trig", "targ"])
+                    }
+                    # Create measurement object
+                    measurement: SpMeasure = SpMeasure(
+                        value = Value(
+                            name = f"{self.meas_val_prefix}_{meas_name}_t{trans_state}",
                         ),
-                        eval_cond = self.delay_eval_cond,
-                        rise = rise_fall_combo[i],
-                    ) for (i, node), del_str in zip(enumerate([trig_node, targ_node]), ["trig", "targ"])
-                }
-
-                # Create measurement object
-                measurement: SpMeasure = SpMeasure(
-                    value = Value(
-                        name = f"{self.meas_val_prefix}_{meas_name}_t{trans_state}",
-                    ),
-                    trig = delay_bounds["trig"],
-                    targ = delay_bounds["targ"],
-                )
-                self.meas_points.append(measurement)
+                        trig = delay_bounds["trig"],
+                        targ = delay_bounds["targ"],
+                    )
+                    self.meas_points.append(measurement)
         low_volt_time: Value = copy.deepcopy(self.stim_vsrc.period)
         # Seems like the low voltage measure is always 1n less than period
         low_volt_time.value = low_volt_time.value - 1
@@ -874,18 +925,20 @@ class Block:
     def set_block_tile_area(self, area_dict: Dict[str, float | int], width_dict: Dict[str, float | int]):
         # calculates the area with and without SRAM and average of this block type
         for ckt in self.ckt_defs:
-            self.block_avg_area += self.perc_dist[ckt] * area_dict[ckt.sp_name]
             self.block_area += ckt.num_per_tile * area_dict[ckt.sp_name + "_sram"]
             self.block_area_no_sram += ckt.num_per_tile * area_dict[ckt.sp_name]
             self.block_area_sram += ckt.num_per_tile * (area_dict[ckt.sp_name + "_sram"] - area_dict[ckt.sp_name])
+            # Avg area of a single ckt in the block (ie SB Mux in SB)
+            self.block_avg_area += self.perc_dist[ckt] * area_dict[ckt.sp_name]
             self.block_avg_area_no_sram += self.perc_dist[ckt] * (area_dict[ckt.sp_name + "_sram"] - area_dict[ckt.sp_name])
         assert self.block_area != 0 and self.block_area_no_sram != 0 and self.block_avg_area != 0
         # Set the fields in the area dict
         # Specific to an SB mux
-        area_dict[f"{self.ckt_defs[0].sp_name}_sram"] = self.block_area_sram
-        area_dict[f"{self.ckt_defs[0].sp_name}_no_sram"] = self.block_area_no_sram
+        # TODO figure out if we need to do this for all muxes
         
         # Across all Sb muxes (name rather than sp_name)
+        area_dict[f"{self.ckt_defs[0].name}_sram"] = self.block_area_sram
+        area_dict[f"{self.ckt_defs[0].name}_no_sram"] = self.block_area_no_sram
         area_dict[f"{self.ckt_defs[0].name}_avg"] = self.block_avg_area
         area_dict[f"{self.ckt_defs[0].name}_total"] = self.block_area
         width_dict[f"{self.ckt_defs[0].name}_total"] = math.sqrt(self.block_area)
@@ -893,8 +946,8 @@ class Block:
     def set_block_widths(self, area_dict: Dict[str, float | int], num_stripes: int, lb_height: float):
         # Just set in this struct in case we need later
         self.num_stripes = num_stripes
-        for ckt, freq  in self.freq_dist.items():
-            self.stripe_widths[ckt] = freq * area_dict[f"{ckt.sp_name}_no_sram"] / ( num_stripes * lb_height)
+        for ckt, freq in self.freq_dist.items():
+            self.stripe_widths[ckt] = freq * area_dict[ckt.sp_name] / ( num_stripes * lb_height)
             self.stripe_sram_widths[ckt] = freq * (area_dict[f"{ckt.sp_name}_sram"] - area_dict[f"{ckt.sp_name}"]) / ( num_stripes * lb_height)
             # Weighted avg across all instantiations 
             self.stripe_avg_width += self.stripe_widths[ckt] * self.perc_dist[ckt]

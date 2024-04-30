@@ -79,13 +79,20 @@ def log_format_list(*args : Tuple[str]) -> str:
 #  ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝     ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
 
 
-def get_unique_obj(objects: List[Any], condition: Callable) -> Any:
+def str_match_condition(cmp_key: str, filt_key: str, ) -> bool:
+    """
+        Returns True if filt_key is in search_key
+    """
+    return filt_key in cmp_key
+
+
+def get_unique_obj(objects: List[Any], condition: Callable, *args, **kwargs) -> Any:
     """
         Returns an object from a list that satisfies the callable condition
             if no objects satisfy this condition we throw error as it should exist
             if multiple objects satisfy this condition, we throw error as it should be unique
     """
-    matching_objs: List[Any] = [obj for obj in objects if condition(obj)]
+    matching_objs: List[Any] = [obj for obj in objects if condition(obj, *args, **kwargs)]
     if len(matching_objs) == 0:
         raise ValueError("ERROR: No matching object found")
     elif len(matching_objs) > 1:
@@ -192,6 +199,9 @@ def rad_gen_log(log_str: str, file: str):
 
 
 def are_lists_mutually_exclusive(lists: List[List[Any]]):
+    """
+        Checks if input list of lists are mutually exclusive
+    """
     return all(not set(lists[i]) & set(lists[j]) for i in range(len(lists)) for j in range(i + 1, len(lists)))
 
 def write_csv_file(filename, formatted_data):
