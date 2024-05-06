@@ -1257,7 +1257,7 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
             delay_names = delay_names,
             trig_node = trig_node, 
             targ_nodes = targ_nodes,
-            low_v_node = "n_general_out", # TODO figure out why tf we measure voltage of a floating node...
+            low_v_node = self.gnd_node, # TODO figure out why tf we measure voltage of a floating node...
             # pwr_meas_lines = cust_pwr_meas_lines,
             tb_fname = tb_fname,
         )

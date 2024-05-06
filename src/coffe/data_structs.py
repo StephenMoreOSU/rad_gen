@@ -923,6 +923,12 @@ class Block:
         assert len(set([ckt.name for ckt in self.ckt_defs])) == 1, "All ckt_defs must have the same name"
 
     def set_block_tile_area(self, area_dict: Dict[str, float | int], width_dict: Dict[str, float | int]):
+        # Init block areas to 0
+        self.block_area = 0
+        self.block_area_no_sram = 0
+        self.block_area_sram = 0
+        self.block_avg_area = 0
+        self.block_avg_area_no_sram = 0
         # calculates the area with and without SRAM and average of this block type
         for ckt in self.ckt_defs:
             self.block_area += ckt.num_per_tile * area_dict[ckt.sp_name + "_sram"]
@@ -935,7 +941,7 @@ class Block:
         # Set the fields in the area dict
         # Specific to an SB mux
         # TODO figure out if we need to do this for all muxes
-        
+        assert all(ckt_def.name == self.ckt_defs[0].name for ckt_def in self.ckt_defs), "All ckt_defs must have the same name"
         # Across all Sb muxes (name rather than sp_name)
         area_dict[f"{self.ckt_defs[0].name}_sram"] = self.block_area_sram
         area_dict[f"{self.ckt_defs[0].name}_no_sram"] = self.block_area_no_sram
@@ -943,12 +949,12 @@ class Block:
         area_dict[f"{self.ckt_defs[0].name}_total"] = self.block_area
         width_dict[f"{self.ckt_defs[0].name}_total"] = math.sqrt(self.block_area)
 
-    def set_block_widths(self, area_dict: Dict[str, float | int], num_stripes: int, lb_height: float):
+    def set_block_widths(self, area_dict: Dict[str, float | int], num_stripes: int, num_stripes_sram: int, lb_height: float):
         # Just set in this struct in case we need later
         self.num_stripes = num_stripes
         for ckt, freq in self.freq_dist.items():
             self.stripe_widths[ckt] = freq * area_dict[ckt.sp_name] / ( num_stripes * lb_height)
-            self.stripe_sram_widths[ckt] = freq * (area_dict[f"{ckt.sp_name}_sram"] - area_dict[f"{ckt.sp_name}"]) / ( num_stripes * lb_height)
+            self.stripe_sram_widths[ckt] = freq * (area_dict[f"{ckt.sp_name}_sram"] - area_dict[f"{ckt.sp_name}"]) / ( num_stripes_sram * lb_height)
             # Weighted avg across all instantiations 
             self.stripe_avg_width += self.stripe_widths[ckt] * self.perc_dist[ckt]
             self.stripe_avg_sram_width += self.stripe_sram_widths[ckt] * self.perc_dist[ckt]

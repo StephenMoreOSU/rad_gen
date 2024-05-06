@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass, field, InitVar
+from dataclasses import dataclass, field, fields, InitVar
 
 import os
 import sys
@@ -109,204 +109,296 @@ import src.common.rr_parse as rrg_parse
 #     assert:
 #     - An action performed for each param in exhaustive list -> set( [param for param in all_params] ) == set( [param for param in action_params] )
 
-
-
-# RRG data structures are taken from csvs generated via the rr_parse script
-# @dataclass
-# class SegmentRRG():
-#     """ 
-#         This class describes a segment in the routing resource graph (RRG). 
-#     """
-#     # Required fields
-#     name: str            # Name of the segment
-#     id: int               
-#     length: int          # Length of the segment in number of tiles
-#     C_per_meter: float  # Capacitance per meter of the segment (FROM VTR)
-#     R_per_meter: float  # Resistance per meter of the segment (FROM VTR)
-
-# @dataclass
-# class SwitchRRG():
-#     name: str
-#     id: int
-#     type: str
-#     R: float        = None 
-#     Cin: float      = None 
-#     Cout: float     = None 
-#     Tdel: float     = None 
-
-
-# @dataclass
-# class MuxLoadRRG():
-#     mux_type: str   # What mux are we referring to?
-#     freq: int       # How many of these muxes are attached?
-
-# @dataclass
-# class MuxIPIN():
-#     wire_type: str      # What is the wire type going into this mux IPIN?
-#     drv_type: str       # What is the driver type of the wire going into this mux IPIN?
-#     freq: int          # How many of these muxes are attached?
-
-# @dataclass
-# class MuxWireStatRRG():
-#     wire_type: str            # What wire are we referring to?
-#     drv_type: str             # What mux is driving this wire?
-#     mux_ipins: List[MuxIPIN]  # What are the mux types / frequency attached to this wire?
-#     mux_loads: List[MuxLoadRRG]   # What are mux types / frequency attached to this wire?
-#     total_mux_inputs: int         = None  # How many mux inputs for mux driving this wire?
-#     total_wire_loads: int         = None       # How many wires are loading this mux in total of all types?
-#     def __post_init__(self):
-#         self.total_mux_inputs = sum([mux_ipin.freq for mux_ipin in self.mux_ipins])
-#         self.total_wire_loads = sum([mux_load.freq for mux_load in self.mux_loads])
-#     #     # Make suer that all the MuxIPINs in list add up to our total mux inputs
-#     #     assert sum([mux_ipin.freq for mux_ipin in self.mux_ipins]) == self.total_mux_inputs, "Mux IPIN frequencies do not add up to total mux inputs"
-#     #     # Make sure that all the MuxLoadRRGs in list add up to our total wire loads
-#     #     assert sum([mux_load.freq for mux_load in self.mux_loads]) == self.total_wire_loads, "Mux loads do not add up to total wire loads"
-
-# @dataclass
-# class Wire:
-#     # Describes a wire type in the FPGA
-#     name: str           = None            # Name of the wire type, used for the SpParameter globally across circuits Ex. "gen_routing_wire_L4", "intra_tile_ble_2_sb"    
-#     layer: int          = None            # What RC index do we use for this wire (what metal layer does this corresond to?)
-#     id: int             = None            # Unique identifier for this wire type, used to generate the wire name Ex. "gen_routing_wire_L4_0", "intra_tile_ble_2_sb_0"
-#     def __post_init__(self):
-#         # Struct verif checks
-#         assert self.id >= 0, "uid must be a non-negative integer"
-
-# @dataclass
-# class GenRoutingWire(Wire):
-#     """ 
-#         This class describes a general routing wire in an FPGA. 
-#     """
-#     # Required fields
-#     length: int              = None # Length of the general routing wire in number of tiles
-#     mux_info: MuxWireStatRRG = None
-
-
-
-# @dataclass 
-# class RoutingWireLoad(c_ds.SizeableCircuit):
-
-    
-
-# Managing List of Configuration States for COFFE:
-# use_rrg: bool -> If true we use RRG data to calculate wire loads + SB Mux sizes
-# 
+# Defining type aliases -> these dont work in python 3.9 :( 
+# SpMeasOut = Dict[str, List[float | bool]]    
+# SpMeasTbsOut = Dict[Type[c_ds.SimTB], SpMeasOut]
 
 
 # Make FPGA class with "models" for each component
 # Each model would have a list of possible base components, generated from user params
 # From that list of components, we can iterate and swap out components while we run simulations to test multiple types of components
 # When looking at multiple "models" we can determine if we need to do a geometric or linear sweep of them to accurately represent the FPGA
+
+
+def fpga_state_fmt(fpga_inst:'FPGA', tag: str):
+    row_data = { 
+        "TAG": tag, 
+        "AREA_UPDATE_ITER": fpga_inst.update_area_cnt, 
+        "WIRE_UPDATE_ITER": fpga_inst.update_wires_cnt, 
+        "DELAY_UPDATE_ITER": fpga_inst.update_delays_cnt, 
+        "COMPUTE_DISTANCE_ITER": fpga_inst.compute_distance_cnt, 
+    }
+    return row_data
+
+def fpga_state_to_csv(fpga_inst: 'FPGA', tag: str, catagory: str, ckt: Type[c_ds.SizeableCircuit] = None):
+    """ Update the FPGA telemetry CSV file with the current FPGA telemetry, Create CSV if it doesnt exist """
+
+    out_catagories = {
+        "wire_length": fpga_inst.wire_lengths,
+        "area": fpga_inst.area_dict,
+        "tx_size": fpga_inst.transistor_sizes,
+        "delay": fpga_inst.delay_dict
+    }
+
+    # Make sure these keys are same ones in FPGA object
+    assert set(list(out_catagories.keys())) == set(fpga_inst.log_out_catagories)
+
+    # Check to see if any repeating keys in any of these dicts
+    # if not set(fpga_inst.wire_lengths.keys()) & set(fpga_inst.area_dict.keys()) fpga_inst.transistor_sizes.keys()
+    # Write a CSV for each catagory of information we want to track
+    # for cat_k, cat_v in out_catagories.items():
+
+    # Open the CSV file
+    out_dir = "debug"
+    os.makedirs(out_dir, exist_ok=True)
+
+    if ckt is None:
+        cat_v = out_catagories[catagory]
+        fpath = os.path.join(out_dir,f"{catagory}_detailed.csv")
+
+    else:
+        sp_name: str = ckt.sp_name if ckt.sp_name else ckt.name
+        if catagory == "wire_length": 
+            cat_v = {wire_name: fpga_inst.wire_lengths[wire_name] for wire_name in ckt.wire_names}
+        elif catagory == "area":
+            cat_v = {area_key: fpga_inst.area_dict[area_key] for area_key in fpga_inst.area_dict.keys() if sp_name in area_key}
+        elif catagory == "tx_size":
+            cat_v = {tx_key: fpga_inst.transistor_sizes[tx_key] for tx_key in fpga_inst.transistor_sizes.keys() if sp_name in tx_key} 
+        
+        # Output path stuff
+        os.makedirs(os.path.join(out_dir, sp_name), exist_ok = True)
+        fpath = os.path.join(os.path.join(out_dir, sp_name),f"{catagory}_{sp_name}.csv")
+
+    sorted_cat = OrderedDict(sorted(cat_v.items())) 
+    row_data = { 
+        "TAG": tag, 
+        "AREA_UPDATE_ITER": fpga_inst.update_area_cnt, 
+        "WIRE_UPDATE_ITER": fpga_inst.update_wires_cnt, 
+        "DELAY_UPDATE_ITER": fpga_inst.update_delays_cnt, 
+        "COMPUTE_DISTANCE_ITER": fpga_inst.compute_distance_cnt, 
+        **sorted_cat
+    }
+    
+    with open(fpath, "a") as csv_file:
+        header = list(row_data.keys())
+        writer = csv.DictWriter(csv_file, fieldnames = header)
+        # Check if the file is empty and write header if needed
+        if csv_file.tell() == 0:
+            writer.writeheader()
+        writer.writerow(row_data)
+
+
 def sim_tbs( 
     tbs: List[Type[c_ds.SimTB]],
     sp_interface: spice.SpiceInterface,
     parameter_dict: Dict[str, List[str]],
-) -> Dict[Type[c_ds.SimTB], Dict[str, float]]:
+) -> Dict[Type[c_ds.SimTB], 
+        Dict[str, 
+            List[float] | List[bool]
+        ]
+]:
     """
         Runs HSPICE on all testbenches in the list with the corresponding parameter dict
         Returns a dict hashed by each testbench with its corresponding results (delay, power)
     """
     valid_delay: bool = True
-    sp_out_meas = { 
-        "trise": None,
-        "tfall": None,
-        "delay": None,
-        "power": None,    
-        "valid": None,  # If the simulation was successful
-    }
-    tb_meas: Dict[Type[c_ds.SimTB], Dict[str, float]] = defaultdict(lambda: copy.deepcopy(sp_out_meas))
+    # sp_out_meas = { 
+    #     "trise": None,
+    #     "tfall": None,
+    #     "delay": None,
+    #     "power": None,    
+    #     "valid": None,  # If the simulation was successful
+    # }
+    # sp_out_meas: List[float] = []
+    # tb_meas: Dict[Type[c_ds.SimTB], Dict[str, float]] = defaultdict(lambda: copy.deepcopy(sp_out_meas))
+    
+    # Create a default dict of dicts of lists to store measurements for each tb sweep point
+    tb_meas: Dict[Type[c_ds.SimTB], Dict[str, float]] = defaultdict(lambda: defaultdict(list))
+    
+
     for tb in tbs:
-        print(f"Updating delay for {tb.dut_ckt.sp_name} with TB {tb.tb_fname.strip('.sp')}")
+        print(f"Updating delay for {tb.dut_ckt.sp_name} with TB {tb.tb_fname.replace('.sp','')}")
         spice_meas = sp_interface.run(tb.sp_fpath, parameter_dict)
-        if  spice_meas["meas_total_tfall"][0] == "failed" \
-                or spice_meas["meas_total_trise"][0] == "failed":
-            valid_delay = False
-            tfall = 1
-            trise = 1
-        else:  
-            tfall = float(spice_meas["meas_total_tfall"][0])
-            trise = float(spice_meas["meas_total_trise"][0])
-        if tfall < 0 or trise < 0:
-            valid_delay = False
-        tb_meas[tb]["trise"] = trise
-        tb_meas[tb]["tfall"] = tfall
-        tb_meas[tb]["delay"] = max(tfall, trise)
-        tb_meas[tb]["power"] = float(spice_meas["meas_avg_power"][0])
-        tb_meas[tb]["valid"] = valid_delay
+        # if  spice_meas["meas_total_tfall"][0] == "failed" \
+        #         or spice_meas["meas_total_trise"][0] == "failed":
+        #     valid_delay = False
+        #     tfall = 1
+        #     trise = 1
+        # else:  
+        #     tfall = float(spice_meas["meas_total_tfall"][0])
+        #     trise = float(spice_meas["meas_total_trise"][0])
+        # if tfall < 0 or trise < 0:
+        #     valid_delay = False
+
+        valid_delays: List[bool] = None
+        # Account for additional measurements which are not explictly asked for
+        for key in spice_meas.keys():
+            # if key not in ["valid", "trise", "tfall", "power"]:
+            if key not in ["valid"]:
+                # Checks to see if the prefix used to define measure statement is in the key (ie its something we want to look for not random crap)
+                if tb.meas_val_prefix in key:
+                    # Our total trise / tfall delays will be checked for validity and set to 1 if invalid (high cost function value)
+                    if key in [f"{tb.meas_val_prefix}_total_trise", f"{tb.meas_val_prefix}_total_tfall"]:
+                        new_valid_delays: List[bool] = [ val != "failed" or float(val) > 0 for val in spice_meas[key] ]
+                        if valid_delays is not None:
+                            # Do element wise AND with prev valid delays and new ones to get updated delay validity
+                            valid_delays = [ 
+                                (prev_vd and new_vd) for prev_vd, new_vd in zip(
+                                    valid_delays,
+                                    new_valid_delays,
+                                ) 
+                            ]     
+                        else:
+                            valid_delays = new_valid_delays         
+                        trise_tfall_delays: List[float] = [ 
+                            float(val) if val != "failed" else 1 for val in spice_meas[key] 
+                        ]
+                        # Convert the tb specific tfall / trise keys into a standard used for all tb post processing
+                        if "tfall" in key:
+                            tb_meas[tb]['tfall'] = trise_tfall_delays
+                        elif "trise" in key:
+                            tb_meas[tb]['trise'] = trise_tfall_delays
+                        # Set valids, if they already exist 
+                    elif key == "meas_avg_power":
+                        tb_meas[tb]['power'] += [ float(val) for val in spice_meas[key] ]
+                    else:
+                        # if its an implicit key we will take all sweep measurement points and append them to the list for this key
+                        # TODO change to allow implicit meas statements to fail if they are not found 
+                        #   (valid delay may still be asserted if the measure statement is unneeded)
+                        tb_meas[tb][key] += [ float(sw_pt_val) for sw_pt_val in spice_meas[key] ]
+        # After this point the trise / tfall delays will be set in tb_meas so we can calculate the max delay
+        tb_meas[tb]["valid"] += valid_delays
+        tb_meas[tb]["delay"] += [ 
+            max(tfall, trise) 
+            for (tfall, trise) in zip(
+                tb_meas[tb]['tfall'],
+                tb_meas[tb]['trise']
+            )
+        ]
+
+
+        # tb_meas[tb]["trise"] = trise
+        # tb_meas[tb]["tfall"] = tfall
+        # tb_meas[tb]["power"] = float(spice_meas["meas_avg_power"][0])
+        # tb_meas[tb]["delay"] = max(tfall, trise)
+        # tb_meas[tb]["valid"] = valid_delay # bool
     return tb_meas
 
-def set_ckt_meas(
-    delay_dict: Dict[str, float], 
+def merge_tb_meas(
     in_tb_meas: Dict[
         Type[c_ds.SimTB],
-        Dict[str, float],
+        Dict[Type[c_ds.SimTB], 
+            Dict[str, 
+                List[float] | List[bool]
+            ]
+        ]
     ], 
-    set_flag: bool = True,
+    # delay_dict: Dict[str, float] = None, 
+    # set_flag: bool = True,
+
     # merge_fn: Callable[[
     #     Dict[
     #             Type[c_ds.SimTB], Dict[str, float | bool]
     #         ]
     #     ], Dict[str, float]
     # ],
-) -> Tuple[
-        float, 
-        Dict[ Type[c_ds.SizeableCircuit], Dict[str, float | bool]]
-]:
+) -> Dict[ Type[c_ds.SizeableCircuit], Dict[str, List[float] | List[bool]]]:
     """
         Takes result dictionary which is hashed by testbenches,
             merges delays and power for each unique circuit to set them
             merge function is specific to a testbench / subckt combo
     """
     # Calculate the portion of the critical path this circuit should contribute
-    repr_crit_path_delay: float = 0
+    # repr_crit_path_delay: float = None
     # Find all unique circuits in testbenches
     unique_ckts: Set[Type[c_ds.SizeableCircuit]] = set([tb.dut_ckt for tb in in_tb_meas.keys()])
-    merged_meas: Dict[Type[c_ds.SizeableCircuit] , Dict[str, float | bool]] = {}
+    merged_meas: Dict[Type[c_ds.SizeableCircuit] , Dict[str, List[float] | List[bool]]] = {}
     # Iterate through results for these circuits across different TB environments and set the circuit delay + power
     for ckt in unique_ckts:
         # Get all the testbenches that have this circuit
-        tb_meas: Dict[Type[c_ds.SimTB], Dict[str, float | bool]] = {
+        tb_meas: Dict[Type[c_ds.SimTB], Dict[str, List[float] | List[bool]]] = {
             tb: meas for tb, meas in in_tb_meas.items() if tb.dut_ckt == ckt
         }
         # Merge & Set the measurements for the circuit
         # merge_fn(tb_meas) # The other unique ckts may or may not be needed depending on the merge fn
-        tfall: float = 0
-        trise: float = 0
-        delay: float = 0
-        pwr: float = 0
+        
+        # tfall: float = 0
+        # trise: float = 0
+        # delay: float = 0
+        # pwr: float = 0
+        float_measures: Dict[str, List[float]] = defaultdict(lambda: [])
+        valids: List[bool] = []
+        # Iterate through tbs 
         for tb in tb_meas.keys():
             # We use a delay weight factor (required from user) to weight the delay of the subckt in this particular tb environment
-            # TODO initialize delay_weights somewhere
-            tfall += tb_meas[tb]["tfall"] / len(tb_meas.keys())
-            trise += tb_meas[tb]["trise"] / len(tb_meas.keys())
-            pwr += tb_meas[tb]["power"] * tb.power_weight # This may be unecessary TODO figure out
-        
-        delay = max(tfall, trise)
+            # tfall += tb_meas[tb]["tfall"] / len(tb_meas.keys()) # TODO initialize delay_weights somewhere rather than evenly weighting by dividing by len
+            # trise += tb_meas[tb]["trise"] / len(tb_meas.keys()) # TODO initialize delay_weights somewhere rather than evenly weighting by dividing by len
+            # pwr += tb_meas[tb]["power"] * tb.power_weight # This may be unecessary TODO figure out
+            for key in tb_meas[tb].keys():
+                if key != "valid":
+                    # Iterate through sweep points (should assert that len(trise) == len(all other keys))
+                    for i in range(len(tb_meas[tb]["trise"])):
+                        weighted_sw_pt_val: float = tb_meas[tb][key][i] / len(tb_meas.keys()) # TODO initialize delay_weights somewhere rather than evenly weighting by dividing by len
+                        if len(float_measures[key]) > i: # from > 0
+                            float_measures[key][i] += weighted_sw_pt_val
+                        else:
+                            float_measures[key].append(weighted_sw_pt_val)
+                else:
+                    # And the tb valids togther to get a single merged one
+                    if len(valids) > i: # from > 0
+                        valids = [ 
+                            valid and tb_meas[tb]["valid"][i] 
+                                for i, valid in enumerate(valids) 
+                        ]
+                    else:
+                        valids = tb_meas[tb]["valid"]
+
+                    # Already accounted for these keys manually
+                    # if key not in ["tfall", "trise", "power", "valid", "delay"]:
+                        # extra_measures[key] += tb_meas[tb][key] / len(tb_meas.keys())  # TODO initialize delay_weights somewhere rather than evenly weighting by dividing by len
+            
+            for i in range(len(float_measures["trise"])):
+                delay: float = max(float_measures["tfall"][i], float_measures["trise"][i])
+                if len(float_measures[key]) > 0:
+                    float_measures["delay"][i] = delay 
+                else:
+                    float_measures["delay"].append(delay)
+
+
+        # delay = max(tfall, trise)
         # Set the measurements for the circuit
-        if set_flag:
-            ckt.trise = trise
-            ckt.tfall = tfall
-            ckt.delay = delay
-            ckt.power = pwr
-        
-            delay_dict[ckt.sp_name] = delay
-        
+        # if set_flag:
+        #     # if we're setting the circuit delays there shouldnt be a point sweep going on
+        #     #   ie all key lists should be of len 1 
+        #     assert all(len(val == 1) for val in float_measures.values())
+        #     ckt.trise = float_measures["trise"][0]
+        #     ckt.tfall = float_measures["tfall"][0]
+        #     ckt.delay = float_measures["delay"][0]
+        #     ckt.power = float_measures["power"][0]
+        #     if delay_dict:
+        #         delay_dict[ckt.sp_name] = float_measures["delay"][0]
+        #     repr_crit_path_delay = float_measures["delay"][0]
+
+
         # Return the merged TB measurements into a dict hashed by subckt objects
         merged_meas[ckt] = {
-            "trise": trise,
-            "tfall": tfall,
-            "delay": delay,
-            "power": pwr,
-            "valid": all([tb_meas[tb]["valid"] for tb in tb_meas.keys()]) # TODO make sure its fine to invalidate other TB envs if one is invalid
+            **float_measures,
+            "valid": valids, 
         }
+        # merged_meas[ckt] = {
+        #     "trise": trise,
+        #     "tfall": tfall,
+        #     "delay": delay,
+        #     "power": pwr,
+        #     "valid": all([tb_meas[tb]["valid"] for tb in tb_meas.keys()]), # TODO make sure its fine to invalidate other TB envs if one is invalid
+        #     **extra_measures,
+        # }
 
         # Now we account for the weight of a particular circuit in the repr crit path calculation
         # If this weight is calculated specific to like SBs rather than L4 SBs we would want to divide it by the number of ckts to keep it fair
         # TODO change the / len(unique_ckts) if we want to set all weights according to thier instance (SB Mux L4, L16... )
-        repr_crit_path_delay += (delay * ckt.delay_weight / len(unique_ckts) )
-    return repr_crit_path_delay, merged_meas
-
-
+        # repr_crit_path_delay += (delay * ckt.delay_weight / len(unique_ckts) )
+    return merged_meas
 
 @dataclass
 class FPGA:
@@ -356,31 +448,13 @@ class FPGA:
     ######################################################################################
 
     # Switch Block Muxes
-    # sb_muxes: List[sb_mux_lib.SwitchBlockMux] = field(
-    #     default_factory=lambda: []
-    # )
     sb_mux_tbs: List[sb_mux_lib.SwitchBlockMuxTB] = field(
         default_factory=lambda: []
     )
     # Connection Block Muxes
-    # cb_muxes: List[cb_mux_lib.ConnectionBlockMux] = field(
-    #     default_factory=lambda: []
-    # )
     cb_mux_tbs: List[cb_mux_lib.ConnectionBlockMuxTB] = field(
         default_factory=lambda: []
     )
-    # BLE General Output Loads
-    # gen_ble_output_loads: List[gen_r_load_lib.GeneralBLEOutputLoad] = field(
-    #     default_factory=lambda: []
-    # )
-    # # General Programmable Routing Loads
-    # gen_routing_loads: List[gen_r_load_lib.RoutingWireLoad] = field(
-    #     default_factory=lambda: []
-    # )
-    # Logic Clusters
-    # logic_clusters: List[lb_lib.LogicCluster] = field(
-    #     default_factory=lambda: []
-    # )
     # Local Mux TBs
     local_mux_tbs: List[lb_lib.LocalMuxTB] = field(
         default_factory=lambda: []
@@ -437,6 +511,12 @@ class FPGA:
     carry_chain_skip_mux_tbs: List[cc_lib.CarryChainSkipMuxTB] = field(
         default_factory=lambda: []
     )
+
+    # Dictionary of simulation testbenches hashed by thier dut ckt
+    tb_lib: Dict[
+        Type[c_ds.SizeableCircuit],
+        List[c_ds.SimTB]
+    ] = None
 
     # Carry Chain Info, used in update_area and other functions
     carry_skip_periphery_count: int = None
@@ -612,14 +692,48 @@ class FPGA:
     ########################################
     ### DEFINE CIRCUIT BASENAMES FOR REF ###
     ########################################
-    sb_mux_basename: str = "sb_mux"
-    routing_wire_load_basename: str = "routing_wire_load"
+    # sb_mux_basename: str = "sb_mux"
+    # routing_wire_load_basename: str = "routing_wire_load"
 
 
 
     # These strings are used as the names of various spice subckts in the FPGA
     #   We define thier names here so we can reference them to Simulation TB classes 
     #   before we actually create the subckt objects
+
+    def init_tb_subckt_libs(self):
+        """
+            Preconditions:
+                - All fields with Type[c_ds.SizeableCircuit] objects are initialized
+                - All fields with Type[c_ds.SimTB] objects are initialized
+            Initialize the testbench & subcircuit libraries
+        """
+        # Init testbench lib
+        tbs = []
+        sizeable_ckts = []
+        for _field in fields(self):
+            cur_obj: Any = getattr(self, _field.name)
+            # TODO refactor somewhere to allow for lists + non list definitions of tbs / subckts
+            if isinstance(cur_obj, list) and len(cur_obj) > 0 and issubclass(type(cur_obj[0]), c_ds.SimTB):
+                tbs += getattr(self, _field.name)
+            # look for sizeable ckts
+            if isinstance(cur_obj, list) and len(cur_obj) > 0 and issubclass(type(cur_obj[0]), c_ds.SizeableCircuit):
+                sizeable_ckts += getattr(self, _field.name)
+
+        # Soft assert there are no duplicate testbenches or sizeable circuits
+        tb_set = set(tbs)
+        ckt_set = set(sizeable_ckts)
+        assert len(tb_set) == len(tbs), "Duplicate testbench objects found"
+        assert len(ckt_set) == len(sizeable_ckts), "Duplicate sizeable circuit objects found"
+
+        # Iterate through  
+        self.tb_lib = defaultdict(list)
+        tb: Type[c_ds.SimTB]
+        for tb in tbs:
+            assert tb.dut_ckt is not None, "Testbench must have a DUT circuit"
+            self.tb_lib[tb.dut_ckt].append(tb)
+
+        
 
 
 
@@ -1655,7 +1769,7 @@ class FPGA:
                 lut_in_driver_load: lut_lib.LUTInputDriverLoad = in_ckt_combo[5]
                 lut_driver_tb = lut_lib.LUTInputDriverTB(
                     id = tb_idx,
-                    not_flag = True,
+                    not_flag = False,
                     # DUT Circuits
                     cb_mux = cb_mux,
                     local_r_wire_load = local_r_wire_load,
@@ -1673,7 +1787,7 @@ class FPGA:
                 self.lut_in_driver_tbs[lut_in_driver.lut_input_key].append(lut_driver_tb)
                 lut_not_driver_tb = lut_lib.LUTInputDriverTB(
                     id = tb_idx,
-                    not_flag = False,
+                    not_flag = True,
                     # DUT Circuits
                     cb_mux = cb_mux,
                     local_r_wire_load = local_r_wire_load,
@@ -1974,6 +2088,9 @@ class FPGA:
         for hardblock in self.hardblocklist:
             hardblock.generate_top(size_hb_interfaces)
 
+        # Initialize library of testbenches and sizeable ckts
+        self.init_tb_subckt_libs()
+
         # Calculate area, and wire data.
         print("Calculating area...")
         # Update area values
@@ -2131,10 +2248,10 @@ class FPGA:
             # FF ble output area
             ff_ble_output_area: float = ff_area + self.specs.N * self.area_dict["ble_output"] # TODO sp_name update
             cc_area_total: float = 0.0
-            self.skip_size: int = 5
+            # self.skip_size: int = 5
             self.carry_skip_periphery_count = int(math.floor ((self.specs.N * self.specs.FAs_per_flut) // self.skip_size))
             if self.specs.enable_carry_chain == 1:
-                cc_area_total =  self.specs.N * (self.area_dict[f"{cc.sp_name}"] * self.specs.FAs_per_flut + (self.specs.FAs_per_flut) * self.area_dict[f"{cc_mux.sp_name}"])
+                cc_area_total = self.specs.N * (self.area_dict[f"{cc.sp_name}"] * self.specs.FAs_per_flut + (self.specs.FAs_per_flut) * self.area_dict[f"{cc_mux.sp_name}"])
                 if not (self.carry_skip_periphery_count == 0 or self.specs.carry_chain_type == "ripple"):
                     cc_area_total += ((self.area_dict[f"{cc_skip_and.sp_name}"] + self.area_dict[f"{cc_skip_mux.sp_name}"]) * self.carry_skip_periphery_count)
                 cc_area_total += self.area_dict[f"{cc_inter.sp_name}"]
@@ -2264,6 +2381,39 @@ class FPGA:
             self.compute_distance()
 
         # Area logging
+        fpga_state_to_csv(self, "VERIF", "area")
+        fpga_state_to_csv(self, "VERIF", "tx_size")
+
+        # Area totals logging
+        csv_outdir = "debug"
+        # The totals for circuits are stored in below keys 
+        # TODO add RAM keys
+        # TODO remove the hardcoded keys...
+        area_total_keys = [
+            "sb_mux_total", # Added in the block function
+            "cb_mux_total", # Added in the block function
+            "local_mux_total", # Added in the block function
+            "lut_total",
+            "ff_total",
+            "ble_output_total",
+            "cc_area_total",
+            "ffableout_area_total",
+            "logic_cluster",
+            "total_carry_chain",
+            # "tile",
+        ]
+        total_areas = {
+            **fpga_state_fmt(self, "VERIF"),
+            **{key: self.area_dict[key] for key in area_total_keys},
+        }
+        totals_csv_out_fpath = os.path.join(csv_outdir, "area_totals.csv")
+        rg_utils.write_single_dict_to_csv(total_areas, totals_csv_out_fpath, "a")
+        # Per circuit area logging
+        unique_subckts: List[Type[c_ds.SizeableCircuit]] = list(self.tb_lib.keys())
+        for subckt in unique_subckts:
+            fpga_state_to_csv(self, "VERIF", "area", subckt)
+            fpga_state_to_csv(self, "VERIF", "tx_size", subckt)
+
         self.update_area_cnt += 1
 
     def compute_distance(self):
@@ -2310,9 +2460,9 @@ class FPGA:
                 self.num_luts_stripes =  self.num_luts_stripes + 1
 
         # Set widths of various blocks in a tile
-        self.sb_mux.set_block_widths(self.area_dict, self.num_sb_stripes, self.lb_height)
-        self.cb_mux.set_block_widths(self.area_dict, self.num_cb_stripes, self.lb_height)
-        self.local_mux.set_block_widths(self.area_dict, self.num_ic_stripes, self.lb_height)
+        self.sb_mux.set_block_widths(self.area_dict, self.num_sb_stripes, self.num_sbs_stripes, self.lb_height)
+        self.cb_mux.set_block_widths(self.area_dict, self.num_cb_stripes, self.num_cbs_stripes, self.lb_height)
+        self.local_mux.set_block_widths(self.area_dict, self.num_ic_stripes, self.num_ics_stripes, self.lb_height)
 
         # measure the width of each stripe:
         self.w_sb = self.sb_mux.stripe_avg_width
@@ -2358,90 +2508,130 @@ class FPGA:
         for index1, item1 in enumerate(self.stripe_order):
             for index2, item2 in enumerate(self.stripe_order):
                 if item1 != item2:
+                    # If we want to find the maximum distance between "cb" and "ic" stripes
                     if (item1 == "cb" and item2 == "ic") or (item1 == "ic" and item2 == "cb"):
                         if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            # Begin summing up distances across stripes to get the total distance of this wire
+                            # Start with the distance from closer side of stripe I/Os to the next stripe 
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+                            # Sum up widths of intermediate stripes (full width as we traverse across them)
                             for i in range(index1 + 1, index2):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                         else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                             for i in range(index2 + 1, index1):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                         if self.d_cb_to_ic < distance_temp:
                             self.d_cb_to_ic = distance_temp
 
                     if (item1 == "lut" and item2 == "ic") or (item1 == "ic" and item2 == "lut"):
                         if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                             for i in range(index1 + 1, index2):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                         else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                             for i in range(index2 + 1, index1):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                         if self.d_ic_to_lut < distance_temp:
                             self.d_ic_to_lut = distance_temp
 
                     if (item1 == "lut" and item2 == "cc") or (item1 == "cc" and item2 == "lut"):
                         if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                             for i in range(index1 + 1, index2):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                         else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                             for i in range(index2 + 1, index1):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                         if self.d_lut_to_cc < distance_temp:
                             self.d_lut_to_cc = distance_temp
 
                     if (item1 == "ffble" and item2 == "cc") or (item1 == "cc" and item2 == "ffble"):
                         if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                             for i in range(index1 + 1, index2):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                         else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                             for i in range(index2 + 1, index1):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                         if self.d_cc_to_ffble < distance_temp:
                             self.d_cc_to_ffble = distance_temp                                                                                    
 
                     if (item1 == "ffble" and item2 == "sb") or (item1 == "sb" and item2 == "ffble"):
                         if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                             for i in range(index1 + 1, index2):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                         else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                             for i in range(index2 + 1, index1):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                         if self.d_ffble_to_sb < distance_temp:
                             self.d_ffble_to_sb = distance_temp
 
                     if (item1 == "ffble" and item2 == "ic") or (item1 == "ic" and item2 == "ffble"):
                         if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                             for i in range(index1 + 1, index2):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp +  self.dict_real_widths[self.stripe_order[index2]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                         else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]]
+                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
                             for i in range(index2 + 1, index1):
-                                distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp = distance_temp + self.dict_real_widths[self.stripe_order[index1]]
+                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
+                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
                         if self.d_ffble_to_ic < distance_temp:
                             self.d_ffble_to_ic = distance_temp       
+
+
         # Compute Dist logging
+        csv_outdir = "debug"
+        tile_width_keys: List[str] = [
+            "sb_sram",
+            "sb",
+            "cb",
+            "cb_sram",
+            "ic_sram",
+            "ic",
+            "lut_sram",
+            "lut",
+            "cc",
+            "ffble",
+        ]
+        tile_widths: Dict[str, float] = {
+            **fpga_state_fmt(self, "VERIF"),
+            **{key: self.dict_real_widths[key] for key in tile_width_keys},
+        }
+        width_csv_outfpath = os.path.join(csv_outdir, "tile_width_totals.csv")
+        rg_utils.write_single_dict_to_csv(tile_widths, width_csv_outfpath, "a")
+        
+        tile_dists: Dict[str, float] = {
+            **fpga_state_fmt(self, "VERIF"),
+            **{
+                "d_cb_to_ic" : self.d_cb_to_ic,
+                "d_ic_to_lut" : self.d_ic_to_lut,
+                "d_lut_to_cc" : self.d_lut_to_cc,
+                "d_cc_to_ffble" : self.d_cc_to_ffble,
+                "d_ffble_to_sb" : self.d_ffble_to_sb,
+                "d_ffble_to_ic" : self.d_ffble_to_ic,
+            }
+        }
+        dists_csv_outfpath = os.path.join(csv_outdir, "tile_dist_totals.csv")
+        rg_utils.write_single_dict_to_csv(tile_dists, dists_csv_outfpath, "a")
+
         self.compute_distance_cnt += 1
 
 
@@ -2514,7 +2704,7 @@ class FPGA:
                 gen_r_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.num_sb_stripes, self.num_cb_stripes)
             gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad
             for gen_ble_output_load in self.gen_ble_output_loads:
-                gen_ble_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)
+                gen_ble_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.d_ffble_to_sb, self.lb_height)
             # Logic clusters
             for logic_cluster in self.logic_clusters:
                 logic_cluster.update_wires(
@@ -2549,7 +2739,15 @@ class FPGA:
             hardblock.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)  
             hardblock.mux.update_wires(self.width_dict, self.wire_lengths, self.wire_layers)   
 
+        
         # Update Wires logging
+        fpga_state_to_csv(self, "VERIF", "wire_length")
+
+        # Per circuit wire logging
+        unique_subckts: List[Type[c_ds.SizeableCircuit]] = list(self.tb_lib.keys())
+        for subckt in unique_subckts:
+            fpga_state_to_csv(self, "VERIF", "wire_length", subckt)
+
         self.update_wires_cnt += 1
 
     def update_wire_rc(self):
@@ -2569,7 +2767,49 @@ class FPGA:
 
     
         
-
+    def set_ckt_meas(
+        self,
+        in_ckt_meas : Dict[Type[c_ds.SizeableCircuit], Dict[str, List[float] | List[bool]]],
+        sw_idx: int, # What sweep index of our meas data are we using to set values
+        update_del_dict: bool = True # Do we update values stored in delay dict?
+    ) -> float:
+        """ 
+        This function sets the measurements of the circuits in the in_ckt_meas dictionary to the delay_dict. 
+        It returns the critical path delay of the circuits in in_ckt_meas.
+        """
+        crit_path_delay: float = 0.0
+        for ckt, meas in in_ckt_meas.items():
+            for key in ["trise", "tfall", "delay", "power"]:
+                setattr(ckt, key, meas[key][sw_idx])
+                ## debug print 
+                # sp_name = ckt.sp_name if ckt.sp_name else ckt.name 
+                # print(f"Setting {sp_name} {key} to {meas[key][sw_idx]}")
+            # Get the critical path delay of the circuit
+            crit_path_delay += ckt.delay * ckt.delay_weight / len(in_ckt_meas.keys()) # TODO initialize delay_weights somewhere rather than evenly weighting by dividing by len
+            # Update the delay dictionary with the measurements
+            if update_del_dict:
+                self.delay_dict[ckt.sp_name] = ckt.delay
+                
+        return crit_path_delay
+        
+    def merge_and_set_meas_sw_pt(
+        self,
+        in_tb_meas: Dict[Type[c_ds.SimTB], 
+            Dict[str, 
+                List[float] | List[bool]
+            ]
+        ],
+        *args,
+        **kwargs,
+    ) -> float:
+        """
+            Merges and sets delays and circuit sim fields for a single sweep point, if there are multiple sweeps this will fail 
+            returns critical path component
+        """
+        ckt_meas = merge_tb_meas(in_tb_meas)
+        assert len( list(ckt_meas.values())[0]['delay'] ) == 1, "This function is only for single sweep point"
+        crit_path_delay = self.set_ckt_meas(ckt_meas, 0, *args, **kwargs)
+        return crit_path_delay
 
     def update_delays(self, spice_interface: spice.SpiceInterface):
         """ 
@@ -2578,7 +2818,11 @@ class FPGA:
         """
         
         print("*** UPDATING DELAYS ***")
-        crit_path_delay = 0
+        crit_path_delay: float = 0
+        # Dict[
+        #     Type[c_ds.SizeableCircuit],
+        #     float
+        # ]
         valid_delay = True
 
         # Run HSPICE on all subcircuits and collect the total tfall and trise for that 
@@ -2609,11 +2853,11 @@ class FPGA:
 
         # SB MUX
         sb_mux_meas: Dict[
-            sb_mux_lib.SwitchBlockMuxTB, Dict[str, float | bool]
+            sb_mux_lib.SwitchBlockMuxTB, Dict[str, List[float] | List[bool]]
         ] = sim_tbs(self.sb_mux_tbs, spice_interface, parameter_dict)
 
         # Sets delays + power in ckt objects 
-        crit_path_delay += set_ckt_meas(self.delay_dict, sb_mux_meas)[0]
+        crit_path_delay += self.merge_and_set_meas_sw_pt(sb_mux_meas)
 
         # Define our function to merge measurments from different TBs
         # def merge_sb_mux_meas(
@@ -2641,107 +2885,123 @@ class FPGA:
                             
         # CB MUX
         cb_mux_meas: Dict[
-            cb_mux_lib.ConnectionBlockMuxTB, Dict[str, float | bool]
+            cb_mux_lib.ConnectionBlockMuxTB, Dict[str, List[float] | List[bool]]
         ] = sim_tbs(self.cb_mux_tbs, spice_interface, parameter_dict)
         # Sets delays + power in ckt objects 
-        crit_path_delay += set_ckt_meas(self.delay_dict, cb_mux_meas)[0]
+        crit_path_delay += self.merge_and_set_meas_sw_pt(cb_mux_meas)
 
         # LOCAL MUX
         local_mux_meas: Dict[
-            lb_lib.LocalMuxTB, Dict[str, float | bool]
+            lb_lib.LocalMuxTB, Dict[str, List[float] | List[bool]]
         ] = sim_tbs(self.local_mux_tbs, spice_interface, parameter_dict)
         # Sets delays + power in ckt objects 
-        crit_path_delay += set_ckt_meas(self.delay_dict, local_mux_meas)[0]
+        crit_path_delay += self.merge_and_set_meas_sw_pt(local_mux_meas)
 
         # Local BLE Output
         local_ble_output_meas: Dict[
-           ble_lib.LocalBLEOutputTB, Dict[str, float | bool]
+           ble_lib.LocalBLEOutputTB, Dict[str, List[float] | List[bool]]
         ] = sim_tbs(self.local_ble_output_tbs, spice_interface, parameter_dict)
         # Sets delays + power in ckt objects 
-        crit_path_delay += set_ckt_meas(self.delay_dict, local_ble_output_meas)[0]
+        crit_path_delay += self.merge_and_set_meas_sw_pt(local_ble_output_meas)
 
         # General BLE Output
         gen_ble_output_meas: Dict[
-            ble_lib.GeneralBLEOutputTB, Dict[str, float | bool]
+            ble_lib.GeneralBLEOutputTB, Dict[str, List[float] | List[bool]]
         ] = sim_tbs(self.general_ble_output_tbs, spice_interface, parameter_dict)
         # Sets delays + power in ckt objects 
-        crit_path_delay += set_ckt_meas(self.delay_dict, gen_ble_output_meas)[0]
+        crit_path_delay += self.merge_and_set_meas_sw_pt(gen_ble_output_meas)
         
         # Fracurable LUT MUX
         # TODO make sure even if tbs are empty this is fine
         flut_mux_meas: Dict[
-            ble_lib.FlutMuxTB, Dict[str, float | bool]
+            ble_lib.FlutMuxTB, Dict[str, List[float] | List[bool]]
         ] = sim_tbs(self.flut_mux_tbs, spice_interface, parameter_dict)
-        # Sets delays + power in ckt objects 
-        _, flut_mux_merged_meas = set_ckt_meas(self.delay_dict, flut_mux_meas)
+        # Sets delays + power in ckt objects
+        flut_mux_merged_meas = merge_tb_meas(flut_mux_meas)
+        self.set_ckt_meas(flut_mux_merged_meas, sw_idx = 0)
+
+        # _, flut_mux_merged_meas = self.merge_and_set_meas_sw_pt(flut_mux_meas, self.delay_dict)
         
         # LUT
         lut_meas: Dict[
-            lut_lib.LUTTB, Dict[str, float | bool]
+            lut_lib.LUTTB, Dict[str, List[float] | List[bool]]
         ] = sim_tbs(self.lut_tbs, spice_interface, parameter_dict)
         # Sets delays + power in ckt objects 
-        _, lut_merged_meas = set_ckt_meas(self.delay_dict, lut_meas)
-        
+        lut_merged_meas = merge_tb_meas(lut_meas)
+        self.set_ckt_meas(lut_merged_meas, sw_idx = 0)
+
         # LUT Inputs
         # Get delay for all paths through the LUT.
         # We get delay for each path through the LUT as well as for the LUT input drivers.
         lut_input_measures: Dict[
-            Dict[ lut_lib.LUTInputTB, Dict[str, float | bool] ]
+            Dict[ lut_lib.LUTInputTB, Dict[str, List[float] | List[bool]] ]
         ] = {}
         lut_input_driver_meas: Dict[
-            lut_lib.LUTInputDriverTB, Dict[str, float | bool]
+            lut_lib.LUTInputDriverTB, Dict[str, List[float] | List[bool]]
         ] = {}
         lut_input_not_driver_meas: Dict[
-                lut_lib.LUTInputDriverTB, Dict[str, float | bool]
+                lut_lib.LUTInputDriverTB, Dict[str, List[float] | List[bool]]
         ] = {}
+
+        # For clairy
+        sw_idx: int = 0
+        ckt_idx: int = 0        
+        
         # only sorting for clarity no real reason
         for lut_in_key in sorted(list(self.lut_input_tbs.keys())):
             # TODO update for multi ckt support
-            lut_input: lut_lib.LUTInput = self.lut_inputs[lut_in_key][0]
+            lut_input: lut_lib.LUTInput = self.lut_inputs[lut_in_key][ckt_idx]
             # LUT Input Driver with LUT loading
             lut_input_meas: Dict[
-                lut_lib.LUTInputTB, Dict[str, float | bool]
+                lut_lib.LUTInputTB, Dict[str, List[float] | List[bool]]
             ] = sim_tbs(self.lut_input_tbs[lut_in_key], spice_interface, parameter_dict)
             lut_input_measures[lut_in_key] = lut_input_meas
             # TODO make this cleaner, we are kinda doing a workaround way of setting values in the LUTInput obj
             # Get merged delays but DONT set as we do a custom thing for LUT inputs 
-            _, lut_input_merged_meas = set_ckt_meas(self.delay_dict, lut_input_meas, set_flag = False)
+            lut_input_merged_meas = merge_tb_meas(lut_input_meas)
+            # self.merge_and_set_meas_sw_pt(lut_input_meas, self.delay_dict, set_flag = False)
+            
+
             # If we're on the fracturable input which is the last LUT input then we set the fmux delay for this input
             if (lut_in_key == "f" and self.specs.use_fluts and self.specs.K == 6) or \
                 (lut_in_key == "e" and self.specs.use_fluts and self.specs.K == 5):
                 # TODO update for multi flut ckt support
-                lut_input.tfall = list(flut_mux_merged_meas.values())[0]["tfall"]
-                lut_input.trise = list(flut_mux_merged_meas.values())[0]["trise"]
+                lut_input.tfall = list(flut_mux_merged_meas.values())[ckt_idx]["tfall"][sw_idx]
+                lut_input.trise = list(flut_mux_merged_meas.values())[ckt_idx]["trise"][sw_idx]
                 lut_input.delay = max(lut_input.tfall, lut_input.trise)
                 self.delay_dict[lut_input.name] = lut_input.delay
             else:    
                 # TODO update for multi ckt support
-                meas = list(lut_input_merged_meas.values())[0]
-                in_meas: Dict[str, float | bool] = copy.deepcopy(meas)
+                meas = list(lut_input_merged_meas.values())[ckt_idx]
+                in_meas: Dict[str, List[float] | List[bool]] = copy.deepcopy(meas)
                 if self.specs.use_fluts:
                     for del_key in ["tfall", "trise"]:
-                        in_meas[del_key] += list(flut_mux_merged_meas.values())[0][del_key]
+                        in_meas[del_key][ckt_idx] += list(flut_mux_merged_meas.values())[ckt_idx][del_key][sw_idx]
                     in_meas["delay"] = max(in_meas["tfall"], in_meas["trise"])
-                lut_input.set_fields(in_meas)
-                self.delay_dict[lut_input.name] = in_meas["delay"]
+                lut_input.tfall = in_meas["tfall"][sw_idx]
+                lut_input.trise = in_meas["trise"][sw_idx]
+                lut_input.delay = in_meas["delay"][sw_idx]
+                self.delay_dict[lut_input.name] = in_meas["delay"][sw_idx]
 
             # LUT Input drivers
             lut_input_driver_meas: Dict[
-                lut_lib.LUTInputDriverTB, Dict[str, float | bool]
+                lut_lib.LUTInputDriverTB, Dict[str, List[float] | List[bool]]
             ] = sim_tbs(self.lut_in_driver_tbs[lut_in_key], spice_interface, parameter_dict)
-            _, lut_in_drv_merged_meas = set_ckt_meas(self.delay_dict, lut_input_driver_meas)
+            lut_in_drv_merged_meas = merge_tb_meas(lut_input_driver_meas)
+            self.set_ckt_meas(lut_in_drv_merged_meas, sw_idx = 0)            
 
 
             # LUT Input Not drivers
             lut_input_not_driver_meas: Dict[
-                lut_lib.LUTInputDriverTB, Dict[str, float | bool]
+                lut_lib.LUTInputDriverTB, Dict[str, List[float] | List[bool]]
             ] = sim_tbs(self.lut_in_not_driver_tbs[lut_in_key], spice_interface, parameter_dict)
-            _, lut_in_not_drv_merged_meas = set_ckt_meas(self.delay_dict, lut_input_not_driver_meas)
+            lut_in_not_drv_merged_meas = merge_tb_meas(lut_input_not_driver_meas)
+            self.set_ckt_meas(lut_in_not_drv_merged_meas, sw_idx = 0)
 
             # Calculate lut delay
             # TODO update for multi ckt support
-            lut_in_drv_delay: float = list(lut_in_drv_merged_meas.values())[0]["delay"]
-            lut_in_not_drv_delay: float = list(lut_in_not_drv_merged_meas.values())[0]["delay"]
+            lut_in_drv_delay: float = list(lut_in_drv_merged_meas.values())[0]["delay"][0]
+            lut_in_not_drv_delay: float = list(lut_in_not_drv_merged_meas.values())[0]["delay"][0]
             lut_delay: float = lut_input.delay + max(lut_in_drv_delay, lut_in_not_drv_delay)
             if self.specs.use_fluts:
                 # TODO update for multi ckt support
@@ -2759,50 +3019,53 @@ class FPGA:
             flut_mux: ble_lib.FlutMux = list(flut_mux_merged_meas.keys())[0]
             crit_path_delay += flut_mux.delay * flut_mux.delay_weight
 
+        self.delay_dict["rep_crit_path"] = crit_path_delay
+
+        # TODO figure out why we don't include cc in crit path
         if self.specs.enable_carry_chain:
             # Carry Chain
             cc_meas: Dict[
-                cc_lib.CarryChainTB, Dict[str, float | bool]
+                cc_lib.CarryChainTB, Dict[str, List[float] | List[bool]]
             ] = sim_tbs(self.carry_chain_tbs, spice_interface, parameter_dict)
             # Sets delays + power in ckt objects
-            crit_path_delay += set_ckt_meas(self.delay_dict, cc_meas)[0]
+            crit_path_delay += self.merge_and_set_meas_sw_pt(cc_meas)
                         
             # Carry Chain Peripherial
             cc_periph_meas: Dict[
-                cc_lib.CarryChainPerTB, Dict[str, float | bool]
+                cc_lib.CarryChainPerTB, Dict[str, List[float] | List[bool]]
             ] = sim_tbs(self.carry_chain_per_tbs, spice_interface, parameter_dict)
             # Sets delays + power in ckt objects
-            crit_path_delay += set_ckt_meas(self.delay_dict, cc_periph_meas)[0]
+            crit_path_delay += self.merge_and_set_meas_sw_pt(cc_periph_meas)
 
             # Carry Chain Mux
             cc_mux_meas: Dict[
-                cc_lib.CarryChainMuxTB, Dict[str, float | bool]
+                cc_lib.CarryChainMuxTB, Dict[str, List[float] | List[bool]]
             ] = sim_tbs(self.carry_chain_mux_tbs, spice_interface, parameter_dict)
             # Sets delays + power in ckt objects
-            crit_path_delay += set_ckt_meas(self.delay_dict, cc_mux_meas)[0]
+            crit_path_delay += self.merge_and_set_meas_sw_pt(cc_mux_meas)
             
             # Carry Chain Inter Cluster
             cc_inter_meas: Dict[
-                cc_lib.CarryChainInterClusterTB, Dict[str, float | bool]
+                cc_lib.CarryChainInterClusterTB, Dict[str, List[float] | List[bool]]
             ] = sim_tbs(self.carry_chain_inter_tbs, spice_interface, parameter_dict)
             # Sets delays + power in ckt objects
-            crit_path_delay += set_ckt_meas(self.delay_dict, cc_inter_meas)[0]
+            crit_path_delay += self.merge_and_set_meas_sw_pt(cc_inter_meas)
 
             if self.specs.carry_chain_type == "skip":
                 # Carry Chain Skip AND
                 # TODO make sure even if tbs are empty this is fine
                 cc_skip_and_meas: Dict[
-                    cc_lib.CarryChainSkipAndTB, Dict[str, float | bool]
+                    cc_lib.CarryChainSkipAndTB, Dict[str, List[float] | List[bool]]
                 ] = sim_tbs(self.carry_chain_skip_and_tbs, spice_interface, parameter_dict)
                 # Sets delays + power in ckt objects
-                crit_path_delay += set_ckt_meas(self.delay_dict, cc_skip_and_meas)[0]
+                crit_path_delay += self.merge_and_set_meas_sw_pt(cc_skip_and_meas)
 
                 # Carry Chain Skip Mux
                 cc_skip_mux_meas: Dict[
-                    cc_lib.CarryChainSkipMuxTB, Dict[str, float | bool]
+                    cc_lib.CarryChainSkipMuxTB, Dict[str, List[float] | List[bool]]
                 ] = sim_tbs(self.carry_chain_skip_mux_tbs, spice_interface, parameter_dict)
                 # Sets delays + power in ckt objects
-                crit_path_delay += set_ckt_meas(self.delay_dict, cc_skip_mux_meas)[0]
+                crit_path_delay += self.merge_and_set_meas_sw_pt(cc_skip_mux_meas)
 
         # Hardblocks
         # TODO add hardblock support
@@ -2816,11 +3079,11 @@ class FPGA:
             ram_valid = self.update_ram_delays(spice_interface, parameter_dict)
 
         # After getting the delays across subckts and tesbenches we need to combine them for each subckt and assign it trise / tfall / delay / power values.
-        self.delay_dict["rep_crit_path"] = crit_path_delay
 
+        # Update Delays logging
+        fpga_state_to_csv(self, "VERIF", "delay")
 
-
-
+        self.update_delays_cnt += 1
             
 
 

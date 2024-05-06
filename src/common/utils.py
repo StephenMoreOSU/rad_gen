@@ -261,6 +261,19 @@ def write_dict_to_csv(csv_lines: List[Dict[str, Any]], csv_fname: str) -> None:
         writer.writerow(line)
     csv_fd.close()
 
+def write_single_dict_to_csv(in_dict: Dict[str, Any], fpath: str, fopen_opt: str) -> None:
+    """
+        Using a single dictionart write the values to the specified csv
+    """
+    with open(fpath, fopen_opt) as csv_file:
+        header = list(in_dict.keys())
+        writer = csv.DictWriter(csv_file, fieldnames = header)
+        # Check if the file is empty and write header if needed
+        if csv_file.tell() == 0:
+            writer.writeheader()
+        writer.writerow(in_dict)
+
+
 
 def read_csv_to_list(csv_fname: str) -> List[Dict[str, Any]]:
     """

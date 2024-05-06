@@ -379,7 +379,7 @@ class LUTInputDriverTB(c_ds.SimTB):
                 ] + delay_names
                 targ_nodes = [
                     ".".join([inst.name for inst in lut_driver_path] + ["n_1_1"]),
-                    ".".join([inst.name for inst in lut_driver_path] + ["n_1_3"]),
+                    ".".join([inst.name for inst in lut_driver_path] + ["n_3_1"]),
                 ] + targ_nodes
         trig_node: str = "n_1_2"
         # Base class generate top does all common functionality 

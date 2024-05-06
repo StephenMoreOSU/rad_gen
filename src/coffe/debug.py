@@ -1,5 +1,6 @@
 import csv
 import pandas as pd
+import copy
 
 import plotly.subplots as subplots
 import plotly.graph_objects as go
@@ -20,13 +21,13 @@ from typing import List, Dict, Any, Tuple, Type, NamedTuple, Set, Optional, Unio
 import re
 # Sp Process for CONTROL SB_MUX
 import os, sys
+import shutil
 import pandas as pd
 
 import argparse
 import time
 import multiprocessing as mp
 import subprocess as sp
-
 
 
 
@@ -653,6 +654,32 @@ def cmp_key_pairs(log_dpath: str):
 #     parser = argparse.ArgumentParser(description="Parse the command line arguments for the script")
 #     return parser.parse_args()
 
+def find_files_of_ext(
+        search_dirs: List[str],
+        exclude_dirs: List[str], 
+        substrs: List[str], 
+        ext: str,
+) -> List[str]:
+    found_fpaths: List[str] = []
+    for directory in search_dirs:
+        for substr in substrs:
+            # the exclude is broken for some reason TODO fix
+            dir_exclude_subcmds: str = ' '.join([f"{directory} -type d -name {excl_dir} -prune -o" for excl_dir in exclude_dirs ])
+            find_cmd = f"find {directory} {dir_exclude_subcmds} -name '*{substr}*' -type d -print0 | xargs -0 -I {{}} find {{}} -name '*.{ext}' -type f"
+            # as a quick hack we're going to use negative grep to exclude directories
+            found_files = sp.check_output(find_cmd, shell=True)
+            decoded_found_files: List[str] = found_files.decode("utf-8").split()
+            for dec_found_file in decoded_found_files:
+                if not re.search(
+                        f"({'|'.join(exclude_dirs)})",
+                        dec_found_file,
+                ):
+                    found_fpaths.append(dec_found_file)
+                    # print(dec_found_file)
+            
+    return found_fpaths
+
+
 def find_sp_sims(ckt_keys: List[str], search_dirs: List[str]):
     sp_sims = []
     for directory in search_dirs:
@@ -691,13 +718,15 @@ def prepare_legacy_ckt_for_cmp(ctrl_dir: str):
         else:
             new_dir = os.path.join(top_dir, os.path.splitext(os.path.basename(sp_tb))[0])
             os.makedirs(new_dir, exist_ok=True)
-            os.rename(sp_tb, os.path.join(new_dir, os.path.basename(sp_tb)))
-            print(f"Moved {os.path.basename(sp_tb)} to {os.path.join(new_dir, os.path.basename(sp_tb))}")
+            shutil.copy(sp_tb, os.path.join(new_dir, os.path.basename(sp_tb)))
+            # os.rename(sp_tb, os.path.join(new_dir, os.path.basename(sp_tb)))
+            print(f"Copied {os.path.basename(sp_tb)} to {os.path.join(new_dir, os.path.basename(sp_tb))}")
 
 
 def subckt_meas_cmp(
     sp_tb_keys: List[str],
     in_coffe_dirs: List[str],
+    plot_flag: bool = True,
     out_dir: str = None
 ):
     """
@@ -737,7 +766,7 @@ def subckt_meas_cmp(
                     title = sp_title,
                 )]
             for sp_proc in sp_procs:
-                _, measurements, _ = ic_3d.run_spice_debug(sp_proc)
+                _, measurements, _ = ic_3d.run_spice_debug(sp_proc, plot_flag)
                 cmp_measurements[sp_title] = measurements
         cols = ["TITLE", "TRISE", "TFALL", "MAX", "ABS_DIFF", "PERC_DIFF"]
         col_width=30
@@ -772,6 +801,59 @@ def subckt_meas_cmp(
 
 
                 
+
+def debug_csv_iterate(coffe_debug_dpath: str):
+    """
+        Iterates through coffe generated debug csvs and creates new ones comparing iterations to one another
+            outputs to the "compares" directory in the coffe_debug_dpath 
+    """
+    # find all debug csv files in a directory
+    debug_csv_fpaths = find_files_of_ext([coffe_debug_dpath], ["compares"], ["debug"], "csv")
+    # Ignore list of csv catagories to ignore
+    ignore_substrs: List[str] = ["TAG", "_ITER"]    
+    # open them up and iterate through them (row by row rn for ease but should really look at the indexes used) 
+    # TODO update to use indexes used rather than row by row
+    for debug_csv_fpath in debug_csv_fpaths:
+        print("creating comparison csv for ", debug_csv_fpath)
+        debug_dicts = rg_utils.read_csv_to_list(debug_csv_fpath)
+        
+        perc_diff_rows: List[Dict[str,float]] = []
+        perc_dict: Dict[str, float] = {}
+        prev_row: Dict[str, float] = {}
+
+        excl_cols = {}
+
+        # Get the keys of the first row
+        for i, row in enumerate(debug_dicts):
+            if i != 0:
+                # save previous row for comparison
+                prev_row = debug_dicts[i-1]
+            # Save the values for each column not in ignore list
+            for key, val in row.items():
+                if any([ignore_substr in key for ignore_substr in ignore_substrs]):
+                    excl_cols.update({key: val})
+                    continue
+                if i == 0:
+                    perc_dict[key] = 0
+                else:
+                    if float(val) == 0:
+                        perc_dict[key] = 0
+                    else:
+                        perc_dict[key] = round((float(val) - float(prev_row[key]))/float(val), 3) * 100
+            # Save the values for each column not in ignore list
+            perc_diff_rows.append({
+                    **excl_cols,
+                    **copy.deepcopy(perc_dict)
+                })
+        cmp_out_dpath: str = os.path.join( os.path.dirname(debug_csv_fpath), "compares" )
+        os.makedirs(cmp_out_dpath, exist_ok=True)
+        cmp_csv_out_fpath: str = os.path.join(cmp_out_dpath, f"{os.path.basename(debug_csv_fpath)}_cmp" )
+        if len(perc_diff_rows) > 0:
+            rg_utils.write_dict_to_csv(perc_diff_rows, cmp_csv_out_fpath)
+        else:
+            print(f"Error, no rows found in {debug_csv_fpath}")
+        print(f"Finished comparing {debug_csv_fpath} and saved to {cmp_csv_out_fpath}")
+
 
 
 
@@ -819,28 +901,35 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
         f"{lut_in_driver_keys}*with"
         for lut_in_driver_keys in lut_in_driver_keys
     ]
+
+
+    # Uses existing debug csvs to find differences across iterations
+    debug_csv_iterate(os.path.join(dut_outdir,"debug"))
+
+
     # Which subckts will we run and compare against one another
     testing_subckts: List[str] = [
         "sb_mux",
-        "cb_mux",
-        "local_mux",
-        "local_ble_output",
-        "general_ble_output",
-        "flut_mux",
-        "lut",
-        *lut_in_driver_keys,
-        *lut_in_not_driver_keys,
-        *lut_in_with_lut_keys,
-        "carry_chain",
-        "carry_chain_per",
-        "carry_chain_inter",
-        "carry_chain_mux",
-        "xcarry_chain_and",
-        "xcarry_chain_mux",
+        # "cb_mux",
+        # "local_mux",
+        # "local_ble_output",
+        # "general_ble_output",
+        # "flut_mux",
+        # "lut",
+        # *lut_in_driver_keys,
+        # *lut_in_not_driver_keys,
+        # *lut_in_with_lut_keys,
+        # "carry_chain",
+        # "carry_chain_per",
+        # "carry_chain_inter",
+        # "carry_chain_mux",
+        # "xcarry_chain_and",
+        # "xcarry_chain_mux",
     ] 
+    ## Runs spice simulations and plots for detail comparison
+    # prepare_legacy_ckt_for_cmp(ctrl_outdir)
+    # subckt_meas_cmp(testing_subckts, [ctrl_outdir, dut_outdir], plot_flag = True)
 
-    prepare_legacy_ckt_for_cmp(ctrl_outdir)
-    subckt_meas_cmp(testing_subckts, [ctrl_outdir, dut_outdir])
 
     # Outputs log files comparing keys from control and tests
     # cmp_dut_ctrl_coffe_runs(cmp_inputs)
