@@ -36,6 +36,10 @@ class ConnectionBlockMux(mux.Mux2Lvl):
     def __hash__(self):
         return id(self)
 
+    def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]):
+        super().update_area(area_dict, width_dict)
+        self.update_vpr_areas(area_dict)
+
     # Only need to deal w/ vpr areas as regular update areas all handled from Mux class
     def update_vpr_areas(self, area_dict: Dict[str, float]):
         # Update VPR area numbers

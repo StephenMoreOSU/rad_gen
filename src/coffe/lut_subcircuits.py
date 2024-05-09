@@ -31,7 +31,7 @@ def generate_ptran_lut6(spice_filename:str, min_tran_width: float, use_finfet: b
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=1\n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -79,8 +79,8 @@ def generate_ptran_lut6(spice_filename:str, min_tran_width: float, use_finfet: b
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("ptran_lut_L1_nmos")
 	tran_names_list.append("ptran_lut_L2_nmos")
 	tran_names_list.append("ptran_lut_L3_nmos")
@@ -135,7 +135,7 @@ def generate_ptran_lut5(spice_filename: str, min_tran_width: float, use_finfet: 
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=1\n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -179,8 +179,8 @@ def generate_ptran_lut5(spice_filename: str, min_tran_width: float, use_finfet: 
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("ptran_lut_L1_nmos")
 	tran_names_list.append("ptran_lut_L2_nmos")
 	tran_names_list.append("ptran_lut_L3_nmos")
@@ -233,7 +233,7 @@ def generate_ptran_lut4(spice_filename: str, min_tran_width: float, use_finfet: 
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=1\n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -273,8 +273,8 @@ def generate_ptran_lut4(spice_filename: str, min_tran_width: float, use_finfet: 
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("ptran_lut_L1_nmos")
 	tran_names_list.append("ptran_lut_L2_nmos")
 	tran_names_list.append("rest_lut_int_buffer_pmos")
@@ -486,7 +486,7 @@ def generate_tgate_lut6(spice_filename: str, min_tran_width: float, use_finfet: 
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=2 \n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -534,8 +534,8 @@ def generate_tgate_lut6(spice_filename: str, min_tran_width: float, use_finfet: 
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("tgate_lut_L1_nmos")
 	tran_names_list.append("tgate_lut_L1_pmos")
 	tran_names_list.append("tgate_lut_L2_nmos")
@@ -596,7 +596,7 @@ def generate_tgate_lut5(spice_filename: str, min_tran_width: float, use_finfet: 
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=2 \n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -640,8 +640,8 @@ def generate_tgate_lut5(spice_filename: str, min_tran_width: float, use_finfet: 
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("tgate_lut_L1_nmos")
 	tran_names_list.append("tgate_lut_L1_pmos")
 	tran_names_list.append("tgate_lut_L2_nmos")
@@ -699,7 +699,7 @@ def generate_tgate_lut4(spice_filename: str, min_tran_width: float, use_finfet: 
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=2 \n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -739,8 +739,8 @@ def generate_tgate_lut4(spice_filename: str, min_tran_width: float, use_finfet: 
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("tgate_lut_L1_nmos")
 	tran_names_list.append("tgate_lut_L1_pmos")
 	tran_names_list.append("tgate_lut_L2_nmos")

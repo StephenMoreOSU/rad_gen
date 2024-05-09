@@ -214,11 +214,11 @@ class CarryChainMuxTB(c_ds.SimTB):
             ), 
         ]
     def generate_top(self):
-        dut_sp_name: str = self.dut_ckt.name # TODO update to sp_name
+        # dut_sp_name: str = self.dut_ckt.sp_name # TODO update to sp_name
         trig_node: str = "n_1_4"
         delay_names: List[str] = [
-            f"inv_{dut_sp_name}_1",
-            f"inv_{dut_sp_name}_2",
+            f"inv_{self.dut_ckt.sp_name}_1",
+            f"inv_{self.dut_ckt.sp_name}_2",
             f"total",
         ]
         # Instance path from our TB to the ON Local Mux inst
@@ -856,13 +856,13 @@ class CarryChainSkipAndTB(c_ds.SimTB):
             ),
         ]
     def generate_top(self):
-        dut_sp_name: str = self.dut_ckt.name # TODO update to sp_name
+        # dut_sp_name: str = self.dut_ckt.sp_name # TODO update to sp_name
         trig_node: str = "n_1_2"
         delay_names: List[str] = [
-            f"inv_nand_{self.carry_chain_and.nand1_size}_{self.carry_chain_and.sp_name}_1",
-            f"inv_nand_{self.carry_chain_and.nand1_size}_{self.carry_chain_and.sp_name}_2",
-            f"inv_nand_{self.carry_chain_and.nand1_size}_{self.carry_chain_and.sp_name}_3",
-            f"inv_nand_{self.carry_chain_and.nand1_size}_{self.carry_chain_and.sp_name}_4",
+            f"inv_nand{self.carry_chain_and.nand1_size}_{self.carry_chain_and.sp_name}_1",
+            f"inv_{self.carry_chain_and.sp_name}_2",
+            f"inv_nand{self.carry_chain_and.nand2_size}_{self.carry_chain_and.sp_name}_3",
+            f"inv_{self.carry_chain_and.sp_name}_4",
             f"total",
         ] 
         # Instance path from our TB to the ON Local Mux inst
@@ -887,7 +887,7 @@ class CarryChainSkipAndTB(c_ds.SimTB):
             f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
             f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",
         ]
-        tb_fname: str = f"{dut_sp_name}_tb_{self.id}"
+        tb_fname: str = f"{self.dut_ckt.sp_name}_tb_{self.id}"
         # Base class generate top does all common functionality 
         return super().generate_top(
             delay_names = delay_names,
@@ -1197,7 +1197,7 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
             ),
             # DUT Carry Chain Skip Mux
             rg_ds.SpSubCktInst(
-                name = f"X{self.carry_chain_skip_mux.sp_name[1:]}_dut", 
+                name = f"X{self.carry_chain_skip_mux.sp_name}_dut", 
                 subckt = subckt_lib[self.carry_chain_skip_mux.sp_name], 
                 conns = {
                     "n_in": "n_1_3",
@@ -1224,11 +1224,11 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
         ]
 
     def generate_top(self):
-        dut_sp_name: str = self.dut_ckt.name # TODO update to sp_name
+        # dut_sp_name: str = self.dut_ckt.sp_name
         trig_node: str = "n_1_3"
         delay_names: List[str] = [
-            f"inv_nand_{self.carry_chain_and.nand1_size}_{self.carry_chain_and.sp_name}_1",
-            f"inv_nand_{self.carry_chain_and.nand1_size}_{self.carry_chain_and.sp_name}_2",
+            f"inv_{self.dut_ckt.sp_name}_1",
+            f"inv_{self.dut_ckt.sp_name}_2",
             f"total",
         ] 
         # Instance path from our TB to the ON Local Mux inst
@@ -1251,7 +1251,7 @@ class CarryChainSkipMuxTB(c_ds.SimTB):
         #     f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
         #     f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",
         # ]
-        tb_fname: str = f"{dut_sp_name}_tb_{self.id}"
+        tb_fname: str = f"{self.dut_ckt.sp_name}_tb_{self.id}"
         # Base class generate top does all common functionality 
         return super().generate_top(
             delay_names = delay_names,

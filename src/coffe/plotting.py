@@ -96,6 +96,8 @@ def main():
             cat = "delay"
         elif "wire_length" in os.path.basename(csv_file):
             cat = "wire_length"
+        else:
+            continue
         iter_key = 0
         print(csv_file)
         ret_val = pie_plot_fpga_state(csv_file, iter_key, cat)

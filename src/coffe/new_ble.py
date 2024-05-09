@@ -194,12 +194,12 @@ class LocalBLEOutputTB(c_ds.SimTB):
             [inst.name for inst in loc_ble_out_load_path] + ["n_1_2"]
         )
         delay_names: List[str] = [
-            # f"inv_{dut_sp_name}_1",
             f"inv_{dut_sp_name}_1",
+            f"inv_{dut_sp_name}_2",
             f"total",
         ]
         targ_nodes: List[str] = [
-            # meas_loc_ble_out_in_node, 
+            meas_loc_ble_out_in_node, 
             meas_loc_ble_out_term_node,
             meas_loc_ble_out_term_node,
         ]
@@ -428,6 +428,7 @@ class FlipFlop(c_ds.SizeableCircuit):
         return super().__hash__()
 
     def __post__init__(self):
+        self.sp_name = self.name # TODO update to sp_name
         # Initialize times to basically NULL for the cost function == 1
         if self.t_setup is None:
             self.t_setup = 1

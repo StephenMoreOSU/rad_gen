@@ -90,6 +90,10 @@ class SwitchBlockMux(mux.Mux2Lvl):
             area_dict["switch_mux_trans_size"] = area_dict["tgate_" + self.sp_name + "_L1"]
             area_dict["switch_buf_size"] = area_dict["inv_" + self.sp_name + "_1"] + area_dict["inv_" + self.sp_name + "_2"]
     
+    def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]):
+        super().update_area(area_dict, width_dict)
+        self.update_vpr_areas(area_dict)
+
     def print_details(self, report_fpath: str):
         """ Print switch block details """
 

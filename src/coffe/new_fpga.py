@@ -18,18 +18,14 @@ from collections import defaultdict
 
 # Subcircuit Modules
 import src.coffe.basic_subcircuits as basic_subcircuits
-import src.coffe.mux_subcircuits as mux_subcircuits
-import src.coffe.lut_subcircuits as lut_subcircuits
-import src.coffe.ff_subcircuits as ff_subcircuits
-import src.coffe.load_subcircuits as load_subcircuits
-import src.coffe.memory_subcircuits as memory_subcircuits
+# import src.coffe.mux_subcircuits as mux_subcircuits
+# import src.coffe.lut_subcircuits as lut_subcircuits
+# import src.coffe.ff_subcircuits as ff_subcircuits
+# import src.coffe.load_subcircuits as load_subcircuits
+# import src.coffe.memory_subcircuits as memory_subcircuits
 import src.coffe.utils as utils
 import src.coffe.cost as cost
 import src.coffe.constants as consts
-# from src.coffe.circuit_baseclasses import _SizableCircuit, _CompoundCircuit
-
-# Top level file generation module
-# import src.coffe.top_level as top_level
 
 # HSPICE handling module
 import src.coffe.spice as spice
@@ -59,6 +55,8 @@ import src.coffe.hardblock as hb_lib
 import src.coffe.constants as constants
 
 import src.common.rr_parse as rrg_parse
+
+
 
 # # Track-access locality constants
 # OUTPUT_TRACK_ACCESS_SPAN = 0.25
@@ -157,7 +155,7 @@ def fpga_state_to_csv(fpga_inst: 'FPGA', tag: str, catagory: str, ckt: Type[c_ds
         fpath = os.path.join(out_dir,f"{catagory}_detailed.csv")
 
     else:
-        sp_name: str = ckt.sp_name if ckt.sp_name else ckt.name
+        sp_name: str = ckt.sp_name if (hasattr(ckt, "sp_name") and ckt.sp_name) else ckt.name
         if catagory == "wire_length": 
             cat_v = {wire_name: fpga_inst.wire_lengths[wire_name] for wire_name in ckt.wire_names}
         elif catagory == "area":
@@ -201,7 +199,7 @@ def sim_tbs(
         Runs HSPICE on all testbenches in the list with the corresponding parameter dict
         Returns a dict hashed by each testbench with its corresponding results (delay, power)
     """
-    valid_delay: bool = True
+    # valid_delay: bool = True
     # sp_out_meas = { 
     #     "trise": None,
     #     "tfall": None,
@@ -217,8 +215,22 @@ def sim_tbs(
     
 
     for tb in tbs:
-        print(f"Updating delay for {tb.dut_ckt.sp_name} with TB {tb.tb_fname.replace('.sp','')}")
-        spice_meas = sp_interface.run(tb.sp_fpath, parameter_dict)
+        sp_name: str = tb.dut_ckt.sp_name if (hasattr(tb.dut_ckt, "sp_name") and tb.dut_ckt.sp_name) else tb.dut_ckt.name
+        print(f"Updating delay for {sp_name} with TB {tb.tb_fname.replace('.sp','')}")
+        if not consts.PASSTHROUGH_DEBUG_FLAG:
+            spice_meas = sp_interface.run(tb.sp_fpath, parameter_dict)
+        else:
+            spice_meas = {
+                "trise": [1]*len(list(parameter_dict.values())[0]),
+                "tfall": [1]*len(list(parameter_dict.values())[0]),
+                "meas_avg_power": [1]*len(list(parameter_dict.values())[0]),
+                "meas_logic_low_voltage": [0]*len(list(parameter_dict.values())[0]),
+                "delay": [1]*len(list(parameter_dict.values())[0]),
+                "valid": True*len(list(parameter_dict.values())[0]),
+                # Add the inverter / other measurements
+                **{mp.value.name: [1]*len(list(parameter_dict.values())[0]) for mp in tb.meas_points}
+            }
+        
         # if  spice_meas["meas_total_tfall"][0] == "failed" \
         #         or spice_meas["meas_total_trise"][0] == "failed":
         #     valid_delay = False
@@ -269,11 +281,10 @@ def sim_tbs(
         # After this point the trise / tfall delays will be set in tb_meas so we can calculate the max delay
         tb_meas[tb]["valid"] += valid_delays
         tb_meas[tb]["delay"] += [ 
-            max(tfall, trise) 
-            for (tfall, trise) in zip(
-                tb_meas[tb]['tfall'],
-                tb_meas[tb]['trise']
-            )
+            max(tfall, trise) for (tfall, trise) in zip(
+                    tb_meas[tb]['tfall'],
+                    tb_meas[tb]['trise']
+                )
         ]
 
 
@@ -709,11 +720,17 @@ class FPGA:
         for _field in fields(self):
             cur_obj: Any = getattr(self, _field.name)
             # TODO refactor somewhere to allow for lists + non list definitions of tbs / subckts
+
             if isinstance(cur_obj, list) and len(cur_obj) > 0 and issubclass(type(cur_obj[0]), c_ds.SimTB):
                 tbs += getattr(self, _field.name)
-            # look for sizeable ckts
+            # Looking for dicts of lists for input driver testbenches
+            elif isinstance(cur_obj, dict) and len(cur_obj) > 0 and isinstance(list(cur_obj.values())[0], list) and len(list(cur_obj.values())[0]) > 0 and issubclass(type(list(cur_obj.values())[0][0]), c_ds.SimTB):
+                tbs += [tb for tb_list in list(cur_obj.values()) for tb in tb_list]
+            # look for sizeable ckts, stored in lists or dicts of lists (input drivers)
             if isinstance(cur_obj, list) and len(cur_obj) > 0 and issubclass(type(cur_obj[0]), c_ds.SizeableCircuit):
-                sizeable_ckts += getattr(self, _field.name)
+                sizeable_ckts += getattr(self, _field.name)            
+            elif isinstance(cur_obj, dict) and len(cur_obj) > 0 and isinstance(list(cur_obj.values())[0], list) and len(list(cur_obj.values())[0]) > 0 and issubclass(type(list(cur_obj.values())[0][0]), c_ds.SizeableCircuit):
+                sizeable_ckts += [ckt for ckt_list in list(cur_obj.values()) for ckt in ckt_list]
 
         # Soft assert there are no duplicate testbenches or sizeable circuits
         tb_set = set(tbs)
@@ -1214,6 +1231,9 @@ class FPGA:
             self.flut_muxes = [
                 lc.ble.fmux for lc in self.logic_clusters
             ] 
+            self.flip_flops = [ 
+                lc.ble.ff for lc in self.logic_clusters 
+            ]
             # LUT
             self.luts = [
                 lc.ble.lut for lc in self.logic_clusters
@@ -2381,38 +2401,38 @@ class FPGA:
             self.compute_distance()
 
         # Area logging
-        fpga_state_to_csv(self, "VERIF", "area")
-        fpga_state_to_csv(self, "VERIF", "tx_size")
-
-        # Area totals logging
-        csv_outdir = "debug"
-        # The totals for circuits are stored in below keys 
-        # TODO add RAM keys
-        # TODO remove the hardcoded keys...
-        area_total_keys = [
-            "sb_mux_total", # Added in the block function
-            "cb_mux_total", # Added in the block function
-            "local_mux_total", # Added in the block function
-            "lut_total",
-            "ff_total",
-            "ble_output_total",
-            "cc_area_total",
-            "ffableout_area_total",
-            "logic_cluster",
-            "total_carry_chain",
-            "tile",
-        ]
-        total_areas = {
-            **fpga_state_fmt(self, "VERIF"),
-            **{key: self.area_dict[key] for key in area_total_keys},
-        }
-        totals_csv_out_fpath = os.path.join(csv_outdir, "area_totals.csv")
-        rg_utils.write_single_dict_to_csv(total_areas, totals_csv_out_fpath, "a")
-        # Per circuit area logging
-        unique_subckts: List[Type[c_ds.SizeableCircuit]] = list(self.tb_lib.keys())
-        for subckt in unique_subckts:
-            fpga_state_to_csv(self, "VERIF", "area", subckt)
-            fpga_state_to_csv(self, "VERIF", "tx_size", subckt)
+        if consts.VERBOSITY == consts.DEBUG:
+            fpga_state_to_csv(self, "VERIF", "area")
+            fpga_state_to_csv(self, "VERIF", "tx_size")
+            # Area totals logging
+            csv_outdir = "debug"
+            # The totals for circuits are stored in below keys 
+            # TODO add RAM keys
+            # TODO remove the hardcoded keys...
+            area_total_keys = [
+                "sb_mux_total", # Added in the block function
+                "cb_mux_total", # Added in the block function
+                "local_mux_total", # Added in the block function
+                "lut_total",
+                "ff_total",
+                "ble_output_total",
+                "cc_area_total",
+                "ffableout_area_total",
+                "logic_cluster",
+                "total_carry_chain",
+                "tile",
+            ]
+            total_areas = {
+                **fpga_state_fmt(self, "VERIF"),
+                **{key: self.area_dict[key] for key in area_total_keys},
+            }
+            totals_csv_out_fpath = os.path.join(csv_outdir, "area_totals.csv")
+            rg_utils.write_single_dict_to_csv(total_areas, totals_csv_out_fpath, "a")
+            # Per circuit area logging
+            unique_subckts: List[Type[c_ds.SizeableCircuit]] = list(self.tb_lib.keys())
+            for subckt in unique_subckts:
+                fpga_state_to_csv(self, "VERIF", "area", subckt)
+                fpga_state_to_csv(self, "VERIF", "tx_size", subckt)
 
         self.update_area_cnt += 1
 
@@ -2669,69 +2689,70 @@ class FPGA:
 
         
         # Compute Dist logging
-        csv_outdir = "debug"
-        tile_width_keys: List[str] = [
-            "sb_sram",
-            "sb",
-            "cb",
-            "cb_sram",
-            "ic_sram",
-            "ic",
-            "lut_sram",
-            "lut",
-            "cc",
-            "ffble",
-        ]
-        # Absolute widths
-        tile_widths: Dict[str, float] = {
-            **fpga_state_fmt(self, "VERIF"),
-            # Divide the real widths of each block by width dict to get percentage of tile width
-            **{key: self.dict_real_widths[key] for key in tile_width_keys},
-        }
-        width_csv_outfpath = os.path.join(csv_outdir, "tile_width_totals.csv")
-        rg_utils.write_single_dict_to_csv(tile_widths, width_csv_outfpath, "a")
-        # Tile width as a ratio of the real tile width
-        tile_width_ratios: Dict[str, float] = {
-            **fpga_state_fmt(self, "VERIF"),
-            # Divide the real widths of each block by width dict to get percentage of tile width
-            **{key: self.dict_real_widths[key]/(real_tile_width) for key in tile_width_keys},
-        }
-        width_csv_outfpath = os.path.join(csv_outdir, "tile_width_total_ratios.csv")
-        rg_utils.write_single_dict_to_csv(tile_width_ratios, width_csv_outfpath, "a")
-        dist_keys: List[str] = [
-            "d_cb_to_ic",            
-            "d_ic_to_lut",
-            "d_lut_to_cc",
-            "d_cc_to_ffble",
-            "d_ffble_to_sb",
-            "d_ffble_to_ic",
-        ]
+        if consts.VERBOSITY == consts.DEBUG:
+            csv_outdir = "debug"
+            tile_width_keys: List[str] = [
+                "sb_sram",
+                "sb",
+                "cb",
+                "cb_sram",
+                "ic_sram",
+                "ic",
+                "lut_sram",
+                "lut",
+                "cc",
+                "ffble",
+            ]
+            # Absolute widths
+            tile_widths: Dict[str, float] = {
+                **fpga_state_fmt(self, "VERIF"),
+                # Divide the real widths of each block by width dict to get percentage of tile width
+                **{key: self.dict_real_widths[key] for key in tile_width_keys},
+            }
+            width_csv_outfpath = os.path.join(csv_outdir, "tile_width_totals.csv")
+            rg_utils.write_single_dict_to_csv(tile_widths, width_csv_outfpath, "a")
+            # Tile width as a ratio of the real tile width
+            tile_width_ratios: Dict[str, float] = {
+                **fpga_state_fmt(self, "VERIF"),
+                # Divide the real widths of each block by width dict to get percentage of tile width
+                **{key: self.dict_real_widths[key]/(real_tile_width) for key in tile_width_keys},
+            }
+            width_csv_outfpath = os.path.join(csv_outdir, "tile_width_total_ratios.csv")
+            rg_utils.write_single_dict_to_csv(tile_width_ratios, width_csv_outfpath, "a")
+            dist_keys: List[str] = [
+                "d_cb_to_ic",            
+                "d_ic_to_lut",
+                "d_lut_to_cc",
+                "d_cc_to_ffble",
+                "d_ffble_to_sb",
+                "d_ffble_to_ic",
+            ]
 
 
-        dists_dict = {
-            dist_key: getattr(self, dist_key) for dist_key in dist_keys
-        }
+            dists_dict = {
+                dist_key: getattr(self, dist_key) for dist_key in dist_keys
+            }
 
-        dist_ratios_dict = {
-            dist_key: getattr(self, dist_key)/real_tile_width for dist_key in dist_keys
-        }
+            dist_ratios_dict = {
+                dist_key: getattr(self, dist_key)/real_tile_width for dist_key in dist_keys
+            }
 
-        # Assertion to make sure none of these distances are larger than a tile
-        assert all([dist <= real_tile_width for dist in dists_dict.values()]), "Distance is larger than tile width, this is not possible"
-
-        tile_dists: Dict[str, float] = {
-            **fpga_state_fmt(self, "VERIF"),
-            **dists_dict,
-        }
-        dists_csv_outfpath = os.path.join(csv_outdir, "tile_dist_totals.csv")
-        rg_utils.write_single_dict_to_csv(tile_dists, dists_csv_outfpath, "a")
+            # Assertion to make sure none of these distances are larger than a tile
+            assert all([dist <= real_tile_width for dist in dists_dict.values()]), "Distance is larger than tile width, this is not possible"
         
-        tile_dists: Dict[str, float] = {
-            **fpga_state_fmt(self, "VERIF"),
-            **dist_ratios_dict,
-        }
-        dists_csv_outfpath = os.path.join(csv_outdir, "tile_dist_total_ratios.csv")
-        rg_utils.write_single_dict_to_csv(tile_dists, dists_csv_outfpath, "a")
+            tile_dists: Dict[str, float] = {
+                **fpga_state_fmt(self, "VERIF"),
+                **dists_dict,
+            }
+            dists_csv_outfpath = os.path.join(csv_outdir, "tile_dist_totals.csv")
+            rg_utils.write_single_dict_to_csv(tile_dists, dists_csv_outfpath, "a")
+            
+            tile_dists: Dict[str, float] = {
+                **fpga_state_fmt(self, "VERIF"),
+                **dist_ratios_dict,
+            }
+            dists_csv_outfpath = os.path.join(csv_outdir, "tile_dist_total_ratios.csv")
+            rg_utils.write_single_dict_to_csv(tile_dists, dists_csv_outfpath, "a")
 
         self.compute_distance_cnt += 1
 
@@ -2842,12 +2863,13 @@ class FPGA:
 
         
         # Update Wires logging
-        fpga_state_to_csv(self, "VERIF", "wire_length")
+        if consts.VERBOSITY == consts.DEBUG:
+            fpga_state_to_csv(self, "VERIF", "wire_length")
 
-        # Per circuit wire logging
-        unique_subckts: List[Type[c_ds.SizeableCircuit]] = list(self.tb_lib.keys())
-        for subckt in unique_subckts:
-            fpga_state_to_csv(self, "VERIF", "wire_length", subckt)
+            # Per circuit wire logging
+            unique_subckts: List[Type[c_ds.SizeableCircuit]] = list(self.tb_lib.keys())
+            for subckt in unique_subckts:
+                fpga_state_to_csv(self, "VERIF", "wire_length", subckt)
 
         self.update_wires_cnt += 1
 
@@ -2889,7 +2911,8 @@ class FPGA:
             crit_path_delay += ckt.delay * ckt.delay_weight / len(in_ckt_meas.keys()) # TODO initialize delay_weights somewhere rather than evenly weighting by dividing by len
             # Update the delay dictionary with the measurements
             if update_del_dict:
-                self.delay_dict[ckt.sp_name] = ckt.delay
+                sp_name = ckt.sp_name if hasattr(ckt, "sp_name") and ckt.sp_name else ckt.name
+                self.delay_dict[sp_name] = ckt.delay
                 
         return crit_path_delay
         

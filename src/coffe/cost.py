@@ -12,10 +12,9 @@ def get_eval_area(
 ):
     """
         Get area cost for current FPGA state
-
     """
     if subcircuit:
-        sp_name: str = subcircuit.sp_name if subcircuit.sp_name else subcircuit.name
+        sp_name: str = subcircuit.sp_name if (hasattr(subcircuit, "sp_name") and subcircuit.sp_name) else subcircuit.name
         # Get area based on optimization type (subcircuit if local optimization, tile if global)
         if opt_type == "local":
             return fpga_inst.area_dict[sp_name]

@@ -36,6 +36,7 @@ import src.coffe.constants as constants
 import src.coffe.spice as spice
 import src.coffe.new_fpga as fpga
 import src.coffe.cost as cost_lib
+import src.coffe.constants as consts
 
 
 # This flag controls whether or not to print a bunch of ERF messages to the terminal
@@ -46,6 +47,7 @@ ERF_ERROR_TOLERANCE = 0.1
 # Maximum number of times the algorithm will try to meet ERF_ERROR_TOLERANCE before quitting.
 ERF_MAX_ITERATIONS = 4
 
+PASSTHROUGH_DEBUG_FLAG = 1
 
 
 # def log_fpga_telemetry(fpga_inst: fpga.FPGA, *args):
@@ -82,10 +84,13 @@ def ckt_get_meas(
 ) -> Dict[str, List[bool] | List[float]]:
     """
         Convience function to allow for quick simulation and measurement from a list of testbenches with a single circuit
+
+        if PASSTHROUGH_DEBUG_FLAG is set then this function will NOT run spice simulation but will just pass back the 
     """
     unique_ckts = set([tb.dut_ckt for tb in tbs])
     assert len(unique_ckts) == 1, "All testbenches must have the same circuit"
 
+    # if not PASSTHROUGH_DEBUG_FLAG:
     tb_meas: Dict[
         Type[c_ds.SimTB], 
         Dict[str, List[float] | List[bool]],
@@ -94,6 +99,20 @@ def ckt_get_meas(
         sp_interface,
         param_dict
     )
+    # else:
+        # # Create a dummy measurement dict for each tb
+        # tb_meas = {
+        #     tb: {
+        #         "trise": 1,
+        #         "tfall": 1,
+        #         "power": 1,
+        #         "delay": 1,
+        #         "valid": True,
+        #         # Add the inverter / other measurements
+        #         **{mp.value.name: 1 for mp in tb.meas_points}
+        #     } for tb in tbs
+        # }
+        
     merged_meas = fpga.merge_tb_meas(tb_meas)
 
     ckt_idx: int = 0
@@ -1281,9 +1300,9 @@ def erf_combo(
 def run_combo(
     fpga_inst: fpga.FPGA,
     tbs: List[c_ds.SimTB],
-    element_names,
-    combo,
-    erf_ratios,
+    element_names: List[str],
+    combo: Tuple[int | float],
+    erf_ratios: Dict[str, float],
     spice_interface: spice.SpiceInterface
 ):
     """ Run HSPICE to measure delay for this transistor sizing combination.
@@ -1333,7 +1352,7 @@ def run_combo(
     return tfall, trise
 
 
-def write_sp_sweep_data_from_fpga(fpga_inst: fpga.FPGA, sweep_out_fpath: str):
+def write_sp_sweep_data_from_fpga(fpga_inst: fpga.FPGA, sweep_out_fpath: str, num_sweep_pts: int = 1):
     """
         From an input fpga object write out the sweep data to simulate it in its current state 
     """
@@ -1341,15 +1360,15 @@ def write_sp_sweep_data_from_fpga(fpga_inst: fpga.FPGA, sweep_out_fpath: str):
     parameter_dict = {}
     if not fpga_inst.specs.use_finfet:
         for tran_name, tran_size in fpga_inst.transistor_sizes.items():
-            parameter_dict[tran_name] = [1e-9 * tran_size * fpga_inst.specs.min_tran_width]
+            parameter_dict[tran_name] = [1e-9 * tran_size * fpga_inst.specs.min_tran_width] * num_sweep_pts
     else:
         for tran_name, tran_size in fpga_inst.transistor_sizes.items():
-            parameter_dict[tran_name] = [tran_size]
+            parameter_dict[tran_name] = [tran_size] * num_sweep_pts
     
     # Set wires RC vals
     for wire_name, rc_data in fpga_inst.wire_rc_dict.items():
-        parameter_dict[wire_name + "_res"] = [rc_data[0]]
-        parameter_dict[wire_name + "_cap"] = [rc_data[1] * 1e-15]    
+        parameter_dict[wire_name + "_res"] = [rc_data[0]] * num_sweep_pts
+        parameter_dict[wire_name + "_cap"] = [rc_data[1] * 1e-15] * num_sweep_pts 
 
     # Write out the sweep file
     write_out_sweep_file(parameter_dict, sweep_out_fpath)
@@ -1436,9 +1455,9 @@ def search_ranges(
     #     fpga_inst.logger.debug(f'{rg_utils.log_format_list("TX_SIZE", outer_iter, sizable_circuit.name, inner_iter, bunch_num, tx_key)} {tx_val}')
 
     sr_outdir: str = "testing_sp_outdir"
-    os.makedirs(sr_outdir)
+    os.makedirs(sr_outdir, exist_ok=True)
     
-    sp_name: str = sizable_circuit.sp_name if sizable_circuit.sp_name else sizable_circuit.name
+    sp_name: str = sizable_circuit.sp_name if (hasattr(sizable_circuit, "sp_name") and sizable_circuit.sp_name) else sizable_circuit.name
 
     # Export current transistor sizes
     # TODO: Turning this off for now
@@ -1492,7 +1511,8 @@ def search_ranges(
         wire_rc = fpga_inst.wire_rc_dict
         wire_rc_list.append(wire_rc)
         # Debug statement
-        write_sp_sweep_data_from_fpga(fpga_inst, "sweep_data.l")
+        if consts.VERBOSITY == consts.DEBUG:
+            write_sp_sweep_data_from_fpga(fpga_inst, "sweep_data.l")
         pass 
 
     
@@ -1634,8 +1654,8 @@ def search_ranges(
     
     # Write results to file
     # TODO: Turning this off for now
-    export_filename = (sr_outdir + 
-                      sizable_circuit.name + 
+    export_filename = (os.path.join(sr_outdir,
+                      sizable_circuit.sp_name) + 
                       "_o" + str(outer_iter) + 
                       "_i" + str(inner_iter) + 
                       "_b" + str(bunch_num) + ".csv")
@@ -2090,7 +2110,7 @@ def size_subcircuit_transistors(
         is_ram_component: int, # TODO change to bool
         is_cc_component: int, # TODO change to bool
         use_sp_name: bool = True,
-        spec_tb: Type[c_ds.SimTB] = None,
+        spec_tb: Type[c_ds.SimTB] = None, # Allows the specificatuion of a specific testbench rather than using all existing ones
 ): 
     """
         Size transistors for one subcircuit.
@@ -2210,7 +2230,7 @@ def size_subcircuit_transistors(
             sizing_ranges_list.append(sizing_ranges.copy())
             
             # Log out FPGA stats for this inner iteration
-            update_fpga_telemetry_csv(fpga_inst, outer_iter, subcircuit.name, inner_iter, set_num, tag="POST_SWEEP_RE_ERF")
+            # update_fpga_telemetry_csv(fpga_inst, outer_iter, subcircuit.name, inner_iter, set_num, tag="POST_SWEEP_RE_ERF")
             # log_fpga_telemetry(fpga_inst, outer_iter, subcircuit.name, inner_iter, set_num)
 
             inner_iter += 1
@@ -2429,16 +2449,16 @@ def size_subckt_grp(
         area_opt_weight: int | float,
         delay_opt_weight: int | float,
         sp_interface: spice.SpiceInterface,
+        current_cost: float,
         is_cc: int = 0, # TODO change to bool
         is_ram: int = 0, # TODO change to bool
-        use_sp_name: bool = True
 ):
     """
         Performs sizing for a list of subcircuits (eg. all types of SB muxes)
     """
     for subckt in sizing_subckts:
         time_before_sizing = time.time()
-        sp_name: str = subckt.sp_name if use_sp_name else subckt.name
+        sp_name: str = subckt.sp_name if hasattr(subckt, "sp_name") and subckt.sp_name else subckt.name
         # If this is the first iteration, use the 'initial_transistor_sizes' as the 
         #     starting sizes. If it's not the first iteration, we use the transistor sizes 
         #     of the previous iteration as the starting sizes.
@@ -2465,7 +2485,7 @@ def size_subckt_grp(
                 starting_transistor_sizes, 
                 sp_interface, 
                 is_cc,
-                is_ram
+                is_ram,
             )
         else:
             sizing_results_dict[sp_name] = sizing_results_list[-1][sp_name]
@@ -2486,6 +2506,8 @@ def size_subckt_grp(
 
             print("Duration: " + str(time_after_sizing - time_before_sizing))
             print("Current Cost: " + str(current_cost))
+        
+    return current_cost
 
 
 
@@ -2501,7 +2523,8 @@ def size_bram_ckts(
         re_erf: int, 
         area_opt_weight: int | float, 
         delay_opt_weight: int | float, 
-        spice_interface: spice.SpiceInterface
+        spice_interface: spice.SpiceInterface,
+        current_cost: float,
     ):
     ############################################
     ## Size RAM output crossbar
@@ -2969,6 +2992,12 @@ def size_fpga_transistors(fpga_inst: fpga.FPGA, run_options: NamedTuple, spice_i
         # log_fpga_telemetry(fpga_inst, iteration)
         # update_fpga_telemetry_csv(fpga_inst, outer_iter= iteration, sub)
         
+        # HSPICE runtime testing to determine hspice runtime speedup from multithreading
+        if consts.HSPICE_TESTGEN:
+            sw_out_dpath: str = os.path.join("debug","hspice_sweeps")
+            os.makedirs(sw_out_dpath, exist_ok=True)
+            for num_sweeps in consts.HSPICE_SWEEPS:
+                write_sp_sweep_data_from_fpga(fpga_inst, os.path.join(sw_out_dpath, f"sweep_data_{num_sweeps}.l"))
 
 
         print("Sizing will begin now.")
@@ -3079,18 +3108,20 @@ def size_fpga_transistors(fpga_inst: fpga.FPGA, run_options: NamedTuple, spice_i
                 else:
                     sizing_grps = [getattr(fpga_inst, subckt_key)]
                 # Should this circuit use the sp_name or the name attribute? (TODO update all circuits to sp_name)
-                use_sp_name: bool
-                if subckt_key == "luts":
-                    use_sp_name = False
-                else: 
-                    use_sp_name = True
+                
+                # use_sp_name: bool                
+                # if subckt_key == "luts":
+                #     use_sp_name = False
+                # else: 
+                #     use_sp_name = True
+
                 # Are these components RAM? 
                 is_ram: int = 0 # The BRAM components are not yet supported in the size_subckt_grp function
                 # Are these components carry chain components?
                 is_cc: int = 1 if "carry_chain" in subckt_key else 0 
                 # Iterate over our list of sizing circuits and size them
                 for sizing_ckts in sizing_grps:
-                    size_subckt_grp(
+                    current_cost = size_subckt_grp(
                         fpga_inst,
                         sizing_ckts,
                         iteration,
@@ -3104,13 +3135,13 @@ def size_fpga_transistors(fpga_inst: fpga.FPGA, run_options: NamedTuple, spice_i
                         area_opt_weight,
                         delay_opt_weight,
                         spice_interface,
+                        current_cost,
                         is_cc,
                         is_ram,
-                        use_sp_name,
                     ) 
 
             if fpga_inst.specs.enable_bram_block == 1:
-                size_bram_ckts(
+                current_cost = size_bram_ckts(
                     fpga_inst,
                     iteration,
                     quick_mode_dict,
@@ -3123,6 +3154,7 @@ def size_fpga_transistors(fpga_inst: fpga.FPGA, run_options: NamedTuple, spice_i
                     area_opt_weight,
                     delay_opt_weight,
                     spice_interface,
+                    current_cost
                 )
 
             ############################################

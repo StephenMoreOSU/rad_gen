@@ -27,6 +27,19 @@ CHAN_USAGE_ASSUMPTION = 0.5
 CLUSTER_INPUT_USAGE_ASSUMPTION = 0.5
 LUT_INPUT_USAGE_ASSUMPTION = 0.85
 
+
+# Debug parameter which when asserted disables spice simulation and returns a dummy output (1 for all measure statements)
+# This allows us to test the rest of the code to make sure it doesn't error out
+PASSTHROUGH_DEBUG_FLAG = False
+# Verbosity level, TODO move this to logger and make it clean
+BREIF = 0
+VERBOSE = 1
+DEBUG = 2
+VERBOSITY = BREIF 
+# Generate a number of hspice simulations of the same circuit with increasing number of parameters
+HSPICE_TESTGEN = 1
+HSPICE_SWEEPS = [2**i for i in range(13)]
+
 # This parameter determines if RAM core uses the low power transistor technology
 # It is strongly suggested to keep it this way since our
 # core RAM modules were designed to operate with low power transistors.

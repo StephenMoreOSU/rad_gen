@@ -95,12 +95,15 @@ class Mux2Lvl(c_ds.SizeableCircuit):
         # tran_names_list.append("rest_" + sp_name + "_pmos")
         tran_names_list.append(f"inv_{sp_name}_1_nmos")
         tran_names_list.append(f"inv_{sp_name}_1_pmos")
-        tran_names_list.append(f"inv_{sp_name}_2_nmos")
-        tran_names_list.append(f"inv_{sp_name}_2_pmos")
+        if self.use_driver:
+            tran_names_list.append(f"inv_{sp_name}_2_nmos")
+            tran_names_list.append(f"inv_{sp_name}_2_pmos")
         
         # Create a list of all wires used in this subcircuit
         wire_names_list = []
-        wire_names_list.append(f"wire_{sp_name}_driver")
+        # TODO deal with this extra wire that's not used when the mux has no driver, there's an assertion in update_wires
+        if self.use_driver:
+            wire_names_list.append(f"wire_{sp_name}_driver")
         wire_names_list.append(f"wire_{sp_name}_L1")
         wire_names_list.append(f"wire_{sp_name}_L2")
         
@@ -180,8 +183,9 @@ class Mux2Lvl(c_ds.SizeableCircuit):
             self.initial_transistor_sizes["rest_" + sp_name + "_pmos"] = 1
             self.initial_transistor_sizes["inv_" + sp_name + "_1_nmos"] = 8
             self.initial_transistor_sizes["inv_" + sp_name + "_1_pmos"] = 4
-            self.initial_transistor_sizes["inv_" + sp_name + "_2_nmos"] = 10
-            self.initial_transistor_sizes["inv_" + sp_name + "_2_pmos"] = 20
+            if self.use_driver:
+                self.initial_transistor_sizes["inv_" + sp_name + "_2_nmos"] = 10
+                self.initial_transistor_sizes["inv_" + sp_name + "_2_pmos"] = 20
 
         else:
             self.transistor_names, self.wire_names = self.generate_tgate_2lvl_mux(subckt_lib_fpath)
@@ -192,8 +196,9 @@ class Mux2Lvl(c_ds.SizeableCircuit):
             self.initial_transistor_sizes["tgate_" + sp_name + "_L2_pmos"] = 4
             self.initial_transistor_sizes["inv_" + sp_name + "_1_nmos"] = 8
             self.initial_transistor_sizes["inv_" + sp_name + "_1_pmos"] = 4
-            self.initial_transistor_sizes["inv_" + sp_name + "_2_nmos"] = 10
-            self.initial_transistor_sizes["inv_" + sp_name + "_2_pmos"] = 20
+            if self.use_driver:
+                self.initial_transistor_sizes["inv_" + sp_name + "_2_nmos"] = 10
+                self.initial_transistor_sizes["inv_" + sp_name + "_2_pmos"] = 20
         
         # Assert that all transistors in this mux have been updated with initial_transistor_sizes
         assert set(list(self.initial_transistor_sizes.keys())) == set(self.transistor_names)
@@ -260,7 +265,8 @@ class Mux2Lvl(c_ds.SizeableCircuit):
         sp_name = self.get_sp_name()
 
         # Verify that indeed the wires we will update come from the ones initialized in the generate function
-        drv_wire_key = [key for key in self.wire_names if f"wire_{sp_name}_driver" in key][0]
+        if self.use_driver:
+            drv_wire_key = [key for key in self.wire_names if f"wire_{sp_name}_driver" in key][0]
         l1_wire_key = [key for key in self.wire_names if f"wire_{sp_name}_L1" in key][0]
         l2_wire_key = [key for key in self.wire_names if f"wire_{sp_name}_L2" in key][0]
 
@@ -269,16 +275,18 @@ class Mux2Lvl(c_ds.SizeableCircuit):
         s2_inv_key = f"inv_{sp_name}_2"
         
         # Assert keys exist in wire_names, unneeded but following convension if wire keys not coming from wire_names
-        assert set(self.wire_names) == set([drv_wire_key, l1_wire_key, l2_wire_key]), "Only updating a subset of all wires"
+        # assert set(self.wire_names) == set([drv_wire_key, l1_wire_key, l2_wire_key]), "Only updating a subset of all wires"
 
         # Update wire lengths
         # Divide both driver widths by 4 to get wire from pin -> driver input? Maybe just a back of envelope estimate 
-        wire_lengths[drv_wire_key] = (width_dict[s1_inv_key] + width_dict[s2_inv_key]) / 4
+        if self.use_driver:
+            wire_lengths[drv_wire_key] = (width_dict[s1_inv_key] + width_dict[s2_inv_key]) / 4
+            wire_layers[drv_wire_key] = consts.LOCAL_WIRE_LAYER
+
         wire_lengths[l1_wire_key] = width_dict[sp_name] * ratio
         wire_lengths[l2_wire_key] = width_dict[sp_name] * ratio
         
         # Update set wire layers
-        wire_layers[drv_wire_key] = consts.LOCAL_WIRE_LAYER
         wire_layers[l1_wire_key] = consts.LOCAL_WIRE_LAYER
         wire_layers[l2_wire_key] = consts.LOCAL_WIRE_LAYER
 
