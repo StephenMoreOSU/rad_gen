@@ -545,18 +545,15 @@ class FPGA:
     logic_clusters: List[lb_lib.LogicCluster] = None
 
     # Local Interconnect
-    # local_mux: c_ds.Block = None # Unused TODO remove if necessary
+    local_mux: c_ds.Block = None # Unused TODO remove if necessary
     local_muxes: List[lb_lib.LocalMux] = None
     local_routing_wire_loads: List[lb_lib.LocalRoutingWireLoad] = None
     local_ble_output_loads: List[lb_lib.LocalBLEOutputLoad] = None
 
     # BLE
-    # local_ble_output: c_ds.Block = None # Unused TODO remove if necessary
     local_ble_outputs: List[ble_lib.LocalBLEOutput] = None
-    # general_ble_output: c_ds.Block = None # Unused TODO remove if necessary
     general_ble_outputs: List[ble_lib.GeneralBLEOutput] = None    
     lut_output_loads: List[ble_lib.LUTOutputLoad] = None
-    # flut_mux: c_ds.Block = None # Unused TODO remove if necessary
     flut_muxes: List[ble_lib.FlutMux] = None
     flip_flops: List[ble_lib.FlipFlop] = None
 
@@ -566,9 +563,7 @@ class FPGA:
 
     # LUT Input Drivers
     lut_inputs: Dict[str, List[lut_lib.LUTInput]] = None
-    lut_input_driver: Dict[str, c_ds.Block] = None
     lut_input_drivers: Dict[str, List[lut_lib.LUTInputDriver]] = None
-    lut_input_not_driver: Dict[str, c_ds.Block] = None
     lut_input_not_drivers: Dict[str, List[lut_lib.LUTInputNotDriver]] = None
     lut_input_driver_loads: Dict[str, List[lut_lib.LUTInputDriverLoad]] = None
 
@@ -1476,6 +1471,9 @@ class FPGA:
                             tb_cond = True
                     if not tb_cond:
                         self.sb_mux_tbs.append(sb_mux_tb)
+        
+        # TODO FIXME TODO, just removing multiple SB testbenches because they seemed to have similar delays and I want fast runtime atm
+        # self.sb_mux_tbs = [self.sb_mux_tbs[0], self.sb_mux_tbs[2]]
 
         #    ___ ___   __  __ _   ___  __
         #   / __| _ ) |  \/  | | | \ \/ /
@@ -1503,6 +1501,7 @@ class FPGA:
                 if gen_r_wire_load.terminal_cb_mux and gen_r_wire_load.terminal_cb_mux == cb_mux and \
                     gen_r_wire_load.tile_cb_load_assignments[0][gen_r_wire_load.terminal_cb_mux]["num_on"] > 0:
                     tb_gen_r_wire_loads.append(gen_r_wire_load)
+                
         # TODO find all legal local routing wire loads that can be driven by the CB mux
         # We just assume as many types as we have logic clusters TODO circuits should be split up and indivdualized for more clarity + modularity
         tb_local_r_wire_loads: List[lb_lib.LocalRoutingWireLoad] = [
@@ -1511,6 +1510,7 @@ class FPGA:
         tb_local_muxes: List[lb_lib.LocalMux] = [
             lb.local_mux for lb in self.logic_clusters
         ]
+        # TODO make sure its ok to just use the "a" input driver for the SB mux testbench (but I think its fine)
         tb_lut_input_drivers: List[lb_lib.ble_lib.lut_lib.LUTInputDriver] = [
             lb.ble.lut.input_drivers["a"].driver for lb in self.logic_clusters
         ]
@@ -2960,30 +2960,6 @@ class FPGA:
         # Sets delays + power in ckt objects 
         crit_path_delay += self.merge_and_set_meas_sw_pt(sb_mux_meas)
 
-        # Define our function to merge measurments from different TBs
-        # def merge_sb_mux_meas(
-        #     dut_sb_mux_meas: Dict[ sb_mux_lib.SwitchBlockMuxTB, Dict[str, float | bool] ],
-        #     all_sb_muxes: List[sb_mux_lib.SwitchBlockMux]
-        # ):
-        #     """
-        #         Assumptions: Our dut_tb measurement combo will only have a single type of subckt dut in it 
-                
-        #         We need both our DUT SB Mux and others in the FPGA to understand wire type input freq
-        #     """
-        #     # Based on probability of the TB path being on critical path we weight measurements and avg
-        #     dut: sb_mux_lib.SwitchBlockMux = set(list(dut_sb_mux_meas.keys())).pop().dut_ckt
-        #     dut_sink: c_ds.GenRoutingWire = dut.sink_wire
-        #     tb: sb_mux_lib.SwitchBlockMuxTB
-        #     for tb, meas in dut_sb_mux_meas.items():
-        #         term_sb_mux: sb_mux_lib.SwitchBlockMux
-        #         for term_sb_mux in all_sb_muxes:
-        #             # Find all the SB Muxes which have a src wire of the same type as the DUT sink
-        #             if term_sb_mux == tb.sink_routing_wire_load.terminal_sb_mux:
-        #                 # We know this terminal mux is the one which we can get stats from
-
-
-        #                 assert any(wire == tb.dut_ckt.sink_wire for wire in term_sb_mux.src_wires), "Terminal mux must allow sink wire"
-                            
         # CB MUX
         cb_mux_meas: Dict[
             cb_mux_lib.ConnectionBlockMuxTB, Dict[str, List[float] | List[bool]]
@@ -3020,8 +2996,6 @@ class FPGA:
         # Sets delays + power in ckt objects
         flut_mux_merged_meas = merge_tb_meas(flut_mux_meas)
         self.set_ckt_meas(flut_mux_merged_meas, sw_idx = 0)
-
-        # _, flut_mux_merged_meas = self.merge_and_set_meas_sw_pt(flut_mux_meas, self.delay_dict)
         
         # LUT
         lut_meas: Dict[
@@ -3057,11 +3031,10 @@ class FPGA:
                 lut_lib.LUTInputTB, Dict[str, List[float] | List[bool]]
             ] = sim_tbs(self.lut_input_tbs[lut_in_key], spice_interface, parameter_dict)
             lut_input_measures[lut_in_key] = lut_input_meas
+
             # TODO make this cleaner, we are kinda doing a workaround way of setting values in the LUTInput obj
             # Get merged delays but DONT set as we do a custom thing for LUT inputs 
             lut_input_merged_meas = merge_tb_meas(lut_input_meas)
-            # self.merge_and_set_meas_sw_pt(lut_input_meas, self.delay_dict, set_flag = False)
-            
 
             # If we're on the fracturable input which is the last LUT input then we set the fmux delay for this input
             if (lut_in_key == "f" and self.specs.use_fluts and self.specs.K == 6) or \
