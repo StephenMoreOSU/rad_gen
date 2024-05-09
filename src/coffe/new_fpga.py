@@ -2400,7 +2400,7 @@ class FPGA:
             "ffableout_area_total",
             "logic_cluster",
             "total_carry_chain",
-            # "tile",
+            "tile",
         ]
         total_areas = {
             **fpga_state_fmt(self, "VERIF"),
@@ -2415,6 +2415,36 @@ class FPGA:
             fpga_state_to_csv(self, "VERIF", "tx_size", subckt)
 
         self.update_area_cnt += 1
+
+
+    def get_dist_bw_stripes(
+            self, 
+            stripe1: Tuple[str, int], 
+            stripe2: Tuple[str, int], 
+            stripe_widths: Dict[str, float]
+    ):
+        """ 
+            Preconditions: 
+                - self.stripe_order has been set
+                - self.span_stripe fraction has been set
+            Get the distance between two stripes in a tile.     
+        """
+        s1_key, s1_idx = stripe1
+        s2_key, s2_idx = stripe2
+        # We want to get the number of stripes b/w the two NON inclusive
+        num_inter_stripes: int = abs(s1_idx - s2_idx) - 1
+        # if these stripes are non adjacent, we sum the widths of stripes in between
+        tmp_dist: float = 0
+        if num_inter_stripes > 0:
+            # Get the stripes between the two stripes
+            inter_stripes = self.stripe_order[min(s1_idx, s2_idx) + 1: max(s1_idx, s2_idx)]
+            # Sum the widths of the stripes in between
+            tmp_dist = sum([stripe_widths[stripe] for stripe in inter_stripes])
+        # Add the widths of the two stripes, which adds the width of the stripe divided by the self.span_stripe_fraction
+        s1_dist: float = (stripe_widths[s1_key] / self.span_stripe_fraction)
+        s2_dist: float = (stripe_widths[s2_key] / self.span_stripe_fraction)
+        dist: float = s1_dist + tmp_dist + s2_dist
+        return dist
 
     def compute_distance(self):
         """ This function computes distances for different stripes for the floorplanner:
@@ -2504,99 +2534,140 @@ class FPGA:
         self.d_ffble_to_sb = 0.0 # Used in Cluster Output Load
         self.d_ffble_to_ic = 0.0 # Used in Logic Cluster 
 
+
+        # Calculate the width of tile with the new stripe widths
+        real_tile_width: float = sum([self.dict_real_widths[stripe] * self.stripe_order.count(stripe) for stripe in self.stripe_order])
+
+        # Get all unique combos of stripe widths        
+        stripe_mappings: List[Tuple[str, int]] = [
+            (stripe_key, i) for i, stripe_key in enumerate(self.stripe_order)
+        ]
+        # get all possible 2 pair combinations
+        unique_pairs: List[Tuple[str, int]] =  itertools.combinations(stripe_mappings, 2)
+
+        for pair in unique_pairs:
+            stripe1: Tuple[str, int] = pair[0]
+            stripe2: Tuple[str, int] = pair[1]
+            stripe1_key: str = stripe1[0]
+            stripe2_key: str = stripe2[0]
+            # stripe1: Tuple[str, int] = (stripe1_key, self.stripe_order.index(stripe1_key) )
+            # stripe2: Tuple[str, int] = (stripe2_key, self.stripe_order.index(stripe2_key) )
+            # skip over key pairs we don't care about
+            if (stripe1_key != "cb" and stripe1_key != "ic" and stripe1_key != "lut" and stripe1_key != "cc" and stripe1_key != "ffble" and stripe1_key != "sb") and (stripe1_key != stripe2_key):
+                continue
+            dist = self.get_dist_bw_stripes(stripe1, stripe2, self.dict_real_widths)
+            
+            if (stripe1_key == "cb" and stripe2_key == "ic") or (stripe2_key == "ic" and stripe2_key == "cb"):
+                if dist > self.d_cb_to_ic:
+                    self.d_cb_to_ic = dist
+            elif (stripe1_key == "ic" and stripe2_key == "lut") or (stripe2_key == "lut" and stripe2_key == "ic"):
+                if dist > self.d_ic_to_lut:
+                    self.d_ic_to_lut = dist
+            elif (stripe1_key == "lut" and stripe2_key == "cc") or (stripe2_key == "cc" and stripe2_key == "lut"):
+                if dist > self.d_lut_to_cc:
+                    self.d_lut_to_cc = dist
+            elif (stripe1_key == "cc" and stripe2_key == "ffble") or (stripe2_key == "ffble" and stripe2_key == "cc"):
+                if dist > self.d_cc_to_ffble:
+                    self.d_cc_to_ffble = dist
+            elif (stripe1_key == "ffble" and stripe2_key == "sb") or (stripe2_key == "sb" and stripe2_key == "ffble"):
+                if dist > self.d_ffble_to_sb:
+                    self.d_ffble_to_sb = dist
+            
+
+
         # worst-case distance between two stripes:
-        for index1, item1 in enumerate(self.stripe_order):
-            for index2, item2 in enumerate(self.stripe_order):
-                if item1 != item2:
-                    # If we want to find the maximum distance between "cb" and "ic" stripes
-                    if (item1 == "cb" and item2 == "ic") or (item1 == "ic" and item2 == "cb"):
-                        if index1 < index2:
-                            # Begin summing up distances across stripes to get the total distance of this wire
-                            # Start with the distance from closer side of stripe I/Os to the next stripe 
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                            # Sum up widths of intermediate stripes (full width as we traverse across them)
-                            for i in range(index1 + 1, index2):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                        else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                            for i in range(index2 + 1, index1):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                        if self.d_cb_to_ic < distance_temp:
-                            self.d_cb_to_ic = distance_temp
+        # for index1, item1 in enumerate(self.stripe_order):
+        #     for index2, item2 in enumerate(self.stripe_order):
+        #         if item1 != item2:
+        #             # If we want to find the maximum distance between "cb" and "ic" stripes
+        #             if (item1 == "cb" and item2 == "ic") or (item1 == "ic" and item2 == "cb"):
+        #                 if index1 < index2:
+        #                     # Begin summing up distances across stripes to get the total distance of this wire
+        #                     # Start with the distance from closer side of stripe I/Os to the next stripe 
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                     # Sum up widths of intermediate stripes (full width as we traverse across them)
+        #                     for i in range(index1 + 1, index2):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                 else:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                     for i in range(index2 + 1, index1):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                 if self.d_cb_to_ic < distance_temp:
+        #                     self.d_cb_to_ic = distance_temp
 
-                    if (item1 == "lut" and item2 == "ic") or (item1 == "ic" and item2 == "lut"):
-                        if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                            for i in range(index1 + 1, index2):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                        else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                            for i in range(index2 + 1, index1):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                        if self.d_ic_to_lut < distance_temp:
-                            self.d_ic_to_lut = distance_temp
+        #             if (item1 == "lut" and item2 == "ic") or (item1 == "ic" and item2 == "lut"):
+        #                 if index1 < index2:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                     for i in range(index1 + 1, index2):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                 else:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                     for i in range(index2 + 1, index1):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                 if self.d_ic_to_lut < distance_temp:
+        #                     self.d_ic_to_lut = distance_temp
 
-                    if (item1 == "lut" and item2 == "cc") or (item1 == "cc" and item2 == "lut"):
-                        if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                            for i in range(index1 + 1, index2):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                        else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                            for i in range(index2 + 1, index1):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                        if self.d_lut_to_cc < distance_temp:
-                            self.d_lut_to_cc = distance_temp
+        #             if (item1 == "lut" and item2 == "cc") or (item1 == "cc" and item2 == "lut"):
+        #                 if index1 < index2:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                     for i in range(index1 + 1, index2):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                 else:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                     for i in range(index2 + 1, index1):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                 if self.d_lut_to_cc < distance_temp:
+        #                     self.d_lut_to_cc = distance_temp
 
-                    if (item1 == "ffble" and item2 == "cc") or (item1 == "cc" and item2 == "ffble"):
-                        if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                            for i in range(index1 + 1, index2):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                        else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                            for i in range(index2 + 1, index1):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                        if self.d_cc_to_ffble < distance_temp:
-                            self.d_cc_to_ffble = distance_temp                                                                                    
+        #             if (item1 == "ffble" and item2 == "cc") or (item1 == "cc" and item2 == "ffble"):
+        #                 if index1 < index2:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                     for i in range(index1 + 1, index2):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                 else:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                     for i in range(index2 + 1, index1):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                 if self.d_cc_to_ffble < distance_temp:
+        #                     self.d_cc_to_ffble = distance_temp                                                                                    
 
-                    if (item1 == "ffble" and item2 == "sb") or (item1 == "sb" and item2 == "ffble"):
-                        if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                            for i in range(index1 + 1, index2):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                        else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                            for i in range(index2 + 1, index1):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                        if self.d_ffble_to_sb < distance_temp:
-                            self.d_ffble_to_sb = distance_temp
+        #             if (item1 == "ffble" and item2 == "sb") or (item1 == "sb" and item2 == "ffble"):
+        #                 if index1 < index2:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                     for i in range(index1 + 1, index2):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                 else:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                     for i in range(index2 + 1, index1):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                 if self.d_ffble_to_sb < distance_temp:
+        #                     self.d_ffble_to_sb = distance_temp
 
-                    if (item1 == "ffble" and item2 == "ic") or (item1 == "ic" and item2 == "ffble"):
-                        if index1 < index2:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                            for i in range(index1 + 1, index2):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                        else:
-                            distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-                            for i in range(index2 + 1, index1):
-                                distance_temp += self.dict_real_widths[self.stripe_order[i]]
-                            distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-                        if self.d_ffble_to_ic < distance_temp:
-                            self.d_ffble_to_ic = distance_temp       
+        #             if (item1 == "ffble" and item2 == "ic") or (item1 == "ic" and item2 == "ffble"):
+        #                 if index1 < index2:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                     for i in range(index1 + 1, index2):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                 else:
+        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
+        #                     for i in range(index2 + 1, index1):
+        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
+        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
+        #                 if self.d_ffble_to_ic < distance_temp:
+        #                     self.d_ffble_to_ic = distance_temp       
 
-
+        
         # Compute Dist logging
         csv_outdir = "debug"
         tile_width_keys: List[str] = [
@@ -2611,25 +2682,55 @@ class FPGA:
             "cc",
             "ffble",
         ]
+        # Absolute widths
         tile_widths: Dict[str, float] = {
             **fpga_state_fmt(self, "VERIF"),
+            # Divide the real widths of each block by width dict to get percentage of tile width
             **{key: self.dict_real_widths[key] for key in tile_width_keys},
         }
         width_csv_outfpath = os.path.join(csv_outdir, "tile_width_totals.csv")
         rg_utils.write_single_dict_to_csv(tile_widths, width_csv_outfpath, "a")
+        # Tile width as a ratio of the real tile width
+        tile_width_ratios: Dict[str, float] = {
+            **fpga_state_fmt(self, "VERIF"),
+            # Divide the real widths of each block by width dict to get percentage of tile width
+            **{key: self.dict_real_widths[key]/(real_tile_width) for key in tile_width_keys},
+        }
+        width_csv_outfpath = os.path.join(csv_outdir, "tile_width_total_ratios.csv")
+        rg_utils.write_single_dict_to_csv(tile_width_ratios, width_csv_outfpath, "a")
+        dist_keys: List[str] = [
+            "d_cb_to_ic",            
+            "d_ic_to_lut",
+            "d_lut_to_cc",
+            "d_cc_to_ffble",
+            "d_ffble_to_sb",
+            "d_ffble_to_ic",
+        ]
+
+
+        dists_dict = {
+            dist_key: getattr(self, dist_key) for dist_key in dist_keys
+        }
+
+        dist_ratios_dict = {
+            dist_key: getattr(self, dist_key)/real_tile_width for dist_key in dist_keys
+        }
+
+        # Assertion to make sure none of these distances are larger than a tile
+        assert all([dist <= real_tile_width for dist in dists_dict.values()]), "Distance is larger than tile width, this is not possible"
+
+        tile_dists: Dict[str, float] = {
+            **fpga_state_fmt(self, "VERIF"),
+            **dists_dict,
+        }
+        dists_csv_outfpath = os.path.join(csv_outdir, "tile_dist_totals.csv")
+        rg_utils.write_single_dict_to_csv(tile_dists, dists_csv_outfpath, "a")
         
         tile_dists: Dict[str, float] = {
             **fpga_state_fmt(self, "VERIF"),
-            **{
-                "d_cb_to_ic" : self.d_cb_to_ic,
-                "d_ic_to_lut" : self.d_ic_to_lut,
-                "d_lut_to_cc" : self.d_lut_to_cc,
-                "d_cc_to_ffble" : self.d_cc_to_ffble,
-                "d_ffble_to_sb" : self.d_ffble_to_sb,
-                "d_ffble_to_ic" : self.d_ffble_to_ic,
-            }
+            **dist_ratios_dict,
         }
-        dists_csv_outfpath = os.path.join(csv_outdir, "tile_dist_totals.csv")
+        dists_csv_outfpath = os.path.join(csv_outdir, "tile_dist_total_ratios.csv")
         rg_utils.write_single_dict_to_csv(tile_dists, dists_csv_outfpath, "a")
 
         self.compute_distance_cnt += 1
@@ -2701,7 +2802,7 @@ class FPGA:
             # Routing Wire Loads
             gen_r_wire_load: gen_r_load_lib.RoutingWireLoad
             for gen_r_wire_load in self.gen_routing_wire_loads:
-                gen_r_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.num_sb_stripes, self.num_cb_stripes)
+                gen_r_wire_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.num_sb_stripes, self.num_cb_stripes, self.lb_height)
             gen_ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad
             for gen_ble_output_load in self.gen_ble_output_loads:
                 gen_ble_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.d_ffble_to_sb, self.lb_height)

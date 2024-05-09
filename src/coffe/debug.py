@@ -856,6 +856,157 @@ def debug_csv_iterate(coffe_debug_dpath: str):
 
 
 
+def compare_debug_keys(ctrl_outdir: str, dut_outdir: str):
+    """
+        Provides hardcoded list of keys to compare dut and ctrl coffe runs
+    """
+    wire_length_key_pairs = [
+        ("wire_ble_outputs", "wire_ble_outputs_id_0"),
+        # CARRY CHAIN
+        ("wire_carry_chain_1", "wire_FA_carry_chain_id_0_1"),
+        ("wire_carry_chain_2", "wire_FA_carry_chain_id_0_2"),
+        ("wire_carry_chain_3", "wire_FA_carry_chain_id_0_3"),
+        ("wire_carry_chain_4", "wire_FA_carry_chain_id_0_4"),
+        ("wire_carry_chain_5", "wire_FA_carry_chain_id_0_5"),
+        ("wire_carry_chain_inter_1", "wire_carry_chain_inter_id_0_1"),
+        ("wire_carry_chain_mux", "wire_carry_chain_mux_id_0"),
+        ("wire_carry_chain_mux_driver", "wire_carry_chain_mux_id_0_driver"),
+        # CB
+        ("wire_cb_load_off", "wire_cb_load_off_id_0"),
+        ("wire_cb_load_off", "wire_cb_load_off_id_1"),
+        ("wire_cb_load_on", "wire_cb_load_on_id_0"),
+        ("wire_cb_load_on", "wire_cb_load_on_id_1"),
+        ("wire_cb_load_partial", "wire_cb_load_partial_id_0"),
+        ("wire_cb_load_partial", "wire_cb_load_partial_id_1"),
+        ("wire_cb_mux_L1", "wire_cb_mux_id_0_L1"),
+        ("wire_cb_mux_L2", "wire_cb_mux_id_0_L2"),
+        ("wire_cb_mux_driver", "wire_cb_mux_id_0_driver"),
+        ("wire_ff_cc1_out", "wire_ff_cc1_out"),
+        ("wire_ff_cc2_out", "wire_ff_cc2_out"),
+        ("wire_ff_input_out", "wire_ff_input_out"),
+        ("wire_ff_input_select", "wire_ff_input_select"),
+        ("wire_ff_tgate_1_out", "wire_ff_tgate_1_out"),
+        ("wire_ff_tgate_2_out", "wire_ff_tgate_2_out"),
+        ("wire_flut_mux", "wire_flut_mux_id_0"),
+        ("wire_flut_mux_driver", "wire_flut_mux_id_0_driver") ,
+        ("wire_gen_routing", "wire_gen_routing_id_0"),
+        ("wire_gen_routing", "wire_gen_routing_id_1"),
+        ("wire_gen_routing", "wire_gen_routing_id_2"),
+        ("wire_gen_routing", "wire_gen_routing_id_3"),
+        ("wire_general_ble_output", "wire_general_ble_output_id_0"),
+        ("wire_general_ble_output_driver", "wire_general_ble_output_id_0_driver"),
+        ("wire_general_ble_output_load", "wire_general_ble_output_load_id_0"),
+        ("wire_local_ble_output", "wire_local_ble_output_id_0") ,
+        ("wire_local_ble_output_driver", "wire_local_ble_output_id_0_driver") ,
+        ("wire_local_ble_output_feedback", "wire_local_ble_output_feedback_id_0") ,
+        ("wire_local_mux_L1", "wire_local_mux_id_0_L1"),
+        ("wire_local_mux_L2", "wire_local_mux_id_0_L2"),
+        ("wire_local_routing", "wire_local_routing_id_0"),
+        ("wire_lut_L1", "wire_lut_L1"),
+        ("wire_lut_L2", "wire_lut_L2"),
+        ("wire_lut_L3", "wire_lut_L3"),
+        ("wire_lut_L4", "wire_lut_L4"),
+        ("wire_lut_L5", "wire_lut_L5"),
+        ("wire_lut_L6", "wire_lut_L6"),
+        # A
+        ("wire_lut_a_driver", "wire_lut_a_driver_id_0"),
+        ("wire_lut_a_driver_load", "wire_lut_a_driver_load"),
+        ("wire_lut_a_driver_not", "wire_lut_a_driver_not_id_0"),
+        # B
+        ("wire_lut_b_driver", "wire_lut_b_driver_id_0"),
+        ("wire_lut_b_driver_load", "wire_lut_b_driver_load"),
+        ("wire_lut_b_driver_not", "wire_lut_b_driver_not_id_0"),
+        # C
+        ("wire_lut_c_driver", "wire_lut_c_driver_id_0"),
+        ("wire_lut_c_driver_load", "wire_lut_c_driver_load"),
+        ("wire_lut_c_driver_not", "wire_lut_c_driver_not_id_0"),
+        ("wire_lut_c_driver_0", "wire_lut_c_driver_id_0_0"),
+        ("wire_lut_c_driver_0_out", "wire_lut_c_driver_id_0_0_out"),
+        ("wire_lut_c_driver_0_rsel", "wire_lut_c_driver_id_0_0_rsel"),
+        # D
+        ("wire_lut_d_driver", "wire_lut_d_driver_id_0"),
+        ("wire_lut_d_driver_load", "wire_lut_d_driver_load"),
+        ("wire_lut_d_driver_not", "wire_lut_d_driver_not_id_0"),
+        # E
+        ("wire_lut_e_driver", "wire_lut_e_driver_id_0"),
+        ("wire_lut_e_driver_load", "wire_lut_e_driver_load"),
+        ("wire_lut_e_driver_not", "wire_lut_e_driver_not_id_0"),
+        # F
+        ("wire_lut_f_driver", "wire_lut_f_driver_id_0"),
+        ("wire_lut_f_driver_load", "wire_lut_f_driver_load"),
+        ("wire_lut_f_driver_not", "wire_lut_f_driver_not_id_0"),
+         
+        ("wire_lut_int_buffer", "wire_lut_int_buffer"),
+        ("wire_lut_int_buffer_out", "wire_lut_int_buffer_out"),
+        ("wire_lut_out_buffer", "wire_lut_out_buffer"),
+        ("wire_lut_output_load_1", "wire_lut_output_load_1"),
+        ("wire_lut_output_load_2", "wire_lut_output_load_2"),
+        ("wire_lut_sram_driver", "wire_lut_sram_driver"),
+        ("wire_lut_sram_driver_out", "wire_lut_sram_driver_out"),
+        ("wire_lut_to_flut_mux", "wire_lut_to_flut_mux"),
+        
+        ("wire_sb_load_off", "wire_sb_load_off_id_0"),
+        ("wire_sb_load_off", "wire_sb_load_off_id_1"),
+        ("wire_sb_load_off", "wire_sb_load_off_id_2"),
+        ("wire_sb_load_off", "wire_sb_load_off_id_3"),
+        ("wire_sb_load_partial", "wire_sb_load_partial_id_0"),
+        ("wire_sb_load_partial", "wire_sb_load_partial_id_1"),
+        ("wire_sb_load_partial", "wire_sb_load_partial_id_2"),
+        ("wire_sb_load_partial", "wire_sb_load_partial_id_3"),
+        ("wire_sb_load_on", "wire_sb_load_off_id_0"),
+        ("wire_sb_mux_L1", "wire_sb_mux_id_0_L1"),
+        ("wire_sb_mux_L2", "wire_sb_mux_id_0_L2"),
+        ("wire_sb_mux_L1", "wire_sb_mux_id_1_L1"),
+        ("wire_sb_mux_L2", "wire_sb_mux_id_1_L2"),
+        ("wire_sb_mux_driver", "wire_sb_mux_id_0_driver"),
+        ("wire_sb_mux_driver", "wire_sb_mux_id_1_driver"),
+
+        ("wire_xcarry_chain_and_1", "wire_xcarry_chain_and_id_0_1"),
+        ("wire_xcarry_chain_and_2", "wire_xcarry_chain_and_id_0_2"),
+        ("wire_xcarry_chain_mux", "wire_xcarry_chain_mux_id_0"),
+        ("wire_xcarry_chain_mux_driver", "wire_xcarry_chain_mux_id_0_driver"), 
+
+    ]
+    print(len(wire_length_key_pairs))
+    debug_key_cmp(ctrl_outdir, dut_outdir, "wire_length", wire_length_key_pairs)
+
+def debug_key_cmp(ctrl_outdir: str, dut_outdir: str, cat: str, key_pairs: List[Tuple[str]]):
+    """
+        Takes in two coffe output directories and compares each key pair for the specified catagory
+    """
+    debug_dir: str = "debug"
+    detailed_csv: str = f"{cat}_detailed.csv"
+    ctrl_det_csv_fpath: str = os.path.join(ctrl_outdir, debug_dir, detailed_csv)
+    dut_det_csv_fpath: str = os.path.join(dut_outdir, debug_dir, detailed_csv)
+    ctrl_det_dicts = rg_utils.read_csv_to_list(ctrl_det_csv_fpath)
+    dut_det_dicts = rg_utils.read_csv_to_list(dut_det_csv_fpath)
+    # Across all rows lets do a comparison and output abs and % diff to a new csv
+    os.makedirs(os.path.join(dut_outdir, debug_dir, "compares"), exist_ok=True)
+    cmp_outfpath = os.path.join(dut_outdir, debug_dir, "compares", f"{cat}_detailed_dut_vs_ctrl_cmp")
+    out_rows = []
+    for ctrl_row, dut_row in zip(ctrl_det_dicts, dut_det_dicts):
+        out_row = {}
+        for key_pair in key_pairs:
+            ctrl_key = key_pair[0]
+            dut_key = key_pair[1]
+            ctrl_val = ctrl_row.get(ctrl_key)
+            dut_val = dut_row.get(dut_key)
+            perc_diff = round(
+                (100 * (float(dut_val) - float(ctrl_val)) / float(ctrl_val)),
+                3
+            )
+            abs_diff = float(dut_val) - float(ctrl_val)
+            out_row[f"{ctrl_key} VS {dut_key}"] = perc_diff
+        
+        # if len(out_row.keys()) < max(len(ctrl_row.keys()), len(dut_row.keys())):
+        #     print(f"ERROR, not all key pairs were found in the csvs {len(out_row.keys())} {len(dut_row.keys())}")
+        
+        out_rows.append(out_row)
+    rg_utils.write_dict_to_csv(out_rows, cmp_outfpath)
+    print(f"Finished comparing {cat} keys between {ctrl_outdir} and {dut_outdir} and saved to {cmp_outfpath}.csv")
+         
+
+
 
 def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
 
@@ -904,7 +1055,12 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
 
 
     # Uses existing debug csvs to find differences across iterations
-    debug_csv_iterate(os.path.join(dut_outdir,"debug"))
+    # debug_csv_iterate(os.path.join(dut_outdir,"debug"))
+    # debug_csv_iterate(os.path.join(ctrl_outdir,"debug"))
+
+
+    # Compares debug keys for ctrl and dut runs
+    # compare_debug_keys(ctrl_outdir, dut_outdir)
 
 
     # Which subckts will we run and compare against one another
@@ -928,7 +1084,8 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
     ] 
     ## Runs spice simulations and plots for detail comparison
     # prepare_legacy_ckt_for_cmp(ctrl_outdir)
-    # subckt_meas_cmp(testing_subckts, [ctrl_outdir, dut_outdir], plot_flag = True)
+    #[ctrl_outdir
+    subckt_meas_cmp(testing_subckts, [dut_outdir], plot_flag = True)
 
 
     # Outputs log files comparing keys from control and tests

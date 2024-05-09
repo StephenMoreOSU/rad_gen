@@ -14,6 +14,7 @@ import time
 import csv
 
 from itertools import product
+from collections import defaultdict
 import sys
 import logging
 
@@ -394,21 +395,81 @@ def get_current_area(
         ret_val = fpga_inst.area_dict["ram_core"]
     return ret_val
 
-# def get_final_area(fpga_inst, opt_type, subcircuit, is_ram_component, is_cc_component):
-#     # Get area based on optimization type (subcircuit if local optimization, tile if global)
-#     if opt_type == "local":
-#         area = fpga_inst.area_dict[subcircuit.name]
-#     # If the block being sized is part of the memory component, return ram size
-#     # Otherwise, the block size is returned
-#     elif "hard_block" in subcircuit.name:
-#         return subcircuit.area
-#     elif is_cc_component == 1:
-#         return fpga_inst.area_dict["total_carry_chain"]
-#     elif is_ram_component == 0 or fpga_inst.specs.enable_bram_block == 0:
-#         return fpga_inst.area_dict["tile"] 
-#     else:
-#         return fpga_inst.area_dict["ram_core"]
+def get_eval_delay(
+        fpga_inst: fpga.FPGA,
+        opt_type: str,
+        subcircuit: c_ds.SizeableCircuit,
+        tfall: float,
+        trise: float,
+        low_voltage: float,
+        is_ram_component: bool,
+        is_cc_component: bool,
+) -> float:
+    """
+        Returns the delay (cost) to be used in transistor sizing function
+    """
+    # TODO refactor this function and get_current_delay into a single one
+
+    # omit measurements that are negative or doesn't reach Vgnd
+    # TODO check to see if the low_voltage is necessary given that it seems many testbenches set the low_voltage meas statement to gnd
+    if  ( (tfall < 0 or trise < 0 or low_voltage > 4.0e-1) or 
+            # omit measurements that are too large
+            (tfall > 5e-9 or trise > 5e-9) ):
+        return 100
+    
+
+    # Use average delay for evaluation
+    delay: float = (tfall + trise)/2
+
+    if "hard_block" in subcircuit.name:
+        # TODO fix hardblock specific delay cost functionality 
+
+        delay_worst = max(tfall, trise)
+
+        subcircuit.delay = delay
+        subcircuit.trise = trise
+        subcircuit.tfall = tfall
+
+        if delay_worst > subcircuit.lowerbounddelay:
+            return subcircuit.delay + 10 * (delay_worst - subcircuit.lowerbounddelay)
+        else:
+            return subcircuit.delay
+    if is_cc_component:
+        # Why do we set the subcircuit delay here?
+        # TODO figure it out
+        subcircuit.delay = delay
+        # cc delay
+        cc_delay: float = sum([ cc.delay for cc in fpga_inst.carry_chains]) / len(fpga_inst.carry_chains)
+        cc_per_delay: float = sum([ cc_per.delay for cc_per in fpga_inst.carry_chain_periphs]) / len(fpga_inst.carry_chain_periphs)
+        cc_inter_delay: float = sum([ cc_inter.delay for cc_inter in fpga_inst.carry_chain_inter_clusters]) / len(fpga_inst.carry_chain_inter_clusters)
+
+        if fpga_inst.specs.carry_chain_type == "ripple":
+            # The skip is pretty much dependent on size, I'll just assume 4 skip stages for now. However, it should work for any number of bits.
+            path_delay: float =  (fpga_inst.specs.N * fpga_inst.specs.FAs_per_flut - 2) * cc_delay + cc_per_delay + cc_inter_delay
+        elif fpga_inst.specs.carry_chain_type == "skip":
+            cc_and_delay: float = sum([cc_and.delay for cc_and in fpga_inst.carry_chain_skip_ands])/len(fpga_inst.carry_chain_skip_ands)
+            cc_skip_mux_delay: float = sum([cc_skip_mux.delay for cc_skip_mux in fpga_inst.carry_chain_skip_muxes])/len(fpga_inst.carry_chain_skip_muxes)
+            
+            # The critical path is the ripple path and the skip of the first one + the skip path of blocks in between, and the ripple and sum of the last block + the time it takes to load the wire in between
+            path_delay = (
+                (cc_delay * fpga_inst.skip_size) + cc_and_delay + cc_skip_mux_delay +
+                (2 * cc_skip_mux_delay) + (cc_delay * fpga_inst.skip_size) + cc_per_delay + 
+                (3 - fpga_inst.specs.FAs_per_flut) * cc_inter_delay
+            )     
+            return path_delay
+
+    if opt_type == "local":
+        return delay
+    else:
+        subcircuit.delay = delay
+        # Calculate the delay of the current path
+        path_delay: float = get_current_delay(fpga_inst, is_ram_component)
+        assert path_delay > 0, f"ERROR: path delay: {path_delay} is negative"
+        return path_delay       
         
+        
+        
+
 
 def get_current_delay(fpga_inst: fpga.FPGA, is_ram_component):
     path_delay: float = 0
@@ -442,7 +503,17 @@ def get_current_delay(fpga_inst: fpga.FPGA, is_ram_component):
     for gen_ble_output in fpga_inst.general_ble_outputs:
         path_delay += (gen_ble_output.delay * gen_ble_output.delay_weight) / len(fpga_inst.general_ble_outputs)  # TODO get user defined weight
 
-    # TODO figure out why carry chains not on critical path
+    # TODO figure out why only carry chain mux is on the critical path
+    if fpga_inst.specs.enable_carry_chain:
+        # Carry chain mux
+        for cc_mux in fpga_inst.carry_chain_muxes:
+            path_delay += (cc_mux.delay * cc_mux.delay_weight) / len(fpga_inst.carry_chain_muxes) # TODO get user defined weight
+    
+    if fpga_inst.specs.use_fluts:
+        # FMUX
+        for fmux in fpga_inst.flut_muxes:
+            path_delay += (fmux.delay * fmux.delay_weight) / len(fpga_inst.flut_muxes) # TODO get user defined weight
+    
 
     # Memory block components begin here
     # set RAM individual constant delays here:
@@ -521,10 +592,10 @@ def get_final_delay(
     subcircuit.delay = delay
     subcircuit.trise = trise
     subcircuit.tfall = tfall
+
     if "hard_block" in subcircuit.name:
         return subcircuit.delay
 
-    #skip_size = 5
     if is_cc_component:
         cc_delay: float = sum([cc.delay for cc in fpga_inst.carry_chains])/len(fpga_inst.carry_chains)                                 # TODO allow user defined weights here    
         cc_periph_delay: float = sum([cc_per.delay for cc_per in fpga_inst.carry_chain_periphs])/len(fpga_inst.carry_chain_periphs)    # TODO allow user defined weights here
@@ -543,42 +614,8 @@ def get_final_delay(
     if opt_type == "local":
         return delay
     else:
-        
         path_delay = get_current_delay(fpga_inst, is_ram_component)
-        assert path_delay > 0, f"ERROR: path delay: {path_delay} is negative"
-
-        # We need to get the delay of a representative critical path
-        # Let's first set the delay for this subcircuit
-        # subcircuit.delay = delay
-        
-        # path_delay = 0
-        
-        # # Switch block
-        # sb_mux: switch_block_mux._SwitchBlockMUX
-        # # To calculate delay we assume that the number of muxes * their size is the frequency the path will be taken 
-        # for sb_mux in fpga_inst.sb_muxes:
-        #     sb_mux_ipin_freq_ratio = sb_mux.num_per_tile * sb_mux.required_size / sum([sb_mux.num_per_tile * sb_mux.required_size for sb_mux in fpga_inst.sb_muxes])
-        #     path_delay += sb_mux.delay * sb_mux.delay_weight * sb_mux_ipin_freq_ratio
-        # # Connection block
-        # path_delay += fpga_inst.cb_mux.delay*fpga_inst.cb_mux.delay_weight
-        # # Local mux
-        # path_delay += fpga_inst.logic_cluster.local_mux.delay*fpga_inst.logic_cluster.local_mux.delay_weight
-        # # LUT
-        # path_delay += fpga_inst.logic_cluster.ble.lut.delay*fpga_inst.logic_cluster.ble.lut.delay_weight
-        # # LUT input drivers
-        # for lut_input_name, lut_input in fpga_inst.logic_cluster.ble.lut.input_drivers.items():
-        #     path_delay += lut_input.driver.delay*lut_input.driver.delay_weight
-        #     path_delay += lut_input.not_driver.delay*lut_input.not_driver.delay_weight
-        # # Local BLE output
-        # path_delay += fpga_inst.logic_cluster.ble.local_output.delay*fpga_inst.logic_cluster.ble.local_output.delay_weight
-        # # General BLE output
-        # path_delay += fpga_inst.logic_cluster.ble.general_output.delay*fpga_inst.logic_cluster.ble.general_output.delay_weight
-
-        # final delay should not be negative, something went wrong :(
-        # if path_delay < 0 :
-        #     print("***Negative path delay: " + str(path_delay) + " in " + subcircuit.name + " ***")
-        #     exit(2)
-        
+        assert path_delay > 0, f"ERROR: path delay: {path_delay} is negative"        
         return path_delay
         
     
@@ -1300,8 +1337,65 @@ def write_sp_sweep_data_from_fpga(fpga_inst: fpga.FPGA, sweep_out_fpath: str):
     """
         From an input fpga object write out the sweep data to simulate it in its current state 
     """
-    # Write out sweep data file
+    # Populate a parameter dict with values in the fpga inst
+    parameter_dict = {}
+    if not fpga_inst.specs.use_finfet:
+        for tran_name, tran_size in fpga_inst.transistor_sizes.items():
+            parameter_dict[tran_name] = [1e-9 * tran_size * fpga_inst.specs.min_tran_width]
+    else:
+        for tran_name, tran_size in fpga_inst.transistor_sizes.items():
+            parameter_dict[tran_name] = [tran_size]
     
+    # Set wires RC vals
+    for wire_name, rc_data in fpga_inst.wire_rc_dict.items():
+        parameter_dict[wire_name + "_res"] = [rc_data[0]]
+        parameter_dict[wire_name + "_cap"] = [rc_data[1] * 1e-15]    
+
+    # Write out the sweep file
+    write_out_sweep_file(parameter_dict, sweep_out_fpath)
+
+
+def write_out_sweep_file(parameter_dict: Dict[str, List[float]], sweep_out_fpath: str):
+    """
+        Write out the sweep file to simulate the current transistor sizes and wire RC values
+    """
+    max_items_per_line = 4
+
+    # Get a list of parameter names
+    param_list = list(parameter_dict.keys())
+
+    # Write the .DATA HPSICE file. This first part writes out the header.
+    hspice_data_file = open(sweep_out_fpath, 'w')
+    hspice_data_file.write(".DATA sweep_data")
+    item_counter = 0
+    for param_name in param_list:
+        if item_counter >= max_items_per_line:
+            hspice_data_file.write("\n" + param_name)
+            item_counter = 0
+        else:
+            hspice_data_file.write(" " + param_name)
+        item_counter += 1
+    hspice_data_file.write("\n")
+
+    # Add data for each elements in the lists.
+    num_settings = len(parameter_dict[param_list[0]])
+    for i in range(num_settings):
+        item_counter = 0
+        for param_name in param_list:
+            if item_counter >= max_items_per_line:
+                hspice_data_file.write(str(parameter_dict[param_name][i]) + "\n")
+                item_counter = 0
+            else:
+                hspice_data_file.write(str(parameter_dict[param_name][i]) + " ")
+            item_counter += 1
+        hspice_data_file.write ("\n")
+
+    # Add the footer
+    hspice_data_file.write(".ENDDATA")
+
+    hspice_data_file.close()
+
+
 
     
 def search_ranges(
@@ -1397,6 +1491,9 @@ def search_ranges(
         fpga_inst.update_wire_rc()
         wire_rc = fpga_inst.wire_rc_dict
         wire_rc_list.append(wire_rc)
+        # Debug statement
+        write_sp_sweep_data_from_fpga(fpga_inst, "sweep_data.l")
+        pass 
 
     
     # We have to make a parameter dict for HSPICE
@@ -1483,7 +1580,7 @@ def search_ranges(
         trise_str = ckt_meas["trise"][i]
         if ckt_meas["meas_logic_low_voltage"][i] == "failed" :
             meas_logic_low_voltage.append(1)
-        else :
+        else:
             meas_logic_low_voltage.append(float(ckt_meas["meas_logic_low_voltage"][i]))
 
         if tfall_str == "failed":

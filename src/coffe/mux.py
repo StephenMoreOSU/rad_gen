@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Tuple, Union, Type
+from typing import List, Dict, Any, Tuple, Union, Type, Set
 import re
 
 
@@ -208,15 +208,15 @@ class Mux2Lvl(c_ds.SizeableCircuit):
 
         # Calculate & update the area and widths of this mux
         # Find all area keys associated with inverters in this mux
-        inv_id = 1
-        inv_area_keys = []
+        inv_area_keys: Set[str] = set()
         for tx_param in self.transistor_names:
             if "inv" in tx_param:
                 # assert re.search(f'inv_{sp_name}_') tx_param == f"inv_{sp_name}_{inv_id}", f"Invalid inv name {tx_param} for mux {sp_name}"
-                inv_area_keys.append(
+                
+                # We add keys with "inv" and "_pmos" and "_nmos" to the set to calculate the area of all inverters in driver
+                inv_area_keys.add(
                     tx_param.replace("_pmos","").replace("_nmos","")
                 )
-                inv_id += 1
         
         tx_type_key = "ptran" if not self.use_tgate else "tgate"
 

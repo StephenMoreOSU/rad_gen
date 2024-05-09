@@ -193,11 +193,11 @@ class GeneralBLEOutputLoad(c_ds.LoadCircuit):
         wire_lengths[gen_ble_out_wire_key] = width_dict["tile"] * consts.OUTPUT_TRACK_ACCESS_SPAN
         # It's not possible for the wire to be longer than the output track access span * tile width
         if height and h_dist:
-            if h_dist <= width_dict["tile"]:
-                wire_lengths[gen_ble_out_wire_key] = h_dist
-            else:
-                print(f"Warning: The distance between the BLE output and the routing channel is greater than the tile width * OUTPUT_TRACK_ACCESS_SPAN. Setting wire length to tile width.")
-                print(f"Distance: {h_dist}, Tile Width: {width_dict['tile']}")
+            # if h_dist <= width_dict["tile"]:
+            wire_lengths[gen_ble_out_wire_key] = h_dist
+            # else:
+            #     print(f"Warning: The distance between the BLE output and the routing channel is greater than the tile width * OUTPUT_TRACK_ACCESS_SPAN. Setting wire length to tile width.")
+            #     print(f"Distance: {h_dist}, Tile Width: {width_dict['tile']}")
 
         # Update wire layers
         wire_layers[gen_ble_out_wire_key] = consts.LOCAL_WIRE_LAYER

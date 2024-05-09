@@ -950,6 +950,8 @@ class Block:
         width_dict[f"{self.ckt_defs[0].name}_total"] = math.sqrt(self.block_area)
 
     def set_block_widths(self, area_dict: Dict[str, float | int], num_stripes: int, num_stripes_sram: int, lb_height: float):
+        self.stripe_avg_width = 0
+        self.stripe_avg_sram_width = 0
         # Just set in this struct in case we need later
         self.num_stripes = num_stripes
         for ckt, freq in self.freq_dist.items():
