@@ -1206,7 +1206,7 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
     # Loop through subtool keys and call init function to return data structures
     # init functions are in the form init_<subtool>_structs
     for subtool in subtool_confs.keys():
-        fn_to_call = getattr(sys.modules[__name__], f"init_{subtool}_structs", None)
+        fn_to_call = getattr(sys.modules[__name__], f"init_{subtool}_structs")
         if callable(fn_to_call):
             # do the renaming of keys to take out the "<subtool>." portion of heirarchy, this is because by definition all keys that are passed in are only for the respective subtool
             # (subtools are independant of one another), and the common dataclass is passed through the "common" key

@@ -122,4 +122,4 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     utils.print_summary(arch_folder, fpga_inst, total_start_time)
 
     # Print vpr architecure file
-    coffe_vpr.print_vpr_file(fpga_inst, arch_folder, coffe_info.fpga_arch_conf["fpga_arch_params"]['enable_bram_module'])
+    # coffe_vpr.print_vpr_file(fpga_inst, arch_folder, coffe_info.fpga_arch_conf["fpga_arch_params"]['enable_bram_module'])

@@ -22,8 +22,8 @@ from typing import List, Dict, Tuple, Set, Union, Any, Type, Callable, NamedTupl
 import src.common.utils as rg_utils
 
 import src.coffe.data_structs as c_ds
-import src.coffe.new_gen_routing_loads as gen_r_load_lib
 import src.coffe.new_sb_mux as sb_mux_lib
+import src.coffe.new_gen_routing_loads as gen_r_load_lib
 import src.coffe.new_cb_mux as cb_mux_lib
 import src.coffe.new_lut as lut_lib
 import src.coffe.new_ble as ble_lib
@@ -90,7 +90,6 @@ def ckt_get_meas(
     unique_ckts = set([tb.dut_ckt for tb in tbs])
     assert len(unique_ckts) == 1, "All testbenches must have the same circuit"
 
-    # if not PASSTHROUGH_DEBUG_FLAG:
     tb_meas: Dict[
         Type[c_ds.SimTB], 
         Dict[str, List[float] | List[bool]],
@@ -99,19 +98,6 @@ def ckt_get_meas(
         sp_interface,
         param_dict
     )
-    # else:
-        # # Create a dummy measurement dict for each tb
-        # tb_meas = {
-        #     tb: {
-        #         "trise": 1,
-        #         "tfall": 1,
-        #         "power": 1,
-        #         "delay": 1,
-        #         "valid": True,
-        #         # Add the inverter / other measurements
-        #         **{mp.value.name: 1 for mp in tb.meas_points}
-        #     } for tb in tbs
-        # }
         
     merged_meas = fpga.merge_tb_meas(tb_meas)
 
@@ -149,6 +135,17 @@ def update_fpga_telemetry_csv(fpga_inst, outer_iter: int, sizing_subckt: str, in
                 writer.writeheader()
 
             writer.writerow(row_data)
+
+# def write_it_csv(fpga_inst: fpga.FPGA, it_info: Dict[str, int]):
+#     """
+#         Writes out a csv which correlates the update index information with transistor sizing iteration info
+#         This lets us correlate between the two and determine where events are occuring with respective FPGA states through the flow
+#     """
+#     row_data = {
+#         **fpga.fpga_state_fmt("VERIF"),
+#         **it_info,
+#     }
+
 
 
 def expand_ranges(sizing_ranges):
@@ -492,9 +489,17 @@ def get_eval_delay(
 
 def get_current_delay(fpga_inst: fpga.FPGA, is_ram_component):
     path_delay: float = 0
+    
+    # partial_cpds = {
+    #     "sb_mux": 0,
+    #     "cb_mux": 0,
+    #     "local_mux": 0,
+    #     "lut": 0,
         
+
+    # }
+
     # Switch block
-    sb_mux: sb_mux_lib.SwitchBlockMux
     # To calculate delay we assume that the number of muxes * their size is the frequency the path will be taken 
     for sb_mux in fpga_inst.sb_muxes:
         path_delay += (sb_mux.delay * sb_mux.delay_weight) / len(fpga_inst.sb_muxes) # TODO get user defined weight
@@ -1495,6 +1500,10 @@ def search_ranges(
     wire_rc_list = []
     eval_delay_list = []
 
+
+    # Key describing where in iterations we currently are in
+    iteration_key: str = f"subckt_{sp_name}_o_{outer_iter}_i_{inner_iter}_b_{bunch_num}"
+
     # It appears to me that this loop calculates the area and wire_rc data for each transistor sizing combo and saves them to "area_list" and "wire_rc_list"
     # But it looks like the fpga_inst will be updated with the last transistor sizing combo in the list, which im not sure about
     for combo in sizing_combos:
@@ -1512,10 +1521,24 @@ def search_ranges(
         wire_rc_list.append(wire_rc)
         # Debug statement
         if consts.VERBOSITY == consts.DEBUG:
-            write_sp_sweep_data_from_fpga(fpga_inst, "sweep_data.l")
+            write_sp_sweep_data_from_fpga(fpga_inst, os.path.join("debug", "hspice_sweeps", f"{iteration_key}_sweep_data.l"))
+            
         pass 
 
-    
+    sz_it_info: Dict[str, int] = {
+        "sizing_subckt": sp_name,
+        "outer_iter": outer_iter,
+        "inner_iter": inner_iter,
+        "bunch_num": bunch_num
+    }
+    # Write out pure timestamp csv to associate the sizing iteration info with the update information
+    it_row_data = {
+        **fpga.fpga_state_fmt("VERIF"),
+        **sz_it_info,
+    }
+    if consts.VERBOSITY == consts.DEBUG:
+        rg_utils.write_single_dict_to_csv(it_row_data, os.path.join("debug", "iter_info.csv"), "a")
+
     # We have to make a parameter dict for HSPICE
     current_tran_sizes = {}
     if not fpga_inst.specs.use_finfet :
@@ -1655,7 +1678,7 @@ def search_ranges(
     # Write results to file
     # TODO: Turning this off for now
     export_filename = (os.path.join(sr_outdir,
-                      sizable_circuit.sp_name) + 
+                      sp_name) + 
                       "_o" + str(outer_iter) + 
                       "_i" + str(inner_iter) + 
                       "_b" + str(bunch_num) + ".csv")
@@ -1730,11 +1753,12 @@ def search_ranges(
 
     # Write post-erf results to file
     # TODO: Turn this off for now
-    erf_export_filename = (sr_outdir + 
-                          sizable_circuit.name + 
-                          "_o" + str(outer_iter) + 
-                          "_i" + str(inner_iter) + 
-                          "_b" + str(bunch_num) + "_erf.csv")
+    erf_export_filename = (
+        os.path.join(sr_outdir, sp_name) + 
+        "_o" + str(outer_iter) + 
+        "_i" + str(inner_iter) + 
+        "_b" + str(bunch_num) + "_erf.csv"
+    )
     result_rows = export_erf_results(erf_export_filename, 
                       element_names, 
                       sizing_combos, 

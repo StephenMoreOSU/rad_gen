@@ -568,14 +568,14 @@ def run_pdn_modeling(ic_3d_info: rg_ds.Ic3d):
     pdn.pdn_modeling(ic_3d_info)
 
 
-def run_spice_debug(spProcess: rg_ds.SpProcess, plot_flag: bool = True) -> Tuple[pd.DataFrame, dict, Dict[str, List[Dict[int, float]]] ]:
+def run_spice_debug(spProcess: rg_ds.SpProcess, plot_flag: bool = True, run_spice: bool = True) -> Tuple[pd.DataFrame, dict, Dict[str, List[Dict[int, float]]] ]:
     """
         From input spProcess, runs the spice simulation and returns the parsed results and plot if possible
     """
     res = rg_ds.Regexes()
     sp_sim_settings = rg_ds.SpGlobalSimSettings()
-    
-    buff_dse.run_spice(sp_process = spProcess)
+    if run_spice:
+        buff_dse.run_spice(sp_process = spProcess)
     if plot_flag:
         try:
             parse_flags = {

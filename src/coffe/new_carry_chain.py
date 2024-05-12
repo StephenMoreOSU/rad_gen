@@ -422,7 +422,7 @@ class CarryChainPerTB(c_ds.SimTB):
 @dataclass
 class CarryChain(c_ds.SizeableCircuit):
     """ Carry Chain class.    """
-    name: str = "FA_carry_chain"
+    name: str = "fa_carry_chain"
     
     cluster_size: int = None
     FAs_per_flut: bool = None

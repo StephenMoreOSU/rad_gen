@@ -348,30 +348,33 @@ def print_block_area(report_file, fpga_inst):
 
 
         empty_area = 0.0
-        # metal_pitch = fpga_inst.specs.gen_routing_metal_pitch
-        # metal_layers = fpga_inst.specs.gen_routing_metal_layers
-        # print_and_write(report_file, "  General routing metal pitch  = " + str(metal_pitch) + " nm")
-        # print_and_write(report_file, "  General routing metal layers  = " + str(metal_layers))
-        # if (metal_pitch > 0) and (metal_layers > 0):
-        #     num_tracks = int(fpga_inst.specs.W/metal_layers) + 1
-        #     metal_dim = num_tracks * metal_pitch
-        #     tile_width = fpga_inst.width_dict["tile"]
-        #     tile_height = fpga_inst.lb_height
-        #     print_and_write(report_file, "  Tile width  = " + str(round(tile_width,3)) + " nm")
-        #     print_and_write(report_file, "  Tile height = " + str(round(tile_height,3)) + " nm")
-        #     print_and_write(report_file, "  Width/Height needed by general routing metal = " + str(metal_dim) + " nm")
-        #     if (tile_width < metal_dim) or (tile_height < metal_dim):
-        #         print_and_write(report_file, "  Tile area is LIMITED by metal!")
-        #         print_and_write(report_file, "  Tile area (Active) = " + str(round(tile,3)) + " um^2")
-        #         tile_width = max(tile_width, metal_dim)
-        #         tile_height = max(tile_height, metal_dim)
-        #         empty_area = (tile_width * tile_height / 1e6) - tile
-        #         tile = tile_width * tile_height / 1e6
-        #         print_and_write(report_file, "  Tile area (Metal) = " + str(round(tile,3)) + " um^2")
-        #         fpga_inst.area_dict["tile"] = tile_width * tile_height
-        #     else:
-        #         print_and_write(report_file, "  Tile area is NOT limited by metal!")
-        # print_and_write(report_file, "  ")
+        metal_pitch = fpga_inst.specs.gen_routing_metal_pitch
+        metal_layers = fpga_inst.specs.gen_routing_metal_layers
+        print_and_write(report_file, "  General routing metal pitch  = " + str(metal_pitch) + " nm")
+        print_and_write(report_file, "  General routing metal layers  = " + str(metal_layers))
+        if (metal_pitch > 0) and (metal_layers > 0):
+            # TODO need to make this calculation for each wire type and it's own corresponding number of metal layers 
+            # For now just hacking it and assuming all using same metal layer (works for stratix IV)
+            num_tracks = int(sum(wire["num_tracks"] for wire in fpga_inst.specs.wire_types) / metal_layers) + 1 
+            
+            metal_dim = num_tracks * metal_pitch
+            tile_width = fpga_inst.width_dict["tile"]
+            tile_height = fpga_inst.lb_height
+            print_and_write(report_file, "  Tile width  = " + str(round(tile_width,3)) + " nm")
+            print_and_write(report_file, "  Tile height = " + str(round(tile_height,3)) + " nm")
+            print_and_write(report_file, "  Width/Height needed by general routing metal = " + str(metal_dim) + " nm")
+            if (tile_width < metal_dim) or (tile_height < metal_dim):
+                print_and_write(report_file, "  Tile area is LIMITED by metal!")
+                print_and_write(report_file, "  Tile area (Active) = " + str(round(tile,3)) + " um^2")
+                tile_width = max(tile_width, metal_dim)
+                tile_height = max(tile_height, metal_dim)
+                empty_area = (tile_width * tile_height / 1e6) - tile
+                tile = tile_width * tile_height / 1e6
+                print_and_write(report_file, "  Tile area (Metal) = " + str(round(tile,3)) + " um^2")
+                fpga_inst.area_dict["tile"] = tile_width * tile_height
+            else:
+                print_and_write(report_file, "  Tile area is NOT limited by metal!")
+        print_and_write(report_file, "  ")
 
 
 
@@ -489,18 +492,18 @@ def print_vpr_delays(report_file, fpga_inst):
     local_mux_delays = [ f" {local_mux.sp_name} CLB input -> BLE input (local CLB routing)".ljust(50) + f"{local_mux.delay}" for local_mux in fpga_inst.local_muxes]
     for local_mux_delay in local_mux_delays:
         print_and_write(report_file, local_mux_delay)
-    ble_local_output_delays = [ f" {ble_local_output.sp_name} LUT output -> BLE input (local feedback)".ljust(50) + f"{ble_local_output.delay}" for ble_local_output in fpga_inst.ble_local_outputs]
+    ble_local_output_delays = [ f" {ble_local_output.sp_name} LUT output -> BLE input (local feedback)".ljust(50) + f"{ble_local_output.delay}" for ble_local_output in fpga_inst.local_ble_outputs]
     for ble_local_output_delay in ble_local_output_delays:
         print_and_write(report_file, ble_local_output_delay)
-    ble_gen_output_delays = [ f" {ble_gen_output.sp_name} LUT output -> CLB output (logic block output)".ljust(50) + f"{ble_gen_output.delay}" for ble_gen_output in fpga_inst.ble_gen_outputs]
+    ble_gen_output_delays = [ f" {ble_gen_output.sp_name} LUT output -> CLB output (logic block output)".ljust(50) + f"{ble_gen_output.delay}" for ble_gen_output in fpga_inst.general_ble_outputs]
     for ble_gen_output_delay in ble_gen_output_delays:
         print_and_write(report_file, ble_gen_output_delay)
     
     # Figure out LUT delays
-    lut_input_names = list(fpga_inst.logic_cluster.ble.lut.input_drivers.keys())
+    lut_input_names = list(fpga_inst.lut_inputs.keys())
     lut_input_names.sort()
     for input_name in lut_input_names:
-        lut_input = fpga_inst.logic_cluster.ble.lut.input_drivers[input_name]
+        lut_input = fpga_inst.lut_inputs[input_name][0] #TODO add multi ckt support
         driver_delay = max(lut_input.driver.delay, lut_input.not_driver.delay)
         path_delay = lut_input.delay
         print_and_write(report_file, ("  lut_" + input_name).ljust(50) + str(driver_delay + path_delay))

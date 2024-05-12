@@ -432,6 +432,11 @@ class SpMeasure:
         """
         # head_line += f" {self.eval_fn.fn}"
         
+        # We need to assert that the name stored in value is in lower case, 
+        #   this is because in hspice the .lis / .mt0 measurement files will be generated with all lower case
+
+        assert self.value.name.islower(), "The name of the value in a measure statement must be in lower case to prevent future key errors"
+
         meas_lines: List[str] = [
             f".MEAS {self.type} {self.value.name}",
         ]

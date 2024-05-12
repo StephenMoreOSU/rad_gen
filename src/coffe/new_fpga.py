@@ -743,7 +743,11 @@ class FPGA:
         tb: Type[c_ds.SimTB]
         for tb in tbs:
             assert tb.dut_ckt is not None, "Testbench must have a DUT circuit"
-            self.tb_lib[tb.dut_ckt].append(tb)
+            # TODO make this more general (not hacky), we just want to not use the LUTInputTB for transistor sizing which is why we exclude it here
+            if not "with_lut_tb" in tb.tb_fname:
+                self.tb_lib[tb.dut_ckt].append(tb)
+            else:
+                print(f"Excluding {tb.tb_fname} from tb_lib")
 
         
 
@@ -2427,6 +2431,11 @@ class FPGA:
                 **{key: self.area_dict[key] for key in area_total_keys},
             }
             totals_csv_out_fpath = os.path.join(csv_outdir, "area_totals.csv")
+            # % of area as a portion of the tile area
+            # total_area_ratios = {
+            #     **fpga_state_fmt(self, "VERIF"),
+            #     **{key: self.area_dict[key] / self.area_dict["tile"] for key in area_total_keys if key != "tile"},
+            # }
             rg_utils.write_single_dict_to_csv(total_areas, totals_csv_out_fpath, "a")
             # Per circuit area logging
             unique_subckts: List[Type[c_ds.SizeableCircuit]] = list(self.tb_lib.keys())

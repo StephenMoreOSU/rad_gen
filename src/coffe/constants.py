@@ -35,9 +35,9 @@ PASSTHROUGH_DEBUG_FLAG = False
 BREIF = 0
 VERBOSE = 1
 DEBUG = 2
-VERBOSITY = BREIF 
+VERBOSITY = DEBUG
 # Generate a number of hspice simulations of the same circuit with increasing number of parameters
-HSPICE_TESTGEN = 1
+HSPICE_TESTGEN = False
 HSPICE_SWEEPS = [2**i for i in range(13)]
 
 # This parameter determines if RAM core uses the low power transistor technology

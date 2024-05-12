@@ -14,7 +14,7 @@ import src.common.utils as rg_utils
 import src.ic_3d.buffer_dse as buff_dse
 import src.coffe.data_structs as c_ds
 import src.common.spice_parser as sp_parser
-
+# import src.coffe.new_tran_sizing as tx_sizing
 
 from typing import List, Dict, Any, Tuple, Type, NamedTuple, Set, Optional, Union
 
@@ -650,9 +650,7 @@ def cmp_key_pairs(log_dpath: str):
 # To split up csv files into smaller ones use this command
 # ./split_csv.sh unity_verif/area_verif.csv unity_verif/area_splits 20
 
-# def parse_cli_args():
-#     parser = argparse.ArgumentParser(description="Parse the command line arguments for the script")
-#     return parser.parse_args()
+
 
 def find_files_of_ext(
         search_dirs: List[str],
@@ -675,7 +673,6 @@ def find_files_of_ext(
                         dec_found_file,
                 ):
                     found_fpaths.append(dec_found_file)
-                    # print(dec_found_file)
             
     return found_fpaths
 
@@ -684,6 +681,7 @@ def find_sp_sims(ckt_keys: List[str], search_dirs: List[str]):
     sp_sims = []
     for directory in search_dirs:
         for ckt_key in ckt_keys:
+            print(f"running: 'find {directory} -name '*{ckt_key}*' -type d -print0 | xargs -0 -I {{}} find {{}} -name '*.sp' -type f' ")
             sp_files = sp.check_output(f"find {directory} -name '*{ckt_key}*' -type d -print0 | xargs -0 -I {{}} find {{}} -name '*.sp' -type f", shell=True)
             sp_sims.extend(sp_files.decode("utf-8").split())
     return sp_sims
@@ -727,12 +725,14 @@ def subckt_meas_cmp(
     sp_tb_keys: List[str],
     in_coffe_dirs: List[str],
     plot_flag: bool = True,
+    run_spice: bool = True,
     out_dir: str = None
 ):
     """
         This function takes in a list of subckt testbench keys and input directories (top level coffe output dirs)
     """
     for sp_tb_key in sp_tb_keys:
+        assert isinstance(in_coffe_dirs, list)
         sp_tb_fpaths = find_sp_sims([sp_tb_key], in_coffe_dirs)
         # special filtering for luts 
         if sp_tb_key == "lut":
@@ -766,7 +766,7 @@ def subckt_meas_cmp(
                     title = sp_title,
                 )]
             for sp_proc in sp_procs:
-                _, measurements, _ = ic_3d.run_spice_debug(sp_proc, plot_flag)
+                _, measurements, _ = ic_3d.run_spice_debug(sp_proc, plot_flag, run_spice)
                 cmp_measurements[sp_title] = measurements
         cols = ["TITLE", "TRISE", "TFALL", "MAX", "ABS_DIFF", "PERC_DIFF"]
         col_width=30
@@ -1007,9 +1007,18 @@ def debug_key_cmp(ctrl_outdir: str, dut_outdir: str, cat: str, key_pairs: List[T
          
 
 
+def parse_cli_args():
+    parser = argparse.ArgumentParser(description="Command line options for COFFE debugging utility script")
+    parser.add_argument(
+        "-i", '--input_dirs', nargs='*', type=str, help="List of COFFE output directories to ingest and analyze and debug"
+    )
+    return parser.parse_args()
+
 
 def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
 
+    args: NamedTuple = parse_cli_args()
+    analysis_coffe_dirs: List[str] = args.input_dirs
 
     rad_gen_home = os.path.expanduser("~/Documents/rad_gen")
     coffe_unit_test_outputs = os.path.join(
@@ -1020,6 +1029,7 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
         coffe_unit_test_outputs,
         "arch_out_COFFE_CONTROL_TEST"
     )
+    
     dut_outdir = os.path.join(
         coffe_unit_test_outputs,
         "arch_out_dir_stratix_iv_rrg"
@@ -1039,7 +1049,7 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
     ]
 
     
-    num_lut_inputs = 5
+    num_lut_inputs = 6
     lut_in_driver_keys = [
         f"lut_{chr(c)}_driver"
         for c in range(97, 97 + num_lut_inputs) 
@@ -1065,16 +1075,16 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
 
     # Which subckts will we run and compare against one another
     testing_subckts: List[str] = [
-        "sb_mux",
+        # "sb_mux",
         # "cb_mux",
         # "local_mux",
         # "local_ble_output",
         # "general_ble_output",
         # "flut_mux",
         # "lut",
-        # *lut_in_driver_keys,
+        #*lut_in_driver_keys,
         # *lut_in_not_driver_keys,
-        # *lut_in_with_lut_keys,
+        *lut_in_with_lut_keys,
         # "carry_chain",
         # "carry_chain_per",
         # "carry_chain_inter",
@@ -1083,9 +1093,10 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
         # "xcarry_chain_mux",
     ] 
     ## Runs spice simulations and plots for detail comparison
-    # prepare_legacy_ckt_for_cmp(ctrl_outdir)
+    prepare_legacy_ckt_for_cmp(ctrl_outdir)
     #[ctrl_outdir
-    subckt_meas_cmp(testing_subckts, [dut_outdir], plot_flag = True)
+    #analysis_coffe_dirs
+    subckt_meas_cmp(testing_subckts, analysis_coffe_dirs, plot_flag = True, run_spice = True)
 
 
     # Outputs log files comparing keys from control and tests
