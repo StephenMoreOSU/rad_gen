@@ -630,7 +630,9 @@ class CarryChainTB(c_ds.SimTB):
             "n_1_2",
         ]
         meas_inv_list: List[bool] = [True] + [False] * (len(delay_names)-1)
+        low_v_node: str = "gnd"
         cust_pwr_meas_lines: List[str] = [
+            f".MEASURE TRAN meas_logic_low_voltage FIND V({low_v_node}) AT=25n",
             f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.",
             f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
             f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",
@@ -882,7 +884,9 @@ class CarryChainSkipAndTB(c_ds.SimTB):
             "n_1_3",
             "n_1_3",
         ]
+        low_v_node: str = "gnd"
         cust_pwr_meas_lines: List[str] = [
+            f".MEASURE TRAN meas_logic_low_voltage FIND V({low_v_node}) AT=25n",
             f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.",
             f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
             f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",
@@ -1057,7 +1061,9 @@ class CarryChainInterClusterTB(c_ds.SimTB):
             "n_1_3",
             "n_1_3",
         ]
+        low_v_node: str = "gnd"
         cust_pwr_meas_lines: List[str] = [
+            f".MEASURE TRAN meas_logic_low_voltage FIND V({low_v_node}) AT=25n",
             f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.",
             f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
             f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",

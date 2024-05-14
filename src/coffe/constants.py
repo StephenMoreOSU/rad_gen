@@ -40,6 +40,11 @@ VERBOSITY = DEBUG
 HSPICE_TESTGEN = False
 HSPICE_SWEEPS = [2**i for i in range(13)]
 
+# This points to a path of sizing output files that can be used to skip over a stage of sizing
+CKPT_FLAG = False
+CKPT_DPATH = "/fs1/eecg/vaughn/morestep/Documents/rad_gen/unit_tests/outputs/coffe/stratix_iv_rrg_mt_8_fixed_lut_driver_tb_v2/testing_sp_outdir"
+
+
 # This parameter determines if RAM core uses the low power transistor technology
 # It is strongly suggested to keep it this way since our
 # core RAM modules were designed to operate with low power transistors.

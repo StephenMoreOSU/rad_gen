@@ -1,4 +1,4 @@
-
+from __future__ import annotations
 from typing import List, Dict, Tuple, Set, Union, Any, Type, Callable, cast
 import os, sys, yaml
 import argparse
@@ -11,10 +11,12 @@ import logging
 import shapely as sh
 
 
-from dataclasses import fields, field
+from dataclasses import fields, field, asdict, is_dataclass, dataclass
+import json
 
 from pathlib import Path
 import copy
+import io
 
 
 #Import hammer modules
@@ -287,7 +289,30 @@ def read_csv_to_list(csv_fname: str) -> List[Dict[str, Any]]:
     csv_fd.close()
     return csv_lines
 
+def read_csv_to_list_w_dups(csv_fname: str, rep_suffix: str = "_rep") -> List[Dict[str, Any]]:
+    """
+    Reads a csv file into a list of dictionaries
+    """
+    csv_lines = []
+    with open(csv_fname, "r") as csv_fd:
+        reader = csv.reader(csv_fd)
+        headers = next(reader)  # Get the headers from the first row
+        for row in reader:
+            # Create a dictionary to store the data for this row
+            row_data = {}
+            for index, header in enumerate(headers):
+                if header in row_data:
+                    row_data[f"{header}_{rep_suffix}"] = row[index]
+                # Skip csv entries that are blank
+                elif header == "" and row_data == "":
+                    continue
+                else:
+                    # If the header is not yet in the dictionary, add it with the corresponding value
+                    row_data[header] = row[index]
+            csv_lines.append(row_data)
+    return csv_lines
 
+"""
 def compare_dataframe_row(df1: pd.DataFrame, df2: pd.DataFrame, row_index: int) -> pd.DataFrame:
     # If we are comparing dataframes with similar but not the same keys (coffe ctrl vs test) we can use a regex to find the ctrl to compare the test against
     
@@ -386,7 +411,7 @@ def compare_dataframes(df1_name: str, df1: pd.DataFrame, df2_name: str, df2: pd.
                     else:
                         comparisons.iloc[row_id].at[column] = value1
                 # If they are the same just keep the string value
-
+"""
 
 def check_for_valid_path(path):
     ret_val = False
@@ -412,7 +437,7 @@ def create_bordered_str(text: str = "", border_char: str = "#", total_len: int =
     return [ border_char * total_len, f"{border_char * border_size}{text}{border_char * border_size}", border_char * total_len]
 
 
-def c_style_comment_rm(text):
+def c_style_comment_rm(text: str):
     """ 
         This function removes c/c++ style comments from a file
         WARNING does not work for all cases (such as escaped characters and other edge cases of comments) but should work for most
@@ -511,7 +536,7 @@ def run_csh_cmd(cmd_str):
 
     
 
-def rec_get_flist_of_ext(design_dir_path,hdl_exts):
+def rec_get_flist_of_ext(design_dir_path, hdl_exts):
     """
     Takes in a path and recursively searches for all files of specified extension, returns dirs of those files and file paths in two lists
     """
@@ -522,15 +547,18 @@ def rec_get_flist_of_ext(design_dir_path,hdl_exts):
 
     return design_files,design_dirs
 
-def file_write_ln(fd, line):
-  """
-  writes a line to a file with newline after
-  """
-  fd.write(line + "\n")
-
-def edit_config_file(config_fpath, config_dict):
+def file_write_ln(fd: io.TextIOBase, line: str):
     """
-    Super useful function which I have needed in multiple tools, take in a dict of key value pairs and replace them in a config file,
+    writes a line to a file with newline after
+    """
+    fd.write(line + "\n")
+
+
+# UNUSED TODO figure out if this is needed
+def edit_yml_config_file(config_fpath: str, config_dict: dict):
+    """
+    Super useful function which I have needed in multiple tools, 
+    take in a dict of key value pairs and replace them in a config file,
     will keep it to yaml specification for now.
     """
     #read in config file as text
@@ -551,7 +579,7 @@ def edit_config_file(config_fpath, config_dict):
     with open(config_fpath, 'w') as f:
         f.write(config_text)
 
-
+# UNUSED TODO figure out if this is needed
 def sanitize_config_depr(config_dict) -> dict:
     """
         Modifies values of yaml config file to do the following:
@@ -568,16 +596,18 @@ def sanitize_config_depr(config_dict) -> dict:
     return config_dict
 
 def get_df_output_lines(df: pd.DataFrame) -> List[str]:
+    """
+        From an input dataframe returns a list of strings that can be printed to the console in a human readable table format
+        - The sizing of columns is adjusted automatically based on size of max string in col
+    """
     max_col_lens = max([len(str(col)) for col in df.columns])
     row_strings = [0]
     for col in df.columns:
         for row_idx in df.index:
             if isinstance(df[col].iloc[row_idx], str):
                 row_strings.append(len(df[col].iloc[row_idx]))
+    
     cell_chars = max(max_col_lens, max(row_strings) )
-
-
-    # cell_chars = 40
     ncols = len(df.columns)
     seperator = "+".join(["-"*cell_chars]*ncols)
     format_str = f"{{:^{cell_chars}}}"
@@ -590,7 +620,8 @@ def get_df_output_lines(df: pd.DataFrame) -> List[str]:
     ]
     return df_output_lines
 
-
+# Unused TODO figure out if needed
+# I think this function is a superset of 'find_newest_obj_dir' so we could maybe replace that one with this
 def find_newest_file(search_dir: str, file_fmt: str, is_dir = True):
     """
         Finds newest file corresponding to current design in the specified RAD-Gen output directory.
@@ -665,7 +696,10 @@ def find_newest_obj_dir(search_dir: str, obj_dir_fmt: str):
 #                                                                                     
 #### Parsing Utilities, repeats from RAD-Gen TODO see if they can be removed ####
 
-def check_for_valid_path(path):
+def check_for_valid_path(path: str):
+    """
+        Takes in path and determines if it exists
+    """
     ret_val = False
     if os.path.exists(os.path.abspath(path)):
         ret_val = True
@@ -674,6 +708,9 @@ def check_for_valid_path(path):
     return ret_val
 
 def handle_error(fn, expected_vals: set = None):
+    """
+        Handles error for a function
+    """
     # for fn in funcs:
     if not fn() or (expected_vals is not None and fn() not in expected_vals):
         sys.exit(1)
@@ -690,15 +727,24 @@ def clean_path(unsafe_path: str, validate_path: bool = True) -> str:
     return safe_path
 
 def traverse_nested_dict(in_dict: Dict[str, Any], callable_fn: Callable, *args, **kwargs) -> Dict[str, Any]:
+    """
+        Traverses a nested or un nested dict in depthwise fashion and applies a callable function to each element
+        Currently modifies and returns input dict, in the future should probably just do one or the other
+        
+        *args and **kwargs are passed to the callable function
+    """
     assert callable(callable_fn), "callable_fn must be a function"
+    # iterate across dict
     for k,v in in_dict.items():
+        # If we find a dict, just pass it to the function again
         if isinstance(v, dict):
             in_dict[k] = traverse_nested_dict(v, callable_fn, *args, **kwargs)
+        # If this is a list of dict elements, we traverse it and pass each dict to the callable function
         elif isinstance(v, list) and any(isinstance(ele, dict) for ele in v):
                 in_dict[k] = []
                 for ele in v:
                     if isinstance(ele, dict):
-                        # Pass to the traverse_nested_dict function again, adding the "parent_key" to the dickt to give info to following function
+                        # Pass to the traverse_nested_dict function again, adding the "parent_key" to the dict to give info to following function
                         in_dict[k].append(traverse_nested_dict(ele, callable_fn, *args, **dict(kwargs, parent_key=k) ))
                     else:
                         raise Exception("ERROR: Currently mixing dicts with non dicts in a list is not supported")
@@ -708,6 +754,17 @@ def traverse_nested_dict(in_dict: Dict[str, Any], callable_fn: Callable, *args, 
     return in_dict
 
 def sanitize_element(param: str, ele_val: Any, validate_paths: bool = True, *args, **kwargs) -> Any:
+    """
+        Takes in a key value pair of 'param' and 'ele_val' and returns a sanitized value
+        depending on the options definied in this function.
+
+        If any of the 'path_keys' are substrings to the param and none of the 'inv_path_keys' are substrings to the param
+        then
+            we assume that the value is a path and we should apply the path sanitization function on it
+        fi 
+
+        Other sanitization options could be put in this function to be applied to all configuration elements across coffe
+    """
     # Here are the key matches which makes sanitizer think its a path
     # TODO there may be a better way to do but this way you just have to list all path related keys below
     path_keys = ["path", "sram_parameters", "file", "dir", "home"]
@@ -742,12 +799,15 @@ def sanitize_element(param: str, ele_val: Any, validate_paths: bool = True, *arg
 def sanitize_config(config_dict: Dict[str, Any], validate_paths: bool = True) -> dict:
     """
         Modifies values of a config file to do the following:
-            - Expand relative paths to absolute paths
+            - Expand relative & home paths to absolute paths
     """    
 
     return traverse_nested_dict(config_dict, sanitize_element, validate_paths)
 
 def parse_config(conf_path: str, validate_paths: bool = True, sanitize: bool = True):
+    """
+        Parses a yaml or json config file and returns a sanitized dictionary of its values
+    """
     is_yaml = None
     if conf_path.endswith(".yaml") or conf_path.endswith(".yml"):
         is_yaml = True
@@ -766,6 +826,7 @@ def parse_config(conf_path: str, validate_paths: bool = True, sanitize: bool = T
         
     return conf_dict
 
+# TODO depricate this function and use the one above
 def parse_yml_config(yaml_file: str, validate_paths: bool = True) -> dict:
     """
         Takes in possibly unsafe path and returns a sanitized config
@@ -835,17 +896,22 @@ def find_common_root_dir(dpaths: List[str]) -> Union[None, List[str]]:
 """
 
 
-def init_dataclass(dataclass_type: Type, input_yaml_config: dict, add_arg_config: dict = {}, validate_paths: bool = True) -> dict:
+def init_dataclass(dataclass_type: Type, in_config: dict, add_arg_config: dict = {}, validate_paths: bool = True) -> dict:
     """
         Initializes dictionary values for fields defined in input data structure, basically acts as sanitation for keywords defined in data class fields
+        
+        Priority order:
+        1. in_config
+        2. add_arg_config
+
         Returns a instantiation of the dataclass
     """
     dataclass_inputs = {}
     for field in dataclass_type.__dataclass_fields__:
-        # if the field is read in from input yaml file
-        if field in input_yaml_config.keys():
-            dataclass_inputs[field] = input_yaml_config[field]
-        # additional arg values for fields not defined in input yaml (defined in default_value_config[field])
+        # if the field is read in from input config file
+        if field in in_config.keys():
+            dataclass_inputs[field] = in_config[field]
+        # additional arg values for fields not defined in input config (defined in default_value_config[field])
         elif field in add_arg_config.keys():
             dataclass_inputs[field] = add_arg_config[field]
         # clean path and make sure it exists (if "path" keyword in field name)
@@ -859,7 +925,7 @@ def init_dataclass(dataclass_type: Type, input_yaml_config: dict, add_arg_config
                 pass
     # return created dataclass instance
     # The constructor below will fail if
-    # - key in yaml != field name in dataclass 
+    # - key in in_config != field name in dataclass 
     return dataclass_type(**dataclass_inputs)
 
 
@@ -888,13 +954,14 @@ def convert_namespace(in_namespace: argparse.Namespace) -> List[str]:
 
 
 
+# Defining each task cli globally for easy access in other functions perfoming read actions
 asic_dse_cli = rg_ds.AsicDseCLI()
 coffe_cli = rg_ds.CoffeCLI()
 ic_3d_cli = rg_ds.Ic3dCLI()
 common_cli = rg_ds.RadGenCLI()
 
 
-def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) -> Tuple[argparse.Namespace, Dict[str, Any]]:
+def parse_rad_gen_top_cli_args(in_args: argparse.Namespace | list = None) -> Tuple[argparse.Namespace, Dict[str, Any]]:
     """ 
         Parses the top level RAD-Gen args
     """                     
@@ -903,19 +970,6 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
 
     parser = argparse.ArgumentParser(description="RAD-Gen top level CLI args")
 
-    # TODO see if theres a better way to do this but for now we have to manually define which args go to which tool with a list of tags
-    # Define general tags, assuming we only call a single tool each time we should be able to seperate them from the subtool being run
-
-    gen_arg_keys = [
-        "top_config_path",
-        "subtools"
-    ]
-
-    # TOP LEVEL CONFIG ARG
-    #parser.add_argument("-tc", "--top_config_path", help="path to RAD-GEN top level config file", type=str, default=None)
-    # Subtool options are "coffe" "asic-dse" "3d-ic"
-    #parser.add_argument("-st", "--subtools", help="subtool to run", nargs="*", type=str, default=None)
-    
     # dict storing key value pairs for default values of each arg
     default_arg_vals = {}
 
@@ -928,13 +982,6 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
     for cli_arg in common_cli.cli_args:
         rg_ds.add_arg(parser, cli_arg)
     
-    
-    # Common args for all subtools
-    # parser.add_argument('-mo','--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
-    # Optional arguments only used in the case of manual 
-    # parser.add_argument('--input_tree_top_path', help="path to top level dir containing input designs", type=str, default=None)
-    # parser.add_argument('--output_tree_top_path', help="path to top level dir which outputs will be produced into, will have a subdir for each subtool", type=str, default=None)
-
     if in_args == None and arg_list == None:
         parsed_args, remaining_args = parser.parse_known_args()
     else:
@@ -948,6 +995,12 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
     #    /_\ / __|_ _/ __| |   \/ __| __|   /_\ | _ \/ __/ __|
     #   / _ \\__ \| | (__  | |) \__ \ _|   / _ \|   / (_ \__ \
     #  /_/ \_\___/___\___| |___/|___/___| /_/ \_\_|_\\___|___/
+
+    #arguments for ASIC flow TODO integrate some of these into the asic_dse tool, functionality already exists just needs to be connected
+    # parser.add_argument('-ho',"--hardblock_only",help="run only a single hardblock through the asic flow", action='store_true',default=False)
+    # parser.add_argument('-g',"--gen_hb_scripts",help="generates all hardblock scripts which can be run by a user",action='store_true',default=False)
+    # parser.add_argument('-p',"--parallel_hb_flow",help="runs the hardblock flow for current parameter selection in a parallel fashion",action='store_true',default=False)
+    # parser.add_argument('-r',"--parse_pll_hb_flow",help="parses the hardblock flow from previously generated results",action='store_true',default=False)
     if "asic_dse" in parsed_args.subtools:
         # Adding ASIC DSE CLI args
         asic_dse_cli = rg_ds.AsicDseCLI()
@@ -958,33 +1011,6 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
         for cli_arg in asic_dse_cli.cli_args:
             rg_ds.add_arg(parser, cli_arg)
 
-        """
-            default_arg_vals = {
-                **default_arg_vals,
-                "flow_mode": "hammer",
-                "run_mode": "serial",
-            }
-            parser.add_argument('-r', '--run_mode', help="mode in which asic flow is run, either parallel or serial", type=str, choices=["parallel", "serial", "gen_scripts"], default="serial")
-            parser.add_argument('-m', "--flow_mode", help="option for backend tool to generate scripts & run asic flow with", type=str, choices=["custom", "hammer"], default=default_arg_vals["flow_mode"])
-            parser.add_argument('-e', "--env_config_path", help="path to asic-dse env config file", type=str, default=None)
-            parser.add_argument('-t', '--top_lvl_module', help="name of top level design in HDL", type=str, default=None)
-            parser.add_argument('-v', '--hdl_path', help="path to directory containing HDL files", type=str, default=None)
-            parser.add_argument('-p', '--flow_config_paths', 
-                                help="list of paths to hammer design specific config.yaml files",
-                                nargs="*",
-                                type=str,
-                                default=None)
-            parser.add_argument('-l', '--use_latest_obj_dir', help="uses latest obj dir found in rad_gen dir", action='store_true') 
-            parser.add_argument('-o', '--manual_obj_dir', help="uses user specified obj dir", type=str, default=None)
-            # parser.add_argument('-e', '--top_lvl_config', help="path to top level config file",  type=str, default=None)
-            parser.add_argument('-s', '--design_sweep_config', help="path to config file containing design sweep parameters",  type=str, default=None)
-            parser.add_argument('-c', '--compile_results', help="flag to compile results related a specific asic flow or sweep depending on additional provided configs", action='store_true') 
-            parser.add_argument('-syn', '--synthesis', help="flag runs synthesis on specified design", action='store_true') 
-            parser.add_argument('-par', '--place_n_route', help="flag runs place & route on specified design", action='store_true') 
-            parser.add_argument('-pt', '--primetime', help="flag runs primetime on specified design", action='store_true') 
-            parser.add_argument('-sram', '--sram_compiler', help="flag enables srams to be run in design", action='store_true') 
-            parser.add_argument('-make', '--make_build', help="flag enables make build system for asic flow", action='store_true') 
-        """
         
     #   ___ ___  ___ ___ ___     _   ___  ___ ___ 
     #  / __/ _ \| __| __| __|   /_\ | _ \/ __/ __|
@@ -1000,38 +1026,7 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
         }
         for cli_arg in coffe_cli.cli_args:
             rg_ds.add_arg(parser, cli_arg)
-        """
-            default_arg_vals = {
-                **default_arg_vals,
-                "opt_type": "global",
-                "initial_sizes": "default",
-                "re_erf": 1,
-                "area_opt_weight": 1,
-                "delay_opt_weight": 1,
-                "max_iterations": 6,
-                "size_hb_interfaces": 0.0,
-            }
 
-            parser.add_argument('-f', '--fpga_arch_conf_path', help ="path to config file containing coffe FPGA arch information", type=str, default= None)
-            parser.add_argument('-hb', '--hb_flows_conf_path', type=str, default=None, help="top level hardblock flows config file, this specifies all hardblocks and asic flows used")
-            parser.add_argument('-n', '--no_sizing', help="don't perform transistor sizing", action='store_true')
-            parser.add_argument('-o', '--opt_type', type=str, choices=["global", "local"], default = default_arg_vals["opt_type"], help="choose optimization type")
-            parser.add_argument('-s', '--initial_sizes', type=str, default = default_arg_vals["initial_sizes"], help="path to initial transistor sizes")
-            parser.add_argument('-m', '--re_erf', type=int, default = default_arg_vals["re_erf"], help = "choose how many sizing combos to re-erf")
-            parser.add_argument('-a', '--area_opt_weight', type=int, default = default_arg_vals["area_opt_weight"], help="area optimization weight")
-            parser.add_argument('-d', '--delay_opt_weight', type=int, default = default_arg_vals["delay_opt_weight"], help="delay optimization weight")
-            parser.add_argument('-i', '--max_iterations', type=int, default = default_arg_vals["max_iterations"] ,help="max FPGA sizing iterations")
-            parser.add_argument('-hi', '--size_hb_interfaces', type=float, default=default_arg_vals["size_hb_interfaces"], help="perform transistor sizing only for hard block interfaces")
-            # quick mode is disabled by default. Try passing -q 0.03 for 3% minimum improvement
-            parser.add_argument('-q', '--quick_mode', type=float, default=-1.0, help="minimum cost function improvement for resizing")
-            
-                    
-            #arguments for ASIC flow TODO integrate some of these into the asic_dse tool, functionality already exists just needs to be connected
-            # parser.add_argument('-ho',"--hardblock_only",help="run only a single hardblock through the asic flow", action='store_true',default=False)
-            # parser.add_argument('-g',"--gen_hb_scripts",help="generates all hardblock scripts which can be run by a user",action='store_true',default=False)
-            # parser.add_argument('-p',"--parallel_hb_flow",help="runs the hardblock flow for current parameter selection in a parallel fashion",action='store_true',default=False)
-            # parser.add_argument('-r',"--parse_pll_hb_flow",help="parses the hardblock flow from previously generated results",action='store_true',default=False)
-        """
     #   _______    ___ ___     _   ___  ___ ___ 
     #  |__ /   \  |_ _/ __|   /_\ | _ \/ __/ __|
     #   |_ \ |) |  | | (__   / _ \|   / (_ \__ \
@@ -1065,19 +1060,29 @@ def parse_rad_gen_top_cli_args(in_args: Union[argparse.Namespace, list] = None) 
     return args, default_arg_vals
 
 
+def max_depth(d: dict) -> int:
+    """
+        returns the level of nesting of a particular dict
+    """
+    if isinstance(d, dict):
+        return 1 + max((max_depth(value) for value in d.values()), default=0)
+    else:
+        return 0
+
 def merge_cli_and_config_args(cli: Dict[str, Any], config: Dict[str, Any], default: Dict[str, Any]) -> Dict[str, Any]:
     """
         Merges the cli and config args into a single dictionary
         - CLI args override config args
     """
+
     result_conf = {}
     if config == None:
-        for k_conf, v_conf in cli.items():
-            result_conf[k_conf] = v_conf
+        result_conf = copy.deepcopy(cli)
     elif cli == None:
-        for k_conf, v_conf in config.items():
-            result_conf[k_conf] = v_conf
+        result_conf = copy.deepcopy(config)
     else:
+        # The merging will only work if they are not nested dicts
+        assert max_depth(cli) == 1 and max_depth(config) == 1, "ERROR: Merging only works for non nested dictionaries"
         for k_cli, v_cli in cli.items():
             # We only want the parameters relevant to the subtool we're running (exclude top level args)
             # If one wanted to exclude other subtool args they could do it here
@@ -1092,13 +1097,9 @@ def merge_cli_and_config_args(cli: Dict[str, Any], config: Dict[str, Any], defau
                         result_conf[k_conf] = v_conf
             # if the cli key was not loaded into result config 
             # meaning it didnt exist in config file, we use whatever value was in cli
-            
             if k_cli not in result_conf.keys():
                 result_conf[k_cli] = v_cli 
             
-            # else:
-            #     # if only cli args provided
-            #     result_conf[k_cli] = v_cli
     return result_conf
 
 
@@ -1815,6 +1816,8 @@ def init_coffe_structs(coffe_conf: Dict[str, Any]):
     # coffe_conf["common"].project_tree.append_tagged_subtree("config", rg_ds.Tree("coffe", tag="coffe.config"))
     
     fpga_arch_conf = load_arch_params(clean_path(coffe_conf["fpga_arch_conf_path"]))
+    
+
     # coffe_conf["common"].project_tree.append_tagged_subtree("output", rg_ds.Tree(os.path.basename(os.path.splitext(fpga_arch_conf["arch_out_folder"])[0]), tag="coffe.output"))
 
 

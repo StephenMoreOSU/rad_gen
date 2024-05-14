@@ -1464,312 +1464,359 @@ def search_ranges(
     
     sp_name: str = sizable_circuit.sp_name if (hasattr(sizable_circuit, "sp_name") and sizable_circuit.sp_name) else sizable_circuit.name
 
-    # Export current transistor sizes
-    # TODO: Turning this off for now
-    tran_sizes_filename = (os.path.join(sr_outdir,
-                          "sizes_" + sp_name + 
-                          "_o" + str(outer_iter) + 
-                          "_i" + str(inner_iter) + 
-                          "_b" + str(bunch_num) + ".txt"))
-    export_transistor_sizes(tran_sizes_filename, fpga_inst.transistor_sizes)
+    results_fname: str = f"{sp_name}_o{outer_iter}_i{inner_iter}_b{bunch_num}_results.csv"
+    post_erf_results_fname: str = f"{sp_name}_o{outer_iter}_i{inner_iter}_b{bunch_num}_erf.csv" 
 
-    # Expand ranges to get a list of all possible sizing combinations from ranges
-    element_names, sizing_combos = expand_ranges(sizing_ranges)
 
-    # Find the combo that is near the middle of all ranges
-    middle_combo = get_middle_value_config(element_names, sizing_ranges)
+    if consts.CKPT_FLAG:
+        element_names: List[str] = None
+        best_combo_erf_ratios: dict = None
+        best_results: List[tuple] = None
+        best_combo: tuple = None
+
+        # If we are getting our transistor sizes from a checkpoint look for the file
+        if os.path.isdir(consts.CKPT_DPATH):
+            post_erf_res_fpath = os.path.join(consts.CKPT_DPATH, post_erf_results_fname)
+            # we prioritize the post erf results file, if it doesn't exist we should look in results file
+            if os.path.exists(post_erf_res_fpath):
+                # read in the csv to a list of dicts, if we encounter duplicate headers (which will occur for erf ratios) suffix with "erf"
+                post_erf_res = rg_utils.read_csv_to_list_w_dups(post_erf_res_fpath, "erf")
+                tmp_res_combo: List[float | int] = [] # could be finfet or bulk
+                tmp_best_results: list = []
+                
+                best_combo_erf_ratios: dict = {}
+                element_names: List[str] = []
+
+                # Take first index (should he highest rank)
+                highest_rank_row: dict = post_erf_res[0]
+                # TODO remove hardcoding of strings for dict parsing
+                for res_key in highest_rank_row.keys():
+                    tx_prim_names: Set[str] = set([tx_name.replace("_pmos","").replace("_nmos","") for tx_name in sizable_circuit.transistor_names])
+                    if res_key in tx_prim_names:
+                        if "." in highest_rank_row[res_key]:
+                            tmp_res_combo.append(float(highest_rank_row[res_key]))
+                        else:
+                            tmp_res_combo.append(int(highest_rank_row[res_key]))
+                        element_names.append(res_key)
+                    if "erf" in res_key and res_key != "erf_error":
+                        best_combo_erf_ratios[res_key.replace("_erf", "")] = float(highest_rank_row[res_key])
+                    if res_key in ["Rank", "Cost", "Area", "EvalDelay", "tfall", "trise", ]:
+                        tmp_best_results.append(float(highest_rank_row[res_key]))
+
+                best_results: List[tuple] = [tuple(tmp_best_results)]
+                best_combo = tuple(tmp_res_combo)
+
+    # If for some reason we don't have the results from the expected checkpoint, just rerun
+    if any([not var for var in [element_names, best_combo_erf_ratios, best_results]]):
+        # Export current transistor sizes
+        # TODO: Turning this off for now
+        tran_sizes_filename = (os.path.join(sr_outdir,
+                            "sizes_" + sp_name + 
+                            "_o" + str(outer_iter) + 
+                            "_i" + str(inner_iter) + 
+                            "_b" + str(bunch_num) + ".txt"))
+        export_transistor_sizes(tran_sizes_filename, fpga_inst.transistor_sizes)
+
+        # Expand ranges to get a list of all possible sizing combinations from ranges
+        element_names, sizing_combos = expand_ranges(sizing_ranges)
+
+        # Find the combo that is near the middle of all ranges
+        middle_combo = get_middle_value_config(element_names, sizing_ranges)
         
-    print("Determining initial inverter P/N ratios...")
-    if ERF_MONITOR_VERBOSE:
+        print("Determining initial inverter P/N ratios...")
+        if ERF_MONITOR_VERBOSE:
+            print("")
+
+        # Find ERF ratios for middle combo
+        erf_ratios = erf_combo(
+            fpga_inst, 
+            ckt_tbs, 
+            element_names, 
+            middle_combo,
+            spice_interface
+        )
+        
+        # For each transistor sizing combination, we want to calculate area, wire sizes, 
+        # and wire R and C
+        print("Calculating area and wire data for all transistor sizing combinations...")
+        
+        area_list = []
+        wire_rc_list = []
+        eval_delay_list = []
+
+
+        # Key describing where in iterations we currently are in
+        iteration_key: str = f"subckt_{sp_name}_o_{outer_iter}_i_{inner_iter}_b_{bunch_num}"
+
+        # It appears to me that this loop calculates the area and wire_rc data for each transistor sizing combo and saves them to "area_list" and "wire_rc_list"
+        # But it looks like the fpga_inst will be updated with the last transistor sizing combo in the list, which im not sure about
+        for combo in sizing_combos:
+            # Update FPGA transistor sizes
+            fpga_inst._update_transistor_sizes(element_names, combo, fpga_inst.specs.use_finfet, erf_ratios)
+            # Calculate area of everything
+            fpga_inst.update_area()
+            # Get evaluation area
+            area_list.append(cost_lib.get_eval_area(fpga_inst, opt_type, sizable_circuit, is_ram_component, is_cc_component))
+            # Re-calculate wire lengths
+            fpga_inst.update_wires()
+            # Update wire resistance and capacitance
+            fpga_inst.update_wire_rc()
+            wire_rc = fpga_inst.wire_rc_dict
+            wire_rc_list.append(wire_rc)
+            # Debug statement
+            # if consts.VERBOSITY == consts.DEBUG:
+            #     os.makedirs(os.path.join("debug", "hspice_sweeps"), exist_ok=True)
+            #     write_sp_sweep_data_from_fpga(fpga_inst, os.path.join("debug", "hspice_sweeps", f"{iteration_key}_sweep_data.l"))
+            # pass 
+
+        sz_it_info: Dict[str, int] = {
+            "sizing_subckt": sp_name,
+            "outer_iter": outer_iter,
+            "inner_iter": inner_iter,
+            "bunch_num": bunch_num
+        }
+        # Write out pure timestamp csv to associate the sizing iteration info with the update information
+        it_row_data = {
+            **fpga.fpga_state_fmt(fpga_inst, "VERIF"),
+            **sz_it_info,
+        }
+        if consts.VERBOSITY == consts.DEBUG:
+            rg_utils.write_single_dict_to_csv(it_row_data, os.path.join("debug", "iter_info.csv"), "a")
+
+        # We have to make a parameter dict for HSPICE
+        current_tran_sizes = {}
+        if not fpga_inst.specs.use_finfet :
+            for tran_name, tran_size in fpga_inst.transistor_sizes.items():
+                current_tran_sizes[tran_name] = 1e-9*tran_size*fpga_inst.specs.min_tran_width
+        else :
+            for tran_name, tran_size in fpga_inst.transistor_sizes.items():
+                current_tran_sizes[tran_name] = tran_size
+
+        # Initialize the parameter dict to all empty lists
+        parameter_dict = {}
+        for tran_name in list(current_tran_sizes.keys()):
+            parameter_dict[tran_name] = []
+        for wire_name in list(wire_rc_list[0].keys()):
+            parameter_dict[wire_name + "_res"] = []
+            parameter_dict[wire_name + "_cap"] = []
+
+        # This loop populates the parameter_dict with transistor sizes which are being swept over for this iteration of search_ranges()
+        # Swept and non-swept params will be lists of N elements corresponding to the "tran_name" key in the dict
+        # Non-swept parameters will have the same value for each element
+        for i in range(len(sizing_combos)):
+            for tran_name, tran_size in current_tran_sizes.items():
+                # We need this temp value to compare agains 'element_names'
+                tmp_tran_name = tran_name.replace("_nmos", "")
+                tmp_tran_name = tmp_tran_name.replace("_pmos", "")
+            
+                # If this transistor is one of the transistor sizes that we are sweeping,
+                # we have to properly compute the size, if we aren't sweeping it, just add
+                # the current size to the list.
+                if tmp_tran_name in element_names:
+                    # We need this id to pick the right data from sizing combo
+                    element_id = element_names.index(tmp_tran_name)
+
+                    # Let's calculate the size of this transistor
+                    if not fpga_inst.specs.use_finfet :
+                        tran_size = 1e-9*(sizing_combos[i][element_id]*fpga_inst.specs.min_tran_width)
+                    else :
+                        tran_size = (sizing_combos[i][element_id])
+
+                    # If transistor is an inverter, we need to do some stuff to calc sizes for
+                    # both the NMOS and PMOS, if it is anything else (eg. ptran), we can just add 
+                    # it directly.
+                    if tran_name.startswith("inv_"):
+                        if tran_name.endswith("_nmos"):
+                            # If the NMOS is bigger than the PMOS
+                            if erf_ratios[tmp_tran_name] < 1:
+                                nmos_size = tran_size/erf_ratios[tmp_tran_name]
+                            # If the PMOS is bigger than the NMOS
+                            else:
+                                nmos_size = tran_size
+                            parameter_dict[tran_name].append(nmos_size)
+                        else:
+                            # If the NMOS is bigger than the PMOS
+                            if erf_ratios[tmp_tran_name] < 1:
+                                pmos_size = tran_size
+                            # If the PMOS is bigger than the NMOS
+                            else:
+                                pmos_size = tran_size*erf_ratios[tmp_tran_name]
+                            parameter_dict[tran_name].append(pmos_size)
+
+                    else: 
+                        parameter_dict[tran_name].append(tran_size) 
+                else:
+                    parameter_dict[tran_name].append(tran_size)
+        
+            # Now add the wire information for this wire
+            for wire_name, rc_data in wire_rc_list[i].items():
+                parameter_dict[wire_name + "_res"].append(rc_data[0])
+                parameter_dict[wire_name + "_cap"].append(rc_data[1]*1e-15)
+    
+        # Run HSPICE data sweep
+        print(("Running HSPICE for " + str(len(sizing_combos)) + 
+            " transistor sizing combinations..."))
+        # spice_meas = spice_interface.run(sizable_circuit.top_spice_path, parameter_dict)
+        ckt_meas = ckt_get_meas(ckt_tbs, spice_interface, parameter_dict)
+
+        # Now we need to create a list of tfall_trise to be compatible with old code
+        tfall_trise_list = []
+        meas_logic_low_voltage = []
+        for i in range(len(sizing_combos)):
+            tfall_str = ckt_meas["tfall"][i]
+            trise_str = ckt_meas["trise"][i]
+            if ckt_meas["meas_logic_low_voltage"][i] == "failed" :
+                meas_logic_low_voltage.append(1)
+            else:
+                meas_logic_low_voltage.append(float(ckt_meas["meas_logic_low_voltage"][i]))
+
+            if tfall_str == "failed":
+                tfall = 1
+            else:
+                tfall = float(tfall_str)
+            if trise_str == "failed":
+                trise = 1
+            else:
+                trise = float(trise_str)
+            tfall_trise_list.append((tfall, trise))
+    
+        # Get delay metric used for evaluation for each transistor sizing combo as well as 
+        # ERF error
+        for i in range(len(tfall_trise_list)):    
+            # Calculate evaluation delay
+            tfall_trise = tfall_trise_list[i]
+            delay = get_eval_delay(fpga_inst, opt_type, sizable_circuit, tfall_trise[0], tfall_trise[1], meas_logic_low_voltage[i], is_ram_component, is_cc_component)
+            eval_delay_list.append(delay)
+            
+        # len(area_list) should be equal to len(delay_list), make sure...
+        assert len(area_list) == len(eval_delay_list)
+        
+        # Calculate cost for each combo (area-delay product)
+        # Results list holds a tuple, (cost, combo_index, area, delay)
+        print("Calculating cost for each transistor sizing combinations...")
+        print("")
+        cost_list = []
+        for i in range(len(eval_delay_list)):
+            area = area_list[i]
+            delay = eval_delay_list[i]
+            cost = cost_lib.cost_function(area, delay, area_opt_weight, delay_opt_weight)
+            cost_list.append((cost, i))
+            
+        # Sort based on cost
+        cost_list.sort()
+        
+        # Print top 10 results
+        print("TOP 10 BEST COST RESULTS")
+        print("------------------------")
+        
+        for i in range(min(10, len(cost_list))):
+            combo_index = cost_list[i][1]
+            print(("Combo #" + str(combo_index).ljust(6) + 
+                "cost=" + str(round(cost_list[i][0],6)).ljust(9) + 
+                "area=" + str(round(area_list[combo_index]/1000000,3)).ljust(8) + 
+                "delay=" + str(round(eval_delay_list[combo_index],13)).ljust(10) + 
+                "tfall=" + str(round(tfall_trise_list[combo_index][0],13)).ljust(10) + 
+                "trise=" + str(round(tfall_trise_list[combo_index][1],13)).ljust(10)))
+        print("")
+        
+        # Write results to file
+        # TODO: Turning this off for now
+        export_filename = (os.path.join(sr_outdir,
+                        sp_name) + 
+                        "_o" + str(outer_iter) + 
+                        "_i" + str(inner_iter) + 
+                        "_b" + str(bunch_num) + ".csv")
+        result_rows = export_all_results(export_filename, 
+                        element_names, 
+                        sizing_combos, 
+                        cost_list, 
+                        area_list, 
+                        eval_delay_list, 
+                        tfall_trise_list)
+        
+
+
+
+        # Log the combos pre re-ERF
+        # formatted_result_rows = rg_utils.format_csv_data(result_rows)
+        # for data_row in formatted_result_rows:
+        #     fpga_inst.logger.debug(f'{rg_utils.log_format_list("CSV", "PRE_ERF", outer_iter, str(sizable_circuit.name).upper(), inner_iter, bunch_num)}{",".join(data_row)}')
+
+
+        # Re-ERF some of the top results
+        # This is the number of top results to re-ERF
+        re_erf_num = min(re_erf, len(cost_list))
+        best_results = []
+        for i in range(re_erf_num):
+            # Re-ERF i-th best combo
+            print(("Re-equalizing rise and fall times on combo #" + str(cost_list[i][1]) + 
+                " (ranked #" + str(i+1) + ")\n"))
+            erf_ratios = erf_combo(fpga_inst, 
+                                ckt_tbs, 
+                                element_names, 
+                                sizing_combos[cost_list[i][1]], 
+                                spice_interface)
+
+            # Measure delay for combo
+            trise, tfall = run_combo(fpga_inst, 
+                                    ckt_tbs, 
+                                    element_names, 
+                                    sizing_combos[cost_list[i][1]], 
+                                    erf_ratios,
+                                    spice_interface)
+
+            # Get final delay (we use final because ERFing is done for each combo)
+            delay = get_final_delay(fpga_inst, opt_type, sizable_circuit, tfall, trise, is_ram_component, is_cc_component)
+            # Get area (run_combo will have updated the area numbers for us so we can get it 
+            # directly)
+            area = get_current_area(
+                fpga_inst, 
+                opt_type, 
+                sizable_circuit, 
+                is_ram_component, 
+                is_cc_component
+            )
+            # Calculate cost
+            cost = cost_lib.cost_function(area, delay, area_opt_weight, delay_opt_weight)
+            # Add to best results (cost, combo_index, area, delay, tfall, trise, erf_ratios)
+            best_results.append((cost, cost_list[i][1], area, delay, tfall, trise, erf_ratios))
+            
+        # Sort the newly ERF results
+        best_results.sort()
+        
+        print("BEST COST RESULTS AFTER RE-BALANCING")
+        print("------------------------------------")
+        for result in best_results:
+            print(("Combo #" + str(result[1]).ljust(6) + 
+                "cost=" + str(round(result[0],6)).ljust(9) + 
+                "area=" + str(round(result[2]/1000000,3)).ljust(8) + 
+                "delay=" + str(round(result[3],13)).ljust(10) + 
+                "tfall=" + str(round(result[4],13)).ljust(10) + 
+                "trise=" + str(round(result[5],13)).ljust(10)))
         print("")
 
-    # Find ERF ratios for middle combo
-    erf_ratios = erf_combo(
-        fpga_inst, 
-        ckt_tbs, 
-        element_names, 
-        middle_combo,
-        spice_interface
-    )
-    
-    # For each transistor sizing combination, we want to calculate area, wire sizes, 
-    # and wire R and C
-    print("Calculating area and wire data for all transistor sizing combinations...")
-    
-    area_list = []
-    wire_rc_list = []
-    eval_delay_list = []
-
-
-    # Key describing where in iterations we currently are in
-    iteration_key: str = f"subckt_{sp_name}_o_{outer_iter}_i_{inner_iter}_b_{bunch_num}"
-
-    # It appears to me that this loop calculates the area and wire_rc data for each transistor sizing combo and saves them to "area_list" and "wire_rc_list"
-    # But it looks like the fpga_inst will be updated with the last transistor sizing combo in the list, which im not sure about
-    for combo in sizing_combos:
-        # Update FPGA transistor sizes
-        fpga_inst._update_transistor_sizes(element_names, combo, fpga_inst.specs.use_finfet, erf_ratios)
-        # Calculate area of everything
-        fpga_inst.update_area()
-        # Get evaluation area
-        area_list.append(cost_lib.get_eval_area(fpga_inst, opt_type, sizable_circuit, is_ram_component, is_cc_component))
-        # Re-calculate wire lengths
-        fpga_inst.update_wires()
-        # Update wire resistance and capacitance
-        fpga_inst.update_wire_rc()
-        wire_rc = fpga_inst.wire_rc_dict
-        wire_rc_list.append(wire_rc)
-        # Debug statement
-        if consts.VERBOSITY == consts.DEBUG:
-            write_sp_sweep_data_from_fpga(fpga_inst, os.path.join("debug", "hspice_sweeps", f"{iteration_key}_sweep_data.l"))
-            
-        pass 
-
-    sz_it_info: Dict[str, int] = {
-        "sizing_subckt": sp_name,
-        "outer_iter": outer_iter,
-        "inner_iter": inner_iter,
-        "bunch_num": bunch_num
-    }
-    # Write out pure timestamp csv to associate the sizing iteration info with the update information
-    it_row_data = {
-        **fpga.fpga_state_fmt("VERIF"),
-        **sz_it_info,
-    }
-    if consts.VERBOSITY == consts.DEBUG:
-        rg_utils.write_single_dict_to_csv(it_row_data, os.path.join("debug", "iter_info.csv"), "a")
-
-    # We have to make a parameter dict for HSPICE
-    current_tran_sizes = {}
-    if not fpga_inst.specs.use_finfet :
-        for tran_name, tran_size in fpga_inst.transistor_sizes.items():
-            current_tran_sizes[tran_name] = 1e-9*tran_size*fpga_inst.specs.min_tran_width
-    else :
-        for tran_name, tran_size in fpga_inst.transistor_sizes.items():
-            current_tran_sizes[tran_name] = tran_size
-
-    # Initialize the parameter dict to all empty lists
-    parameter_dict = {}
-    for tran_name in list(current_tran_sizes.keys()):
-        parameter_dict[tran_name] = []
-    for wire_name in list(wire_rc_list[0].keys()):
-        parameter_dict[wire_name + "_res"] = []
-        parameter_dict[wire_name + "_cap"] = []
-
-    # This loop populates the parameter_dict with transistor sizes which are being swept over for this iteration of search_ranges()
-    # Swept and non-swept params will be lists of N elements corresponding to the "tran_name" key in the dict
-    # Non-swept parameters will have the same value for each element
-    for i in range(len(sizing_combos)):
-        for tran_name, tran_size in current_tran_sizes.items():
-            # We need this temp value to compare agains 'element_names'
-            tmp_tran_name = tran_name.replace("_nmos", "")
-            tmp_tran_name = tmp_tran_name.replace("_pmos", "")
-           
-            # If this transistor is one of the transistor sizes that we are sweeping,
-            # we have to properly compute the size, if we aren't sweeping it, just add
-            # the current size to the list.
-            if tmp_tran_name in element_names:
-                # We need this id to pick the right data from sizing combo
-                element_id = element_names.index(tmp_tran_name)
-
-                # Let's calculate the size of this transistor
-                if not fpga_inst.specs.use_finfet :
-                    tran_size = 1e-9*(sizing_combos[i][element_id]*fpga_inst.specs.min_tran_width)
-                else :
-                    tran_size = (sizing_combos[i][element_id])
-
-                # If transistor is an inverter, we need to do some stuff to calc sizes for
-                # both the NMOS and PMOS, if it is anything else (eg. ptran), we can just add 
-                # it directly.
-                if tran_name.startswith("inv_"):
-                    if tran_name.endswith("_nmos"):
-                        # If the NMOS is bigger than the PMOS
-                        if erf_ratios[tmp_tran_name] < 1:
-                            nmos_size = tran_size/erf_ratios[tmp_tran_name]
-                        # If the PMOS is bigger than the NMOS
-                        else:
-                            nmos_size = tran_size
-                        parameter_dict[tran_name].append(nmos_size)
-                    else:
-                        # If the NMOS is bigger than the PMOS
-                        if erf_ratios[tmp_tran_name] < 1:
-                            pmos_size = tran_size
-                        # If the PMOS is bigger than the NMOS
-                        else:
-                            pmos_size = tran_size*erf_ratios[tmp_tran_name]
-                        parameter_dict[tran_name].append(pmos_size)
-
-                else: 
-                    parameter_dict[tran_name].append(tran_size) 
-            else:
-                parameter_dict[tran_name].append(tran_size)
-    
-        # Now add the wire information for this wire
-        for wire_name, rc_data in wire_rc_list[i].items():
-            parameter_dict[wire_name + "_res"].append(rc_data[0])
-            parameter_dict[wire_name + "_cap"].append(rc_data[1]*1e-15)
-   
-    # Run HSPICE data sweep
-    print(("Running HSPICE for " + str(len(sizing_combos)) + 
-           " transistor sizing combinations..."))
-    # spice_meas = spice_interface.run(sizable_circuit.top_spice_path, parameter_dict)
-    ckt_meas = ckt_get_meas(ckt_tbs, spice_interface, parameter_dict)
-
-    # Now we need to create a list of tfall_trise to be compatible with old code
-    tfall_trise_list = []
-    meas_logic_low_voltage = []
-    for i in range(len(sizing_combos)):
-        tfall_str = ckt_meas["tfall"][i]
-        trise_str = ckt_meas["trise"][i]
-        if ckt_meas["meas_logic_low_voltage"][i] == "failed" :
-            meas_logic_low_voltage.append(1)
-        else:
-            meas_logic_low_voltage.append(float(ckt_meas["meas_logic_low_voltage"][i]))
-
-        if tfall_str == "failed":
-            tfall = 1
-        else:
-            tfall = float(tfall_str)
-        if trise_str == "failed":
-            trise = 1
-        else:
-            trise = float(trise_str)
-        tfall_trise_list.append((tfall, trise))
-  
-    # Get delay metric used for evaluation for each transistor sizing combo as well as 
-    # ERF error
-    for i in range(len(tfall_trise_list)):    
-        # Calculate evaluation delay
-        tfall_trise = tfall_trise_list[i]
-        delay = get_eval_delay(fpga_inst, opt_type, sizable_circuit, tfall_trise[0], tfall_trise[1], meas_logic_low_voltage[i], is_ram_component, is_cc_component)
-        eval_delay_list.append(delay)
-        
-    # len(area_list) should be equal to len(delay_list), make sure...
-    assert len(area_list) == len(eval_delay_list)
-    
-    # Calculate cost for each combo (area-delay product)
-    # Results list holds a tuple, (cost, combo_index, area, delay)
-    print("Calculating cost for each transistor sizing combinations...")
-    print("")
-    cost_list = []
-    for i in range(len(eval_delay_list)):
-        area = area_list[i]
-        delay = eval_delay_list[i]
-        cost = cost_lib.cost_function(area, delay, area_opt_weight, delay_opt_weight)
-        cost_list.append((cost, i))
-        
-    # Sort based on cost
-    cost_list.sort()
-    
-    # Print top 10 results
-    print("TOP 10 BEST COST RESULTS")
-    print("------------------------")
-    
-    for i in range(min(10, len(cost_list))):
-        combo_index = cost_list[i][1]
-        print(("Combo #" + str(combo_index).ljust(6) + 
-               "cost=" + str(round(cost_list[i][0],6)).ljust(9) + 
-               "area=" + str(round(area_list[combo_index]/1000000,3)).ljust(8) + 
-               "delay=" + str(round(eval_delay_list[combo_index],13)).ljust(10) + 
-               "tfall=" + str(round(tfall_trise_list[combo_index][0],13)).ljust(10) + 
-               "trise=" + str(round(tfall_trise_list[combo_index][1],13)).ljust(10)))
-    print("")
-    
-    # Write results to file
-    # TODO: Turning this off for now
-    export_filename = (os.path.join(sr_outdir,
-                      sp_name) + 
-                      "_o" + str(outer_iter) + 
-                      "_i" + str(inner_iter) + 
-                      "_b" + str(bunch_num) + ".csv")
-    result_rows = export_all_results(export_filename, 
-                      element_names, 
-                      sizing_combos, 
-                      cost_list, 
-                      area_list, 
-                      eval_delay_list, 
-                      tfall_trise_list)
-    
-
-
-
-    # Log the combos pre re-ERF
-    # formatted_result_rows = rg_utils.format_csv_data(result_rows)
-    # for data_row in formatted_result_rows:
-    #     fpga_inst.logger.debug(f'{rg_utils.log_format_list("CSV", "PRE_ERF", outer_iter, str(sizable_circuit.name).upper(), inner_iter, bunch_num)}{",".join(data_row)}')
-
-
-    # Re-ERF some of the top results
-    # This is the number of top results to re-ERF
-    re_erf_num = min(re_erf, len(cost_list))
-    best_results = []
-    for i in range(re_erf_num):
-        # Re-ERF i-th best combo
-        print(("Re-equalizing rise and fall times on combo #" + str(cost_list[i][1]) + 
-               " (ranked #" + str(i+1) + ")\n"))
-        erf_ratios = erf_combo(fpga_inst, 
-                               ckt_tbs, 
-                               element_names, 
-                               sizing_combos[cost_list[i][1]], 
-                               spice_interface)
-
-        # Measure delay for combo
-        trise, tfall = run_combo(fpga_inst, 
-                                 ckt_tbs, 
-                                 element_names, 
-                                 sizing_combos[cost_list[i][1]], 
-                                 erf_ratios,
-                                 spice_interface)
-
-        # Get final delay (we use final because ERFing is done for each combo)
-        delay = get_final_delay(fpga_inst, opt_type, sizable_circuit, tfall, trise, is_ram_component, is_cc_component)
-        # Get area (run_combo will have updated the area numbers for us so we can get it 
-        # directly)
-        area = get_current_area(
-            fpga_inst, 
-            opt_type, 
-            sizable_circuit, 
-            is_ram_component, 
-            is_cc_component
+        # Write post-erf results to file
+        # TODO: Turn this off for now
+        erf_export_filename = (
+            os.path.join(sr_outdir, sp_name) + 
+            "_o" + str(outer_iter) + 
+            "_i" + str(inner_iter) + 
+            "_b" + str(bunch_num) + "_erf.csv"
         )
-        # Calculate cost
-        cost = cost_lib.cost_function(area, delay, area_opt_weight, delay_opt_weight)
-        # Add to best results (cost, combo_index, area, delay, tfall, trise, erf_ratios)
-        best_results.append((cost, cost_list[i][1], area, delay, tfall, trise, erf_ratios))
+        result_rows = export_erf_results(erf_export_filename, 
+                        element_names, 
+                        sizing_combos, 
+                        best_results)
+        # formatted_result_rows = rg_utils.format_csv_data(result_rows)
+        # for data_row in formatted_result_rows:
+        #     fpga_inst.logger.debug(f'{rg_utils.log_format_list("CSV", "POST_ERF", outer_iter, str(sizable_circuit.name).upper(), inner_iter, bunch_num)}{",".join(data_row)}')
         
-    # Sort the newly ERF results
-    best_results.sort()
-    
-    print("BEST COST RESULTS AFTER RE-BALANCING")
-    print("------------------------------------")
-    for result in best_results:
-        print(("Combo #" + str(result[1]).ljust(6) + 
-               "cost=" + str(round(result[0],6)).ljust(9) + 
-               "area=" + str(round(result[2]/1000000,3)).ljust(8) + 
-               "delay=" + str(round(result[3],13)).ljust(10) + 
-               "tfall=" + str(round(result[4],13)).ljust(10) + 
-               "trise=" + str(round(result[5],13)).ljust(10)))
-    print("")
+        # Update transistor sizes file as well as area and wires to best combo
+        best_combo = sizing_combos[best_results[0][1]]
+        best_combo_erf_ratios = best_results[0][6]
 
-    # Write post-erf results to file
-    # TODO: Turn this off for now
-    erf_export_filename = (
-        os.path.join(sr_outdir, sp_name) + 
-        "_o" + str(outer_iter) + 
-        "_i" + str(inner_iter) + 
-        "_b" + str(bunch_num) + "_erf.csv"
-    )
-    result_rows = export_erf_results(erf_export_filename, 
-                      element_names, 
-                      sizing_combos, 
-                      best_results)
-    # formatted_result_rows = rg_utils.format_csv_data(result_rows)
-    # for data_row in formatted_result_rows:
-    #     fpga_inst.logger.debug(f'{rg_utils.log_format_list("CSV", "POST_ERF", outer_iter, str(sizable_circuit.name).upper(), inner_iter, bunch_num)}{",".join(data_row)}')
-    
-    # Update transistor sizes file as well as area and wires to best combo
-    best_combo = sizing_combos[best_results[0][1]]
-    best_combo_erf_ratios = best_results[0][6]
+
+
     # Update transistor sizes
     fpga_inst._update_transistor_sizes(element_names, best_combo, fpga_inst.specs.use_finfet, best_combo_erf_ratios)
     # Calculate area of everything
@@ -1861,18 +1908,18 @@ def _print_sizing_ranges(subcircuit_name, sizing_ranges_list):
     # Make sizing strings
     for sizing_ranges in sizing_ranges_list:
         for name, size_range in sizing_ranges.items():
-            sizing_strings[name] = sizing_strings[name] + ("[" + str(size_range[0]) + " -> " + str(size_range[1]) + "]").ljust(11)
+            sizing_strings[name] = sizing_strings[name] + ("[" + str(size_range[0]) + " -> " + str(size_range[1]) + "]").ljust(16)
     
     # Print sizing ranges for each subcircuit/transistor
     for name, size_string in sizing_strings.items():
-        print("".join(name.ljust(col_width)) + ": " + size_string)
+        print("".join(name.ljust(col_width)) + f": {size_string:<{7}}")
         
     print("")
 
     
 def print_sizing_results(subcircuit_name, sizing_results_list):
     """ """
-    
+    # TODO update to sp_name
     print("Sizing results for " + subcircuit_name + ":")
     
     # Calculate column width for each name
@@ -1891,11 +1938,11 @@ def print_sizing_results(subcircuit_name, sizing_results_list):
     for sizing_results in sizing_results_list:
         for name in name_list:
             size = sizing_results[name]
-            sizing_strings[name] = sizing_strings[name] + (str(round(size,1))).ljust(4)
+            sizing_strings[name] = sizing_strings[name] + (str(round(size,1))).ljust(7)
     
     # Print sizing results for each subcircuit/transistor
     for name, size_string in sizing_strings.items():
-        print("".join(name.ljust(col_width)) + ": " + size_string)
+        print("".join(name.ljust(col_width)) + f": {size_string:<{7}}")
         
     print("")
 
@@ -3017,12 +3064,13 @@ def size_fpga_transistors(fpga_inst: fpga.FPGA, run_options: NamedTuple, spice_i
         # update_fpga_telemetry_csv(fpga_inst, outer_iter= iteration, sub)
         
         # HSPICE runtime testing to determine hspice runtime speedup from multithreading
+        """
         if consts.HSPICE_TESTGEN:
             sw_out_dpath: str = os.path.join("debug","hspice_sweeps")
             os.makedirs(sw_out_dpath, exist_ok=True)
             for num_sweeps in consts.HSPICE_SWEEPS:
                 write_sp_sweep_data_from_fpga(fpga_inst, os.path.join(sw_out_dpath, f"sweep_data_{num_sweeps}.l"))
-
+        """
 
         print("Sizing will begin now.")
         # Useful for debugging

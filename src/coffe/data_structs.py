@@ -713,8 +713,10 @@ class SimTB():
 
     # def __post_init__(self):
     def generate_top(self, 
-            delay_names: List[str], targ_nodes: List[str],
-            low_v_node: str, trig_node: str,
+            delay_names: List[str], 
+            targ_nodes: List[str],
+            low_v_node: str, 
+            trig_node: str,
             # These two args used for edge cases (lut driver w lut load)
             tb_fname: str = None,
             pwr_meas_lines: List[str] = None,

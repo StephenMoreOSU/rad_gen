@@ -1075,30 +1075,32 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
 
     # Which subckts will we run and compare against one another
     testing_subckts: List[str] = [
-        # "sb_mux",
-        # "cb_mux",
-        # "local_mux",
-        # "local_ble_output",
-        # "general_ble_output",
-        # "flut_mux",
-        # "lut",
-        #*lut_in_driver_keys,
-        # *lut_in_not_driver_keys,
+        "sb_mux",
+        "cb_mux",
+        "local_mux",
+        "local_ble_output",
+        "general_ble_output",
+        "flut_mux",
+        "lut",
+        *lut_in_driver_keys,
+        *lut_in_not_driver_keys,
         *lut_in_with_lut_keys,
-        # "carry_chain",
-        # "carry_chain_per",
-        # "carry_chain_inter",
-        # "carry_chain_mux",
-        # "xcarry_chain_and",
-        # "xcarry_chain_mux",
+        "carry_chain",
+        "carry_chain_per",
+        "carry_chain_inter",
+        "carry_chain_mux",
+        "xcarry_chain_and",
+        "xcarry_chain_mux",
     ] 
     ## Runs spice simulations and plots for detail comparison
     prepare_legacy_ckt_for_cmp(ctrl_outdir)
-    #[ctrl_outdir
-    #analysis_coffe_dirs
+
     subckt_meas_cmp(testing_subckts, analysis_coffe_dirs, plot_flag = True, run_spice = True)
 
 
+
+
+    #### OLDER DEBUG FUNCTIONS ####
     # Outputs log files comparing keys from control and tests
     # cmp_dut_ctrl_coffe_runs(cmp_inputs)
 

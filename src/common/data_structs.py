@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field, fields, make_dataclass, MISSING
 import os, sys
 
@@ -624,53 +626,6 @@ def get_dyn_class(cls_name: str, fields: Dict[str, List[Any]],  bases: Tuple[Any
                         "__init__": dyn_dataclass_init})
     
 
-# @dataclass
-# class CommonCLI(ParentCLI):
-#     """
-#         Path related settings which could be relevant to multiple subtools
-#     """
-#     cli_args : List[GeneralCLI] = field(default_factory = lambda: [ 
-#         GeneralCLI(key = "subtools", shortcut="-st", datatype = str, nargs = "*", help_msg = "subtool to run"),
-#         GeneralCLI(key = "top_config_path", shortcut = "-tc", datatype = str, help_msg = "path to (optional) RAD-GEN top level config file"),
-#         GeneralCLI(key = "use_latest_obj_dir", shortcut = "-l", datatype = bool, action = "store_true", help_msg = "Uses latest obj / work dir found in the respective output dir"),
-#         GeneralCLI(key = "manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj dir"),
-#         GeneralCLI(key = "project_name", shortcut = "-n", datatype = str, help_msg = "Name of Project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them"),
-#         # GeneralCLI(key = "input_tree_top_path", shortcut = "-itree", datatype = str, help_msg = "path to top level dir containing input designs"),
-#         # GeneralCLI(key = "output_tree_top_path", shortcut = "-otree", datatype = str, help_msg = "path to top level dir which outputs will be produced into, will have a subdir for each subtool"),
-
-#     ])
-#     arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [ 
-#         {"key": "use_latest_obj_dir", 
-#             "shortcut": "-l", "action": "store_true", "help_msg": "Uses latest obj / work dir found in the respective output dir"},
-        
-#         {"key": "manual_obj_dir",
-#             "shortcut": "-o", "datatype": str, "help_msg": "Uses user specified obj dir"},
-        
-#         {"key": "input_tree_top_path",
-#             "shortcut": "-itree", "datatype": str, "help_msg": "path to top level dir containing input designs"},
-
-#         {"key": "output_tree_top_path",
-#             "shortcut": "-otree", "datatype": str, "help_msg": "path to top level dir which outputs will be produced into, will have a subdir for each subtool"},
-        
-#     ])
-
-#     """
-#         gen_log: bool = False # generate log file
-#         input_tree_top_path: str = None
-#         output_tree_top_path: str = None
-#     """
-
-# common_cli = CommonCLI()
-
-
-# Make a custom dataclass for common input arguments
-# AsicDseArgs = get_dyn_class(
-#     cls_name = "AsicDseArgs",
-#     fields = common_cli.get_dataclass_fields(),
-#     bases= (AsicDseCLI, )
-# )
-
-
 @dataclass
 class RadGenCLI(ParentCLI):
     
@@ -688,18 +643,14 @@ class RadGenCLI(ParentCLI):
         # GeneralCLI(key = "input_tree_top_path", shortcut = "-itree", datatype = str, help_msg = "path to top level dir containing input designs", default_val = os.path.expanduser(f"{os.environ['RAD_GEN_HOME']}/unit_tests/inputs")),
         # GeneralCLI(key = "output_tree_top_path", shortcut = "-otree", datatype = str, help_msg = "path to top level dir which outputs will be produced into, will have a subdir for each subtool", default_val = os.path.expanduser(f"{os.environ['RAD_GEN_HOME']}/unit_tests/outputs")),
     ])
-    arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [ 
-        {"key": "top_config_path", 
-            "shortcut": "-tc", "datatype": str, "help_msg": "path to (optional) RAD-GEN top level config file"},
+    # arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [ 
+    #     {"key": "top_config_path", 
+    #         "shortcut": "-tc", "datatype": str, "help_msg": "path to (optional) RAD-GEN top level config file"},
 
-        {"key": "subtools",
-            "shortcut": "-st", "datatype": str, "nargs": "*", "help_msg": "subtool to run"},
-    ])
+    #     {"key": "subtools",
+    #         "shortcut": "-st", "datatype": str, "nargs": "*", "help_msg": "subtool to run"},
+    # ])
 
-    """
-        top_config_path: str = None # Optional top config path that can be used to pass cli args to RAD Gen
-        subtools: List[str] = None # Possible subtool strings: "ic_3d" , "asic_dse", "coffe"
-    """
     subtool_args: Any = None # Options would be the cli classes for each subtool
     no_use_arg_list: List[str] = None # list of arguments which should not be used in the command line interface
 
@@ -798,44 +749,6 @@ class AsicDseCLI(ParentCLI):
         GeneralCLI(key = "stdcell_lib.pdk_rundir_path", datatype= str, help_msg = "Path to rundir of pdk being used for Cadence Virtuoso"),
         GeneralCLI(key = "scripts.virtuoso_setup_path", datatype= str, help_msg = "Path to env setup script for virtuoso environment"),
     ] )
-    arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [
-        { "shortcut": "-e", "key": "env_config_path", "help_msg": "Path to hammer environment configuration file", "datatype": str },
-        { "shortcut": "-s", "key": "design_sweep_config", "help_msg": "Path to design sweep config file", "datatype": str },
-        # RUN MODE
-        { "shortcut": "-r", "key": "run_mode", "help_msg": "Specify if flow is run in serial or parallel for sweeps", "datatype": str,
-          "choices" : ["serial", "parallel", "gen_scripts"], "default_val" : "serial" },
-        # FLOW MODE
-        { "shortcut": "-m", "key": "flow_mode", "help_msg": "Mode in which asic flow is run hammer or custom modes", "datatype": str,
-          "choices" : ["hammer", "custom"], "default_val" : "hammer" },
-        { "shortcut": "-t", "key": "top_lvl_module", "help_msg": "Top level module of design", "datatype": str },
-        { "shortcut": "-v", "key": "hdl_path", "help_msg": "Path to directory containing hdl files", "datatype": str },
-        { "shortcut": "-p", "key": "flow_config_paths", "help_msg": "Paths to flow config files, these can be either custom or hammer format", "datatype": str, "nargs": "*" },
-        # { "shortcut": "-l", "key": "use_latest_obj_dir", "help_msg": "Uses latest obj / work dir found in the respective output_design_files/<top_module> dir", "action" : "store_true" },
-        # { "shortcut": "-o", "key": "manual_obj_dir", "help_msg": "Uses user specified obj / work dir", "datatype": str },
-        { "shortcut": "-c", "key": "compile_results", "datatype": bool, "action" : "store_true", "help_msg": "Flag to compile results related a specific asic flow or sweep depending on additional provided configs" },
-        { "shortcut": "-syn", "key": "synthesis", "datatype": bool, "help_msg": "Flag to run synthesis", "action" : "store_true" },
-        { "shortcut": "-par", "key": "place_n_route", "datatype": bool, "help_msg": "Flag to run place & route", "action" : "store_true" },
-        { "shortcut": "-pt", "key": "primetime", "datatype": bool, "help_msg": "Flag to run primetime (timing & power)", "action" : "store_true" },
-        { "shortcut": "-sram", "key": "sram_compiler", "datatype": bool, "help_msg": "Flag that must be provided if sram macros exist in design (ASIC-DSE)", "action" : "store_true" },
-        { "shortcut": "-make", "key": "make_build", "datatype": bool, "help_msg": "Flag that Generates a makefile to manage flow dependencies and execution", "action" : "store_true" },
-    ])
-    """
-        env_config_path: str = None # path to hammer environment configuration file 
-        design_sweep_config: str = None # Path to design sweep config file 
-        run_mode: str = None # specify if flow is run in "serial" or "parallel" or "gen_scripts"
-        flow_mode: str = None # mode in which asic flow is run "hammer" or "custom" modes
-        top_lvl_module: str = None # top level module of design 
-        hdl_path: str = None # path to directory containing hdl files 
-        flow_config_paths: List[str] = None # Paths to flow config files, these can be either "custom" or "hammer" format
-        use_latest_obj_dir: bool = False  # uses latest obj / work dir found in the respective output_design_files/<top_module> dir
-        manual_obj_dir: str = None # uses user specified obj / work dir
-        compile_results: bool = False # flag to compile results related a specific asic flow or sweep depending on additional provided configs
-        synthesis: bool = False # flag to run synthesis
-        place_n_route: bool = False #flag to run place & route
-        primetime: bool = False # flag to run primetime (timing & power)
-        sram_compiler: bool = False # flag that must be provided if sram macros exist in design
-        make_build: bool = False # <TAG> <UNDER DEV> Generates a makefile to manage flow dependencies and execution
-    """
 
 
 # Use asic_dse_cli as factory for creating AsicDseArgs dataclass
@@ -1044,76 +957,76 @@ class ASICFlowSettings:
 
 
 # TODO remove this data structure, moving all its contents to AsicFlowSettings and Common
-@dataclass
-class EnvSettings:
-    """ 
-        Settings which are specific to a user of the RAD Gen tool including the following:
-        - paths specified to system running RAD Gen
-        - log settings
-        - directory structures for inputs and outputs
-    """
-    # RAD-Gen
-    rad_gen_home_path: str # path to top level rad gen repo 
-    # Hammer
-    hammer_home_path: str  # path to hammer repository
-    env_paths: List[str] # paths to hammer environment file containing absolute paths to asic tools and licenses
+# @dataclass
+# class EnvSettings:
+#     """ 
+#         Settings which are specific to a user of the RAD Gen tool including the following:
+#         - paths specified to system running RAD Gen
+#         - log settings
+#         - directory structures for inputs and outputs
+#     """
+#     # RAD-Gen
+#     rad_gen_home_path: str # path to top level rad gen repo 
+#     # Hammer
+#     hammer_home_path: str  # path to hammer repository
+#     env_paths: List[str] # paths to hammer environment file containing absolute paths to asic tools and licenses
 
-    # OpenRAM 
-    # openram_path: str  # path to openram repository
+#     # OpenRAM 
+#     # openram_path: str  # path to openram repository
     
-    # Top level input # TODO remove this, deprecated config path
-    top_lvl_config_path: str = None # high level rad gen configuration file path
+#     # Top level input # TODO remove this, deprecated config path
+#     top_lvl_config_path: str = None # high level rad gen configuration file path
     
-    # Name of directory which stores parameter sweep headers
-    # param_sweep_hdr_dir: str = "param_sweep_hdrs" TODO remove this and use input_dir_structure defined below (gen)
+#     # Name of directory which stores parameter sweep headers
+#     # param_sweep_hdr_dir: str = "param_sweep_hdrs" TODO remove this and use input_dir_structure defined below (gen)
     
-    # Verbosity level
-    # 0 - Brief output
-    # 1 - Brief output + I/O + command line access
-    # 2 - Hammer and asic tool outputs will be printed to console    
-    logger: logging.Logger = logging.getLogger(f"rad-gen-{create_timestamp()}") # logger for RAD Gen
-    log_file: str = f"rad-gen-{create_timestamp()}.log" # path to log file for current RAD Gen run
-    log_verbosity: int = 1 # verbosity level for log file 
+#     # Verbosity level
+#     # 0 - Brief output
+#     # 1 - Brief output + I/O + command line access
+#     # 2 - Hammer and asic tool outputs will be printed to console    
+#     logger: logging.Logger = logging.getLogger(f"rad-gen-{create_timestamp()}") # logger for RAD Gen
+#     log_file: str = f"rad-gen-{create_timestamp()}.log" # path to log file for current RAD Gen run
+#     log_verbosity: int = 1 # verbosity level for log file 
     
-    # Input and output directory structure, these are initialized with design specific paths
-    design_input_path: str = None # path to directory which inputs will be read from. Ex ~/rad_gen/input_designs
-    design_output_path: str = None # path to directory which object directories will be created. Ex ~/rad_gen/output_designs
-    hammer_tech_path: str = None # path to hammer technology directory containing tech files
+#     # Input and output directory structure, these are initialized with design specific paths
+#     design_input_path: str = None # path to directory which inputs will be read from. Ex ~/rad_gen/input_designs
+#     design_output_path: str = None # path to directory which object directories will be created. Ex ~/rad_gen/output_designs
+#     hammer_tech_path: str = None # path to hammer technology directory containing tech files
 
-    # Directory structure for auto-dse hammer asic flow
-    input_dir_struct: dict = field(default_factory = lambda: {
-        # Design configuration files
-        "configs": {
-            # Auto-generated configuration files from sweep
-            "gen" : "gen",
-            # Tmp directory for storing modified configuration files by user passing in top_lvl & hdl_path & original config 
-            "mod" : "mod",
-        },
-        # Design RTL files
-        "rtl" : {
-            "gen" : "gen", # Auto-generated directories containing RTL
-            "src" : "src", # Contains design RTL files
-            "include": "include", # Contains design RTL header files
-            "verif" : "verif", # verification related files
-            "build" : "build", # build related files for this design
-        }
-    })
+#     # Directory structure for auto-dse hammer asic flow
+#     input_dir_struct: dict = field(default_factory = lambda: {
+#         # Design configuration files
+#         "configs": {
+#             # Auto-generated configuration files from sweep
+#             "gen" : "gen",
+#             # Tmp directory for storing modified configuration files by user passing in top_lvl & hdl_path & original config 
+#             "mod" : "mod",
+#         },
+#         # Design RTL files
+#         "rtl" : {
+#             "gen" : "gen", # Auto-generated directories containing RTL
+#             "src" : "src", # Contains design RTL files
+#             "include": "include", # Contains design RTL header files
+#             "verif" : "verif", # verification related files
+#             "build" : "build", # build related files for this design
+#         }
+#     })
 
-    # Regex Info
-    res: Regexes = field(default_factory = Regexes)
-    # Sript path information
-    scripts_info: ScriptInfo = None
-    # Report information
-    report_info: ReportInfo = field(default_factory = ReportInfo)
+#     # Regex Info
+#     res: Regexes = field(default_factory = Regexes)
+#     # Sript path information
+#     scripts_info: ScriptInfo = None
+#     # Report information
+#     report_info: ReportInfo = field(default_factory = ReportInfo)
 
-    def __post_init__(self):
-        # Assign defaults for input and output design dir, these will be overridden if specified in top level yaml file
-        if self.design_input_path is None:
-            self.design_input_path = os.path.join(self.rad_gen_home_path, "input_designs") 
-        if self.design_output_path is None:
-            self.design_output_path = os.path.join(self.rad_gen_home_path, "output_designs")
-        if self.hammer_tech_path is None:
-            self.hammer_tech_path = os.path.join(self.hammer_home_path, "hammer", "technology")
+#     def __post_init__(self):
+#         # Assign defaults for input and output design dir, these will be overridden if specified in top level yaml file
+#         if self.design_input_path is None:
+#             self.design_input_path = os.path.join(self.rad_gen_home_path, "input_designs") 
+#         if self.design_output_path is None:
+#             self.design_output_path = os.path.join(self.rad_gen_home_path, "output_designs")
+#         if self.hammer_tech_path is None:
+#             self.hammer_tech_path = os.path.join(self.hammer_home_path, "hammer", "technology")
 
 
 @dataclass
@@ -1192,7 +1105,7 @@ class CoffeCLI(ParentCLI):
     cli_args: List[GeneralCLI] = field(default_factory = lambda: [
         GeneralCLI(key = "fpga_arch_conf_path", shortcut = "-f", datatype = str, help_msg = "path to config file containing coffe FPGA arch information"),
         GeneralCLI(key = "hb_flows_conf_path", shortcut = "-hb", datatype = str, help_msg = "path to config file containing coffe hard block flows information"),
-        GeneralCLI(key = "no_sizing", shortcut = "-ns", datatype = bool, action = "store_true", help_msg = "don't perform sizing"),
+        GeneralCLI(key = "no_sizing", shortcut = "-ns", datatype = bool, action = "store_true", help_msg = "don't perform transistor sizing"),
         GeneralCLI(key = "opt_type", shortcut = "-ot", datatype = str, choices = ["global", "local"], default_val = "global", help_msg = "optimization type, options are \"global\" or \"local\""),
         GeneralCLI(key = "initial_sizes", shortcut = "-is", datatype = str, help_msg = "path to initial transistor sizes"),
         GeneralCLI(key = "re_erf", shortcut = "-re", datatype = int, default_val = 1, help_msg = "how many sizing combos to re-erf"),
@@ -1205,64 +1118,8 @@ class CoffeCLI(ParentCLI):
         # Additional Args for FPL'24
         GeneralCLI(key = "rrg_data_dpath", shortcut = "-rrg", datatype = str, help_msg = "Path to directory containing parsed RRG output csvs")
     ])
-    arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [
-        # FPGA ARCH CONFIG PATH
-        {"key" : "fpga_arch_conf_path", 
-         "shortcut" : "-f",  "help_msg" : "path to config file containing coffe FPGA arch information", "datatype" : str},
-        # HARDBLOCK FLOW CONFIG PATH
-        {"key" : "hb_flows_conf_path", 
-         "shortcut" : "-hb", "help_msg" : "path to config file containing coffe hard block flows information", "datatype" : str},
-
-        {"key" : "no_sizing",
-         "shortcut" : "-ns", "help_msg" : "don't perform sizing", "action" : "store_true"},
-        
-        {"key" : "opt_type", "default_val" : "global",
-         "shortcut" : "-ot", "help_msg" : "optimization type, options are \"global\" or \"local\"", "datatype" : str, "choices" : ["global", "local"]},
-        
-        {"key" : "initial_sizes", "default_val" : "default", 
-         "shortcut" : "-is", "help_msg" : "path to initial transistor sizes", "datatype" : str},
-
-        {"key" : "re_erf", "default_val" : 1,
-         "shortcut" : "-re", "help_msg" : "how many sizing combos to re-erf", "datatype" : int},
-
-        {"key" : "area_opt_weight", "default_val" : 1,
-         "shortcut" : "-aw", "help_msg" : "area optimization weight", "datatype" : int},
-
-        {"key" : "delay_opt_weight", "default_val" : 1,
-         "shortcut" : "-dw", "help_msg" : "delay optimization weight", "datatype" : int},
-
-        {"key" : "max_iterations", "default_val" : 6,
-         "shortcut" : "-mi", "help_msg" : "max FPGA sizing iterations", "datatype" : int},
-
-        {"key" : "size_hb_interfaces", "default_val": 0.0,
-         "shortcut" : "-sh", "help_msg" : "perform transistor sizing only for hard block interfaces", "datatype" : float},
-
-        {"key" : "quick_mode", "default_val": -1.0, 
-         "shortcut" : "-q",  "help_msg" : "minimum cost function improvement for resizing, Ex. could try 0.03 for 3% improvement", "datatype" : float},
-
-        {"key" : "rrg_data_dpath", 
-         "shortcut" : "-rrg", "help_msg" : "Path to directory containing parsed RRG output csvs", "action": "store_true"},
-        
-    ])
-
-
-
-    """
-        no_sizing: bool = None # don't perform sizing
-        opt_type: str = None # optimization type, options are "global" or "local"
-        initial_sizes: str = None # where to get initial transistor sizes options are "default" ... TODO find all valid options
-        re_erf: int = None # how many sizing combos to re-erf
-        area_opt_weight: int = None # area optimization weight
-        delay_opt_weight: int = None # delay optimization weight
-        max_iterations: int = None # max FPGA sizing iterations
-        size_hb_interfaces: float = None # perform transistor sizing only for hard block interfaces
-        quick_mode : float = None # minimum cost function improvement for resizing, could try 0.03 for 3% improvement
-        fpga_arch_conf_path: Dict[str, Any] = None # FPGA architecture configuration dictionary TODO define as dataclass
-        hb_flows_conf_path: Dict[str, Any] = None # Hard block flows configuration dictionary TODO define as dataclass
-    """
 
 # Use CoffeCLI as factory for creating CoffeArgs dataclass
-
 coffe_cli = CoffeCLI()
 coffe_fields = coffe_cli.get_dataclass_fields()
 CoffeArgs = get_dyn_class(
@@ -1270,6 +1127,105 @@ CoffeArgs = get_dyn_class(
     fields = coffe_fields,
     bases= (CoffeCLI,)
 )
+
+@dataclass
+class RoutingWireType:
+    name: str   = None # Identifier, should keep in line with RRG segment name
+    len: int    = None # length in tiles
+    freq: int   = None # frequency of wires in channel
+    metal: int  = None # metal layer index
+    id: int = None # Unique identifier
+@dataclass
+class FsInfo:
+    """
+        Fs described switch pattern entry
+    """
+    src: int # id of source general routing wires
+    dst: int # id of destination general routing wires
+    Fs: int # number of dst tracks the src can connect to from Switch Block 
+
+@dataclass
+class FPGAArchParams:
+    N: int                              = None # Num BLEs per cluster
+    K: int                              = None # Num inputs per BLE
+    wire_types: List[RoutingWireType]   = None # list of gen prog routing wires
+    Fs_mtx: List[FsInfo]                = None # If using Fs to describe switch pattern rather than RRG we use these to get our switch block info
+    Or: int                             = None # Num BLE outputs to general routing 
+    Ofb: int                            = None # Num BLE outputs to local routing
+    Fclocal: float                      = None # Population of local routing MUXes
+    # Register select:
+    # Defines whether the FF can accept it's input directly from a BLE input or not.
+    # To turn register-select off, Rsel : z
+    # To turn register select on, Rsel : <ble_input_name>
+    # where <ble_input_name>  :  the name of the BLE input from which the FF can
+    # accept its input (e.g. a, b, c, etc...).
+    Rsel: str                           = None 
+    # Register feedback muxes:
+    # Defines which LUT inputs support register feedback.
+    # Set Rfb to a string of LUT input names.
+    # For example: 
+    # Rfb : c tells COFFE to place a register feedback mux on LUT input C.
+    # Rfb : cd tells COFFE to place a register feedback mux on both LUT inputs C and D.
+    # Rfb : z tells COFFE that no LUT input should have register feedback muxes.
+    Rfb: str                           = None
+    use_fluts: bool                    = None # Do we want to use fracturable Luts?
+    independent_inputs: int            = None # How many LUT inputs should be independant of one another? can be as large as K-1
+    enable_carry_chain: bool           = None # Do we have a hard carry chain in our LBs?
+    carry_chain_type: str              = None # legal options 'skip' and 'ripple'
+    FAs_per_flut: int                  = None # Number of Full Adders per fracturable LUT
+    
+    # Voltage
+    vdd: float                         = None # supply voltage
+    vsram: float                       = None # SRAM supply voltage, also the boost voltage for pass transistor FPGAs
+    vsram_n: float                     = None # SRAM ground voltage
+    
+    # Geometry & Areas
+    gate_length: int | float           = None # gate length in nm
+    
+    # This parameter controls the gate length of PMOS level-restorers. For example, setting this paramater 
+    # to 4 sets the gate length to 4x the value of 'gate_legnth'. Increasing the gate length weakens the 
+    # PMOS level-restorer, which is sometimes necessary to ensure proper switching.
+    rest_length_factor: int | float          = None
+    
+    # For FinFETs, minimum transistor refers to the contact width of a single-fin transistor (nm).
+    # For Bulk I don't think this parameter is used 
+    # COFFE uses this when it calculates source/drain parasitic capacitances.
+    min_tran_width: int | float              = None
+    
+    # Length of diffusion for a single-finger transistor (nm).
+    # COFFE uses this when it calculates source/drain parasitic capacitances.
+    trans_diffusion_length: int | float      = None
+  
+    # Minimum-width transistor area (nm^2)
+    # Look in design rules, make me 1 fin, shortest gate, contact on both sides, no diffusion sharing, 1 space between next transistor
+    # Layout a single transistor pass DRC, look for sample layout
+    min_width_tran_area: int | float         = None
+
+    # SRAM area (in number of minimum width transistor areas)
+    sram_cell_area: int                      = None
+
+    # Spice parameters
+    model_path: str                          = None # path to spice model file  Ex. /path/to/7nm_TT.l
+    model_library: str                       = None # name of spice model library Ex. 7NM_FINFET_HP
+
+    #######################################
+    ##### Metal data
+    ##### R in ohms/nm
+    ##### C in fF/nm
+    ##### format: metal : R,C
+    ##### ex: metal : 0.054825,0.000175
+    #######################################
+    
+    # If you wanted to, you could define more metal layers by adding more 'metal'
+    # statements but, by default, COFFE would not use them because it only uses 2 layers.
+    # The functionality of being able to add any number of metal layers is here to allow
+    # you to investigate the use of more than 2 metal layers if you wanted to. However,
+    # making use of more metal layers would require changes to the COFFE source code.
+    metal: List[Tuple[float, float]] = None # R, C values for each metal layer
+
+    gen_routing_metal_pitch: int = None # pitch of general routing metal layers (nm)
+    gen_routing_metal_layers: int = None # number of metal layers used in gen routing
+
 
 
 
