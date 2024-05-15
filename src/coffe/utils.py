@@ -130,8 +130,19 @@ def print_area_and_delay(report_file, fpga_inst):
                 if "sram" in area_key and area_dict.get(area_key) is None:
                     continue
                 ckt_name: str = ckt.sp_name if "sram" not in area_key else ckt.sp_name + "(with_sram)"
-                # Area
                 ckt_name_ele: str = f"  {ckt_name:<{FIRS_COL_WIDTH}}"
+
+                # if "ff" in ckt_name:
+                #     try:
+                #         area_ele: str = f"{round(area_dict["ff"]/area_fac, sig_figs):<{MIDL_COL_WIDTH}}"
+                #         del_str: str = f"{'n/a':<{MIDL_COL_WIDTH}}"
+                #         pwr_str: str = f"{'n/a':<{MIDL_COL_WIDTH}}"
+                #     except:
+                #         area_ele: str = f"{'n/a':<{MIDL_COL_WIDTH}}"
+                #         del_str: str = f"{'n/a':<{MIDL_COL_WIDTH}}"
+                #         pwr_str: str = f"{'n/a':<{MIDL_COL_WIDTH}}"
+                
+                # Area
                 try:
                     area_ele: str = f"{round(area_dict[area_key]/area_fac, sig_figs):<{MIDL_COL_WIDTH}}"
                 except:
@@ -344,6 +355,7 @@ def print_block_area(report_file, fpga_inst):
         local_mux = fpga_inst.local_mux.block_area / scale_fac
         cb = fpga_inst.cb_mux.block_area / scale_fac
         sb = fpga_inst.sb_mux.block_area / scale_fac
+        cc = fpga_inst.area_dict["cc_area_total"] / scale_fac
         sanity_check = lut+ff+ble_output+local_mux+cb+sb
 
 
@@ -424,10 +436,12 @@ def print_block_area(report_file, fpga_inst):
         print_and_write(report_file, "  Tile".ljust(20) + str(round(tile,3)).ljust(20) + "100%")
         print_and_write(report_file, "  LUT".ljust(20) + str(round(lut,3)).ljust(20) + str(round(lut/tile*100,3)) + "%")
         print_and_write(report_file, "  FF".ljust(20) + str(round(ff,3)).ljust(20) + str(round(ff/tile*100,3)) + "%")
+        print_and_write(report_file, "  Carry Chain".ljust(20) + str(round(cc,3)).ljust(20) + str(round(cc/tile*100,3)) + "%")
         print_and_write(report_file, "  BLE output".ljust(20) + str(round(ble_output,3)).ljust(20) + str(round(ble_output/tile*100,3)) + "%")
         print_and_write(report_file, "  Local mux".ljust(20) + str(round(local_mux,3)).ljust(20) + str(round(local_mux/tile*100,3)) + "%")
         print_and_write(report_file, "  Connection block".ljust(20) + str(round(cb,3)).ljust(20) + str(round(cb/tile*100,3)) + "%")
         print_and_write(report_file, "  Switch block".ljust(20) + str(round(sb,3)).ljust(20) + str(round(sb/tile*100,3)) + "%")
+        
         print_and_write(report_file, "  Non-active".ljust(20) + str(round(empty_area,3)).ljust(20) + str(round(empty_area/tile*100,3)) + "%")
         print_and_write(report_file, "")
         if fpga_inst.specs.enable_bram_block == 1:

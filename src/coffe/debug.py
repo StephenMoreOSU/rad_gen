@@ -967,7 +967,8 @@ def compare_debug_keys(ctrl_outdir: str, dut_outdir: str):
         ("wire_xcarry_chain_mux_driver", "wire_xcarry_chain_mux_id_0_driver"), 
 
     ]
-    print(len(wire_length_key_pairs))
+
+    # print(len(wire_length_key_pairs))
     debug_key_cmp(ctrl_outdir, dut_outdir, "wire_length", wire_length_key_pairs)
 
 def debug_key_cmp(ctrl_outdir: str, dut_outdir: str, cat: str, key_pairs: List[Tuple[str]]):
@@ -1012,6 +1013,10 @@ def parse_cli_args():
     parser.add_argument(
         "-i", '--input_dirs', nargs='*', type=str, help="List of COFFE output directories to ingest and analyze and debug"
     )
+    parser.add_argument(
+        "-c", '--ctrl_dir', type=str, help="Legacy COFFE dir to compare against", 
+        default = "/fs1/eecg/vaughn/morestep/Documents/rad_gen/unit_tests/outputs/coffe/CTRL/stratix_iv"
+    )
     return parser.parse_args()
 
 
@@ -1019,34 +1024,35 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
 
     args: NamedTuple = parse_cli_args()
     analysis_coffe_dirs: List[str] = args.input_dirs
-
+    ctrl_outdir: str = args.ctrl_dir
+    dut_outdir: str = analysis_coffe_dirs[0]
     rad_gen_home = os.path.expanduser("~/Documents/rad_gen")
     coffe_unit_test_outputs = os.path.join(
         rad_gen_home,
         "unit_tests/outputs/coffe/finfet_7nm_fabric_w_hbs"
     )
-    ctrl_outdir = os.path.join(
-        coffe_unit_test_outputs,
-        "arch_out_COFFE_CONTROL_TEST"
-    )
+    # ctrl_outdir = os.path.join(
+    #     coffe_unit_test_outputs,
+    #     "arch_out_COFFE_CONTROL_TEST"
+    # )
     
-    dut_outdir = os.path.join(
-        coffe_unit_test_outputs,
-        "arch_out_dir_stratix_iv_rrg"
-    )
+    # dut_outdir = os.path.join(
+    #     coffe_unit_test_outputs,
+    #     "arch_out_dir_stratix_iv_rrg"
+    # )
     # This is where our area_debug.log, ... files are
     sandbox_dir = os.path.join(
         rad_gen_home,
         "unit_tests/sandbox/unity_verif"
     )
     # Control + Test outdir pairs
-    cmp_inputs = [
-        {
-            "ctrl": ctrl_outdir, 
-            "dut": dut_outdir, 
-            "out": "stratixiv_vs_ctrl_l4",
-        },
-    ]
+    # cmp_inputs = [
+    #     {
+    #         "ctrl": ctrl_outdir, 
+    #         "dut": dut_outdir, 
+    #         "out": "stratixiv_vs_ctrl_l4",
+    #     },
+    # ]
 
     
     num_lut_inputs = 6
@@ -1070,32 +1076,34 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
 
 
     # Compares debug keys for ctrl and dut runs
-    # compare_debug_keys(ctrl_outdir, dut_outdir)
+    compare_debug_keys(ctrl_outdir, dut_outdir)
 
 
     # Which subckts will we run and compare against one another
     testing_subckts: List[str] = [
-        "sb_mux",
-        "cb_mux",
-        "local_mux",
+        # "sb_mux",
+        # "cb_mux",
+        # "local_mux",
         "local_ble_output",
-        "general_ble_output",
-        "flut_mux",
-        "lut",
-        *lut_in_driver_keys,
-        *lut_in_not_driver_keys,
-        *lut_in_with_lut_keys,
-        "carry_chain",
-        "carry_chain_per",
-        "carry_chain_inter",
-        "carry_chain_mux",
-        "xcarry_chain_and",
-        "xcarry_chain_mux",
+        # "general_ble_output",
+        # "flut_mux",
+        # "lut",
+        # *lut_in_driver_keys,
+        # *lut_in_not_driver_keys,
+        # *lut_in_with_lut_keys,
+        # "carry_chain",
+        # "carry_chain_per",
+        # "carry_chain_inter",
+        # "carry_chain_mux",
+        # "xcarry_chain_and",
+        # "xcarry_chain_mux",
     ] 
     ## Runs spice simulations and plots for detail comparison
     prepare_legacy_ckt_for_cmp(ctrl_outdir)
 
-    subckt_meas_cmp(testing_subckts, analysis_coffe_dirs, plot_flag = True, run_spice = True)
+    sim_dirs = list(set(analysis_coffe_dirs + [ctrl_outdir]))
+
+    subckt_meas_cmp(testing_subckts, sim_dirs, plot_flag = True, run_spice = True)
 
 
 

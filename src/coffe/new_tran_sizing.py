@@ -1468,43 +1468,44 @@ def search_ranges(
     post_erf_results_fname: str = f"{sp_name}_o{outer_iter}_i{inner_iter}_b{bunch_num}_erf.csv" 
 
 
+    element_names: List[str] = None
+    best_combo_erf_ratios: dict = None
+    best_results: List[tuple] = None
+    best_combo: tuple = None
+
     if consts.CKPT_FLAG:
-        element_names: List[str] = None
-        best_combo_erf_ratios: dict = None
-        best_results: List[tuple] = None
-        best_combo: tuple = None
-
         # If we are getting our transistor sizes from a checkpoint look for the file
-        if os.path.isdir(consts.CKPT_DPATH):
-            post_erf_res_fpath = os.path.join(consts.CKPT_DPATH, post_erf_results_fname)
-            # we prioritize the post erf results file, if it doesn't exist we should look in results file
-            if os.path.exists(post_erf_res_fpath):
-                # read in the csv to a list of dicts, if we encounter duplicate headers (which will occur for erf ratios) suffix with "erf"
-                post_erf_res = rg_utils.read_csv_to_list_w_dups(post_erf_res_fpath, "erf")
-                tmp_res_combo: List[float | int] = [] # could be finfet or bulk
-                tmp_best_results: list = []
-                
-                best_combo_erf_ratios: dict = {}
-                element_names: List[str] = []
+        for dir in consts.CKPT_DPATHS:
+            if os.path.isdir(dir):
+                post_erf_res_fpath = os.path.join(dir, post_erf_results_fname)
+                # we prioritize the post erf results file, if it doesn't exist we should look in results file
+                if os.path.exists(post_erf_res_fpath):
+                    # read in the csv to a list of dicts, if we encounter duplicate headers (which will occur for erf ratios) suffix with "erf"
+                    post_erf_res = rg_utils.read_csv_to_list_w_dups(post_erf_res_fpath, "erf")
+                    tmp_res_combo: List[float | int] = [] # could be finfet or bulk
+                    tmp_best_results: list = []
+                    
+                    best_combo_erf_ratios: dict = {}
+                    element_names: List[str] = []
 
-                # Take first index (should he highest rank)
-                highest_rank_row: dict = post_erf_res[0]
-                # TODO remove hardcoding of strings for dict parsing
-                for res_key in highest_rank_row.keys():
-                    tx_prim_names: Set[str] = set([tx_name.replace("_pmos","").replace("_nmos","") for tx_name in sizable_circuit.transistor_names])
-                    if res_key in tx_prim_names:
-                        if "." in highest_rank_row[res_key]:
-                            tmp_res_combo.append(float(highest_rank_row[res_key]))
-                        else:
-                            tmp_res_combo.append(int(highest_rank_row[res_key]))
-                        element_names.append(res_key)
-                    if "erf" in res_key and res_key != "erf_error":
-                        best_combo_erf_ratios[res_key.replace("_erf", "")] = float(highest_rank_row[res_key])
-                    if res_key in ["Rank", "Cost", "Area", "EvalDelay", "tfall", "trise", ]:
-                        tmp_best_results.append(float(highest_rank_row[res_key]))
+                    # Take first index (should he highest rank)
+                    highest_rank_row: dict = post_erf_res[0]
+                    # TODO remove hardcoding of strings for dict parsing
+                    for res_key in highest_rank_row.keys():
+                        tx_prim_names: Set[str] = set([tx_name.replace("_pmos","").replace("_nmos","") for tx_name in sizable_circuit.transistor_names])
+                        if res_key in tx_prim_names:
+                            if "." in highest_rank_row[res_key]:
+                                tmp_res_combo.append(float(highest_rank_row[res_key]))
+                            else:
+                                tmp_res_combo.append(int(highest_rank_row[res_key]))
+                            element_names.append(res_key)
+                        if "erf" in res_key and res_key != "erf_error":
+                            best_combo_erf_ratios[res_key.replace("_erf", "")] = float(highest_rank_row[res_key])
+                        if res_key in ["Rank", "Cost", "Area", "EvalDelay", "tfall", "trise", ]:
+                            tmp_best_results.append(float(highest_rank_row[res_key]))
 
-                best_results: List[tuple] = [tuple(tmp_best_results)]
-                best_combo = tuple(tmp_res_combo)
+                    best_results: List[tuple] = [tuple(tmp_best_results)]
+                    best_combo = tuple(tmp_res_combo)
 
     # If for some reason we don't have the results from the expected checkpoint, just rerun
     if any([not var for var in [element_names, best_combo_erf_ratios, best_results]]):
@@ -1564,9 +1565,10 @@ def search_ranges(
             wire_rc = fpga_inst.wire_rc_dict
             wire_rc_list.append(wire_rc)
             # Debug statement
-            # if consts.VERBOSITY == consts.DEBUG:
-            #     os.makedirs(os.path.join("debug", "hspice_sweeps"), exist_ok=True)
-            #     write_sp_sweep_data_from_fpga(fpga_inst, os.path.join("debug", "hspice_sweeps", f"{iteration_key}_sweep_data.l"))
+            if consts.VERBOSITY == consts.DEBUG:
+                # os.makedirs(os.path.join("debug", "hspice_sweeps"), exist_ok=True)
+                # write_sp_sweep_data_from_fpga(fpga_inst, os.path.join("debug", "hspice_sweeps", f"{iteration_key}_sweep_data.l"))
+                write_sp_sweep_data_from_fpga(fpga_inst, "sweep_data.l")
             # pass 
 
         sz_it_info: Dict[str, int] = {
@@ -3300,7 +3302,9 @@ def size_fpga_transistors(fpga_inst: fpga.FPGA, run_options: NamedTuple, spice_i
     fpga_inst.update_wires()
     # Update wire resistance and capacitance
     fpga_inst.update_wire_rc()
-           
+    # Update delays for last time
+    fpga_inst.update_delays(spice_interface)
+    
     print("FPGA transistor sizing complete!\n")
     
     final_report_file = open("sizing_results_final.txt", 'w')

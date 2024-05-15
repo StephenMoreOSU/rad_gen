@@ -725,9 +725,13 @@ class SimTB():
             meas_inv_list: List[bool] = None,
             init_inv_idx: int = 0,
             # Custom meas points for edge case (lut driver w lut load requires RISE=2) on trig of tfall
+            # The below argument is only used in local_ble_output, but should probably be used for other edge cases in the number of inverters in a chain
+            rise_fall_states: List[Tuple[bool]] = None,
         ) -> str:
         """
             Common functionality for child generation of SPICE Testbenches
+            #TODO this function needs to be reworked, 
+            it's too complex and is trying to squeeze too many different things at once
         """
         assert len(delay_names) == len(targ_nodes) 
         if not tb_fname:
@@ -764,7 +768,7 @@ class SimTB():
                         inv_idx = init_inv_idx + 1 if meas_inv_list[i] else init_inv_idx
                     else:
                         inv_idx = inv_idx + 1 if meas_inv_list[i] else inv_idx
-                for trans_state in ["rise", "fall"]:
+                for trans_id, trans_state in enumerate(["rise", "fall"]):
                     # Define variables to determine which nodes to use for trig / targ in the case of rising / falling
                     trig_trans: bool = trans_state == "rise"
                     # Create delay index to deal with repeat of last inverter for total
@@ -775,13 +779,19 @@ class SimTB():
                     if meas_inv_list is None:
                         inv_idx = i + 1 if meas_name != "total" else i
 
-                    # Rise and fall combo, based on how many inverters in the chain
-                    # If its even we set both to rise or both to fall
-                    if inv_idx % 2 == 0:
-                        rise_fall_combo: Tuple[bool] = (trig_trans, trig_trans)
+                    if rise_fall_states is None:
+                        # Rise and fall combo, based on how many inverters in the chain
+                        # If its even we set both to rise or both to fall
+                        if inv_idx % 2 == 0:
+                            rise_fall_combo: Tuple[bool] = (trig_trans, trig_trans)
+                        else:
+                            rise_fall_combo: Tuple[bool] = (not trig_trans, trig_trans)
                     else:
-                        rise_fall_combo: Tuple[bool] = (not trig_trans, trig_trans)
-
+                        # multiply by 2 because each delay name has trise tfall
+                        rise_fall_combo: Tuple[bool] = (
+                            rise_fall_states[i * 2 + trans_id][0], 
+                            rise_fall_states[i * 2 + trans_id][1]
+                        )
                     delay_bounds: Dict[str, SpDelayBound] = {
                         del_str: SpDelayBound(
                             probe = SpNodeProbe(

@@ -204,12 +204,23 @@ class LocalBLEOutputTB(c_ds.SimTB):
             meas_loc_ble_out_term_node,
         ]
         trig_node: str = "n_1_1"
+        RISE = True
+        FALL = False
+        rise_fall_states = [
+            (FALL, RISE), # inv1_trise 
+            (RISE, FALL), # inv1_tfall
+            (RISE, FALL), # inv2_trise
+            (FALL, RISE), # inv2_tfall
+            (RISE, FALL), # total_trise
+            (FALL, RISE), # total_tfall
+        ]
         # Base class generate top does all common functionality 
         return super().generate_top(
             delay_names = delay_names,
             trig_node = trig_node, 
             targ_nodes = targ_nodes,
             low_v_node = self.local_out_node,
+            rise_fall_states = rise_fall_states,
         )
 
 

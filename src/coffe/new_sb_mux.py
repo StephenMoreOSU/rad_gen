@@ -84,11 +84,11 @@ class SwitchBlockMux(mux.Mux2Lvl):
     def update_vpr_areas(self, area_dict: Dict[str, float]):
         # Update VPR areas
         if not self.use_tgate :
-            area_dict["switch_mux_trans_size"] = area_dict["ptran_" + self.sp_name + "_L1"]
-            area_dict["switch_buf_size"] = area_dict["rest_" + self.sp_name + ""] + area_dict["inv_" + self.sp_name + "_1"] + area_dict["inv_" + self.sp_name + "_2"]
+            area_dict[f"switch_mux_trans_size_{self.sink_wire.name}"] = area_dict["ptran_" + self.sp_name + "_L1"]
+            area_dict[f"switch_buf_size_{self.sink_wire.name}"] = area_dict["rest_" + self.sp_name + ""] + area_dict["inv_" + self.sp_name + "_1"] + area_dict["inv_" + self.sp_name + "_2"]
         else :
-            area_dict["switch_mux_trans_size"] = area_dict["tgate_" + self.sp_name + "_L1"]
-            area_dict["switch_buf_size"] = area_dict["inv_" + self.sp_name + "_1"] + area_dict["inv_" + self.sp_name + "_2"]
+            area_dict[f"switch_mux_trans_size_{self.sink_wire.name}"] = area_dict["tgate_" + self.sp_name + "_L1"]
+            area_dict[f"switch_buf_size_{self.sink_wire.name}"] = area_dict["inv_" + self.sp_name + "_1"] + area_dict["inv_" + self.sp_name + "_2"]
     
     def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]):
         super().update_area(area_dict, width_dict)
