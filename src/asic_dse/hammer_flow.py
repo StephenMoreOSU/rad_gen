@@ -96,7 +96,7 @@ def pt_init(asic_dse: rg_ds.AsicDSE) -> Tuple[str]:
         Performs actions required prior to running PrimeTime for Power or Timing
     """
     # create PT run-dir
-    pt_outpath = os.path.join(asic_dse.asic_flow_settings.obj_dir_path, "pt-rundir")
+    pt_outpath = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "pt-rundir")
     os.makedirs(pt_outpath, exist_ok=True)
     
     # create reports dir
@@ -106,7 +106,7 @@ def pt_init(asic_dse: rg_ds.AsicDSE) -> Tuple[str]:
     os.makedirs(unparse_report_path, exist_ok=True)
 
     # get pnr output path (should be in this format)
-    pnr_design_outpath = os.path.join(asic_dse.asic_flow_settings.obj_dir_path,"par-rundir",f'{asic_dse.asic_flow_settings.top_lvl_module}_FINAL')
+    pnr_design_outpath = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir,"par-rundir",f'{asic_dse.common_asic_flow.top_lvl_module}_FINAL')
     if not os.path.isdir(pnr_design_outpath):
         rg_utils.rad_gen_log("Couldn't find output of pnr stage, Exiting...",rad_gen_log_fd)
         sys.exit(1)
@@ -122,7 +122,7 @@ def write_pt_power_script(asic_dse: rg_ds.AsicDSE):
     # Use FF corner for worst case power
     corners = ["SS", "TT", "FF"]
     tx_types = ["SLVT", "LVT", "RVT"]
-    if asic_dse.asic_flow_settings.run_sram:
+    if asic_dse.common_asic_flow.flow_stages.sram.run:
         tx_types += ["SRAM"]
     filt_strs = [f"{tx_type}_{corner}" for corner in corners for tx_type in tx_types]
     target_libs = " ".join([
@@ -227,7 +227,7 @@ def write_pt_timing_script(asic_dse: rg_ds.AsicDSE):
     # Using SS corner to show worst case timing
     corners = ["SS", "TT", "FF"]
     tx_types = ["SLVT", "LVT", "RVT"]
-    if asic_dse.asic_flow_settings.run_sram:
+    if asic_dse.common_asic_flow.flow_stages.sram.run:
         tx_types += ["SRAM"]
     filt_strs = [f"{tx_type}_{corner}" for corner in corners for tx_type in tx_types]
     target_libs = " ".join([
@@ -293,7 +293,7 @@ def write_pt_timing_script(asic_dse: rg_ds.AsicDSE):
 # ██║  ██║██║  ██║██║ ╚═╝ ██║██║ ╚═╝ ██║███████╗██║  ██║    ╚██████╔╝   ██║   ██║███████╗███████║
 # ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝     ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝                                                                           
 
-def run_hammer_stage(asic_flow: rg_ds.ASICFlowSettings, flow_stage: str, config_paths: List[str], update_db: bool = True, execute_stage: bool = True):
+def run_hammer_stage(asic_flow: rg_ds.HammerFlow, flow_stage: str, config_paths: List[str], update_db: bool = True, execute_stage: bool = True):
     """
         Invokes the hammer-vlsi tool with the specified config files and flow stage, returns hammer output config path, stdout & stderr
     """
@@ -360,7 +360,7 @@ def modify_config_file(asic_dse: rg_ds.AsicDSE) -> str:
     """
     # recursively get all files matching extension in the design directory
     exts = ['.v','.sv','.vhd',".vhdl"]
-    design_files, design_dirs = rg_utils.rec_get_flist_of_ext(asic_dse.asic_flow_settings.hdl_path, exts)
+    design_files, design_dirs = rg_utils.rec_get_flist_of_ext(asic_dse.common_asic_flow.hdl_path, exts)
 
     # with open(asic_dse_settings.asic_flow_settings.config_path, 'r') as yml_file:
         # design_config = yaml.safe_load(yml_file)
@@ -369,7 +369,7 @@ def modify_config_file(asic_dse: rg_ds.AsicDSE) -> str:
     design_config = asic_dse.asic_flow_settings.hammer_driver.project_config
 
     design_config["synthesis.inputs.input_files"] = design_files
-    design_config["synthesis.inputs.top_module"] = asic_dse.asic_flow_settings.top_lvl_module
+    design_config["synthesis.inputs.top_module"] = asic_dse.common_asic_flow.top_lvl_module
     # If the user specified valid search paths we should not override them but just append to them
     
     # TODO ADD THE CONDITIONAL TO CHECK BEFORE CONCAT, this could be cleaner but is ok for now, worst case we have too many serach paths
@@ -383,7 +383,7 @@ def modify_config_file(asic_dse: rg_ds.AsicDSE) -> str:
     design_config["synthesis.inputs.hdl_search_paths"] = list(dict.fromkeys(design_config["synthesis.inputs.hdl_search_paths"])) 
     
     # init top level placement constraints
-    design_config["vlsi.inputs.placement_constraints"][0]["path"] = asic_dse.asic_flow_settings.top_lvl_module
+    design_config["vlsi.inputs.placement_constraints"][0]["path"] = asic_dse.common_asic_flow.top_lvl_module
 
     # Creates directory for modified config files and writes new config
     # Intermediate/Generated configs & RTL will be output to the following directory
@@ -825,13 +825,13 @@ def get_hammer_flow_sweep_point_lines(asic_dse: rg_ds.AsicDSE, des_sweep_id: int
         mod_flow_conf_fpath: path to flow config file (possibly) modified in previous stages and used for this sweep point
         sweep_pt_idx: sweep point index for the current sweep (ie one of the points )
     """
-    if asic_dse.design_sweep_infos[des_sweep_id].tool_env_conf_paths == None:
-        rg_utils.rad_gen_log(f"WARN: No tool environment config files specified in {asic_dse.sweep_config_path}, cmd script won't be generated!",rad_gen_log_fd)
+    if asic_dse.design_sweep_infos[des_sweep_id].tool_env_conf_fpaths == None:
+        rg_utils.rad_gen_log(f"WARN: No tool environment config files specified in {asic_dse.sweep_conf_fpath}, cmd script won't be generated!",rad_gen_log_fd)
         return None, None
     
     asic_dse_args = rg_ds.AsicDseArgs(
-        flow_conf_paths = asic_dse.design_sweep_infos[des_sweep_id].flow_conf_paths + [mod_flow_conf_fpath] if asic_dse.design_sweep_infos[des_sweep_id].flow_conf_paths != None else [mod_flow_conf_fpath],
-        tool_env_conf_paths = asic_dse.design_sweep_infos[des_sweep_id].tool_env_conf_paths,
+        flow_conf_fpaths = asic_dse.design_sweep_infos[des_sweep_id].flow_conf_fpaths + [mod_flow_conf_fpath] if asic_dse.design_sweep_infos[des_sweep_id].flow_conf_fpaths != None else [mod_flow_conf_fpath],
+        tool_env_conf_fpaths = asic_dse.design_sweep_infos[des_sweep_id].tool_env_conf_fpaths,
         **kwargs
     )
     rad_gen_args = rg_ds.RadGenArgs(
@@ -1183,7 +1183,7 @@ def get_macro_info(rad_gen: rg_ds.AsicDSE, obj_dir: str, sram_num_bits: int = No
 
     return report_dict
 
-def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str, rep_type: str, flow_stage: dict, summarize: bool = False):
+def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str, rep_type: str, flow_stage: rg_ds.FlowStage, summarize: bool = False):
     """
         This specifically parses reports and looks for keywords to grab the values and put them into a list of dicts 
         The list is indexed based on the number of values present in the report file.
@@ -1191,14 +1191,14 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
             For Timing -> If there are a bunch of paths in the report, the list will be indexed by each specific timing path (index 0 contains worst case)
             For Area -> If there are a bunch of modules in the report, the list will be indexed by each specific module (index 0 contains total area)
     """    
-    if flow_stage["name"] == "syn":
+    if flow_stage.tag == "syn":
         cadence_hdr_catagories = ["Instance","Module","Cell Count","Cell Area","Net Area","Total Area"]
         # this regex should match text in the header line which shows result catagories and below
         cadence_area_hdr_re_str = r'(\s+){0,1}'.join(cadence_hdr_catagories) + r'.*'
         cadence_area_hdr_re = re.compile(cadence_area_hdr_re_str, re.MULTILINE|re.DOTALL)
         # cadence_area_hdr_re = re.compile("^\s+Instance\s+Module.*Cell\s+Count.*Cell\s+Area.*Total\s+Area.*", re.MULTILINE|re.DOTALL)
         cadence_arrival_time_re = re.compile("Data\sPath:-.*$",re.MULTILINE)
-    elif flow_stage["name"] == "par":
+    elif flow_stage.tag == "par":
         cadence_hdr_catagories = ["Hinst Name","Module Name","Inst Count","Total Area"]
         cadence_area_hdr_re = re.compile("^\s+Hinst\s+Name\s+Module\sName\s+Inst\sCount\s+Total\sArea.*", re.MULTILINE|re.DOTALL)
         cadence_arrival_time_re = re.compile("Arrival:=.*$",re.MULTILINE)
@@ -1237,7 +1237,7 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
                     break
     elif(rep_type == "timing"):
         timing_rpt_text = open(report_path,"r").read()
-        if flow_stage["tool"] == "cadence":
+        if flow_stage.tool == "cadence":
             timing_path_text = timing_rpt_text
             while cadence_timing_grab_re.search(timing_rpt_text):
                 timing_dict = {}
@@ -1256,7 +1256,7 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
                 if summarize:
                     break
                 timing_rpt_text = timing_rpt_text.replace(timing_path_text,"")
-        elif flow_stage["tool"] == "synopsys":
+        elif flow_stage.tool == "synopsys":
             timing_dict = {}
             for line in timing_rpt_text.split("\n"):
                 if "library setup time" in line:
@@ -1269,7 +1269,7 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
                     timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
                 # This indicates taht all lines have been read in and we can append the timing_dict
             report_list.append(timing_dict)
-        # elif flow_stage["tool"] == "synopsys":
+        # elif flow_stage.tool == "synopsys":
         #     timing_dict = {}
         #     for line in timing_rpt_text.split("\n"):
         #         if "library setup time" in line:
@@ -1285,7 +1285,7 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
     elif(rep_type == "power"):
         power_rpt_text = open(report_path,"r").read()
         # TODO should have a section for subtools being used in stages of flow as dc_shell can do timing analysis but doesnt output primetime format
-        if flow_stage["tool"] == "synopsys_dc":
+        if flow_stage.tool == "synopsys_dc":
             power_dict = {}
             for line in power_rpt_text.split("\n"):
                 if "Total Dynamic Power" in line:
@@ -1309,7 +1309,7 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
                         pwr_vals_line = pwr_vals_line.replace(pwr_val,"")
                     power_dict["Total"] = pwr_totals[-1]
             report_list.append(power_dict)
-        elif flow_stage["tool"] == "synopsys":
+        elif flow_stage.tool == "synopsys":
             power_dict = {}
             power_data = []
             # Section for capturing detailed primetime power data
@@ -1351,7 +1351,7 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
             report_list.append(power_dict)
 
         
-        elif flow_stage["tool"] == "cadence":
+        elif flow_stage.tool == "cadence":
             cadence_hdr_catagories = ["Leakage","Internal","Switching","Total","Row%"]
             power_dict = {}
             for line in power_rpt_text.split("\n"):
@@ -1360,7 +1360,7 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
                         if unit in line:
                             units = asic_dse.common.report.power_lookup[unit]
                             break
-                if flow_stage["name"] == "par":
+                if flow_stage.tag == "par":
                     if "Total Internal Power:" in line:
                         power_dict["Internal"] = float(asic_dse.common.res.decimal_re.findall(line)[0]) * units
                     elif "Total Switching Power:" in line:
@@ -1369,7 +1369,7 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
                         power_dict["Switching"] = float(asic_dse.common.res.decimal_re.findall(line)[0]) * units
                     elif "Total Power:" in line:
                         power_dict["Total"] = float(asic_dse.common.res.decimal_re.findall(line)[0]) * units
-                elif flow_stage["name"] == "syn":
+                elif flow_stage.tag == "syn":
                     if "Subtotal" in line:
                         power_vals = [ float(str_val) for str_val in asic_dse.common.res.sci_not_dec_re.findall(line)]
                         power_dict = {catagory: float(power_vals[idx]) * units for idx, catagory in enumerate(cadence_hdr_catagories) }
@@ -1380,7 +1380,7 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
     return report_list
 
 
-def get_report_results(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_dir_path: str, flow_stage: dict) -> dict:
+def get_report_results(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_dir_path: str, flow_stage: rg_ds.FlowStage) -> dict:
     """
         This function will parse the specified report_dir_path which should contain .rpt report files for various stages of asic flow
         Functional for:
@@ -1400,7 +1400,7 @@ def get_report_results(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_dir_p
                 elif("power" in file): 
                     results["power"] = parse_report_c(asic_dse, top_level_mod, os.path.join(report_dir_path, file), "power", flow_stage, summarize=False)
     else:
-        rg_utils.rad_gen_log(f"Warning: {flow_stage['name']} report path does not exist", rad_gen_log_fd)
+        rg_utils.rad_gen_log(f"Warning: {flow_stage.tag} report path does not exist", rad_gen_log_fd)
     return results 
 
 def parse_output(asic_dse: rg_ds.AsicDSE, top_level_mod: str, output_path: str):
@@ -1411,9 +1411,19 @@ def parse_output(asic_dse: rg_ds.AsicDSE, top_level_mod: str, output_path: str):
     syn_report_path = os.path.join(output_path,syn_dir,"reports")
     par_report_path = os.path.join(output_path,par_dir)
     pt_report_path = os.path.join(output_path,pt_dir,"reports")
-    syn_results = get_report_results(asic_dse, top_level_mod, syn_report_path, asic_dse.asic_flow_settings.flow_stages["syn"])
-    par_results = get_report_results(asic_dse, top_level_mod, par_report_path, asic_dse.asic_flow_settings.flow_stages["par"])
-    pt_results = get_report_results(asic_dse, top_level_mod, pt_report_path, asic_dse.asic_flow_settings.flow_stages["pt"])
+
+    syn_results = get_report_results(
+        asic_dse, top_level_mod, syn_report_path,
+        asic_dse.common_asic_flow.flow_stages.syn,
+    )
+    par_results = get_report_results(
+        asic_dse, top_level_mod, par_report_path, 
+        asic_dse.common_asic_flow.flow_stages.par,
+    )
+    pt_results = get_report_results(
+        asic_dse, top_level_mod, pt_report_path, 
+        asic_dse.common_asic_flow.flow_stages.pt,
+    )
     return syn_results, par_results, pt_results
 
 
@@ -1680,7 +1690,7 @@ def write_virtuoso_gds_to_area_script(asic_dse: rg_ds.AsicDSE, gds_fpath: str):
 def write_lc_lib_to_db_script(asic_dse: rg_ds.AsicDSE, in_libs_paths: List[str]):
     """ Takes in a list of abs paths for libs that need to be converted to .dbs """
     lc_script_name = "lc_lib_to_db.tcl"
-    pt_outpath = os.path.join(asic_dse.asic_flow_settings.obj_dir_path, "pt-rundir")
+    pt_outpath = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "pt-rundir")
     db_lib_outpath = os.path.join(asic_dse.common.rad_gen_home_path, "sram_db_libs")
     if not os.path.isdir(pt_outpath):
         os.makedirs(pt_outpath)
@@ -1763,8 +1773,8 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
     # TODO get Makefile based build working (need to add support for SRAM generator stages)
     # if asic_dse.asic_flow_settings.make_build:
     # Generate dependancy and make files
-    _, _, _, = run_hammer_stage(asic_dse.asic_flow_settings, "build", config_paths, update_db = False, execute_stage = asic_dse.asic_flow_settings.make_build)
-    if asic_dse.asic_flow_settings.make_build:
+    _, _, _, = run_hammer_stage(asic_dse.asic_flow_settings, "build", config_paths, update_db = False, execute_stage = asic_dse.common_asic_flow.flow_stages.build.run)
+    if asic_dse.common_asic_flow.flow_stages.build.run:
         if not os.path.isdir(os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir,"build")):
             os.makedirs(os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir,"build"))
         rg_utils.run_shell_cmd_no_logs(f"mv hammer.d {os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir,'build')}")
@@ -1777,29 +1787,32 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
 
     # Check to see if design has an SRAM configuration
     # if asic_dse.asic_flow_settings.run_sram:
-    sram_config, sram_stdout, sram_stderr = run_hammer_stage(asic_dse.asic_flow_settings, "sram_generator", config_paths, update_db = True, execute_stage = asic_dse.asic_flow_settings.run_sram)
+    sram_config, sram_stdout, sram_stderr = run_hammer_stage(asic_dse.asic_flow_settings, "sram_generator", config_paths, update_db = True, execute_stage = asic_dse.common_asic_flow.flow_stages.sram.run)
     # Add sram config to config paths if it exists (if a previous run created it then it will be there)
     if os.path.exists(sram_config):
         config_paths.append(sram_config)
     
     # Run hammer stages
     # Run synthesis
-    syn_config, syn_stdout, syn_stderr = run_hammer_stage(asic_dse.asic_flow_settings, "syn", config_paths, update_db = True, execute_stage = asic_dse.asic_flow_settings.run_syn)
+    syn_config, syn_stdout, syn_stderr = run_hammer_stage(asic_dse.asic_flow_settings, "syn", config_paths, update_db = True, execute_stage = asic_dse.common_asic_flow.flow_stages.syn.run)
     if os.path.exists(syn_config):
         config_paths.append(syn_config)
 
     # If the synthesis report path exists, then parse
     syn_reports_path = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "syn-rundir", "reports")
     if os.path.isdir(syn_reports_path):
-        syn_report = get_report_results(asic_dse, asic_dse.asic_flow_settings.top_lvl_module, syn_reports_path, asic_dse.asic_flow_settings.flow_stages["syn"])
+        syn_report = get_report_results(
+            asic_dse, asic_dse.common_asic_flow.top_lvl_module, syn_reports_path, 
+            asic_dse.common_asic_flow.flow_stages.syn
+        )
         flow_report["syn"] = syn_report
 
     # Run place & route
     # if asic_dse.asic_flow_settings.run_par:
-    syn_to_par_config, _, _ = run_hammer_stage(asic_dse.asic_flow_settings, "syn-to-par", config_paths, update_db = True, execute_stage = asic_dse.asic_flow_settings.run_par)
+    syn_to_par_config, _, _ = run_hammer_stage(asic_dse.asic_flow_settings, "syn-to-par", config_paths, update_db = True, execute_stage = asic_dse.common_asic_flow.flow_stages.par.run)
     if os.path.exists(syn_to_par_config):
         config_paths.append(syn_to_par_config)
-    par_out_config, par_stdout, par_stderr = run_hammer_stage(asic_dse.asic_flow_settings, "par", config_paths, update_db = True, execute_stage = asic_dse.asic_flow_settings.run_par)
+    par_out_config, par_stdout, par_stderr = run_hammer_stage(asic_dse.asic_flow_settings, "par", config_paths, update_db = True, execute_stage = asic_dse.common_asic_flow.flow_stages.par.run)
     if os.path.exists(par_out_config):
         config_paths.append(par_out_config)
         
@@ -1813,7 +1826,7 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
             tech_cache_dir = os.path.basename(asic_dse.asic_flow_settings.hammer_driver.tech.cache_dir)
             stdcells_fpath = os.path.join( asic_dse.asic_flow_settings.hammer_driver.obj_dir, tech_cache_dir, "stdcells.txt")
             # This data structure assumes cadence tools ("output_gds_filename")
-            scaled_gds_fpath = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "par-rundir", f"{asic_dse.asic_flow_settings.top_lvl_module}_drc.gds")
+            scaled_gds_fpath = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "par-rundir", f"{asic_dse.common_asic_flow.top_lvl_module}_drc.gds")
             # calls a function which uses a gds tool to return area from file rather than virtuoso
             # It seems like the gds libs return an area thats around 2x what virtuoso gives so I scale by 1/2 hence virtuoso is ideal
             flow_report["gds_area"] = gds_fns.main([f"{stdcells_fpath}",f"{scaled_gds_fpath}", "get_area"])/2
@@ -1828,19 +1841,22 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
     # If the par report path exists, then parse
     par_reports_path = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "par-rundir", "reports")
     if os.path.isdir(par_reports_path):
-        par_report = get_report_results(asic_dse, asic_dse.asic_flow_settings.top_lvl_module, par_reports_path, asic_dse.asic_flow_settings.flow_stages["par"])
+        par_report = get_report_results(
+            asic_dse, asic_dse.common_asic_flow.top_lvl_module, par_reports_path, 
+            asic_dse.common_asic_flow.flow_stages.par,
+        )
         flow_report["par"] = par_report
 
     # Run static timing & power analysis
     # if asic_dse.asic_flow_settings.run_pt:
-    par_to_power_config, _, _ = run_hammer_stage(asic_dse.asic_flow_settings, "par-to-power", config_paths, update_db = True, execute_stage = asic_dse.asic_flow_settings.run_pt)
+    par_to_power_config, _, _ = run_hammer_stage(asic_dse.asic_flow_settings, "par-to-power", config_paths, update_db = True, execute_stage = asic_dse.common_asic_flow.flow_stages.pt.run)
     if os.path.exists(par_to_power_config):
         config_paths.append(par_to_power_config)
-    par_to_timing_config, _, _ = run_hammer_stage(asic_dse.asic_flow_settings, "par-to-timing", config_paths, update_db = True, execute_stage = asic_dse.asic_flow_settings.run_pt)
+    par_to_timing_config, _, _ = run_hammer_stage(asic_dse.asic_flow_settings, "par-to-timing", config_paths, update_db = True, execute_stage = asic_dse.common_asic_flow.flow_stages.pt.run)
     if os.path.exists(par_to_timing_config):
         config_paths.append(par_to_timing_config)
     
-    if asic_dse.asic_flow_settings.run_pt:
+    if asic_dse.common_asic_flow.flow_stages.pt.run:
         write_pt_sdc(asic_dse.asic_flow_settings.hammer_driver)
 
         # Check to see if sram parameters exist in the database
@@ -1891,7 +1907,10 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
         
     pt_reports_path = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "pt-rundir", "reports")
     if os.path.isdir(pt_reports_path):
-        pt_report = get_report_results(asic_dse, asic_dse.asic_flow_settings.top_lvl_module, pt_reports_path, asic_dse.asic_flow_settings.flow_stages["pt"])
+        pt_report = get_report_results(
+            asic_dse, asic_dse.common_asic_flow.top_lvl_module, pt_reports_path, 
+            asic_dse.common_asic_flow.flow_stages.pt
+        )
         flow_report["pt"] = pt_report
 
     # Now that we have all the reports, we can generate the final report

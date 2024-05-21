@@ -7,11 +7,12 @@ import shutil
 
 import logging
 
-
+import importlib
 import shapely as sh
 
 
-from dataclasses import fields, field, asdict, is_dataclass, dataclass
+from dataclasses import fields, field, asdict, is_dataclass, dataclass, MISSING
+import dataclasses
 import json
 
 from pathlib import Path
@@ -630,7 +631,7 @@ def find_newest_file(search_dir: str, file_fmt: str, is_dir = True):
     """
 
     # dir were looking for obj dirs in
-    #search_dir = os.path.join(rad_gen_settings.env_settings.design_output_path, rad_gen_settings.asic_flow_settings.top_lvl_module)
+    #search_dir = os.path.join(rad_gen_settings.env_settings.design_output_path, rad_gen_settings.common_asic_flow.top_lvl_module)
 
     # find the newest obj_dir
     file_list = []
@@ -664,7 +665,7 @@ def find_newest_obj_dir(search_dir: str, obj_dir_fmt: str):
     """
 
     # dir were looking for obj dirs in
-    #search_dir = os.path.join(rad_gen_settings.env_settings.design_output_path, rad_gen_settings.asic_flow_settings.top_lvl_module)
+    #search_dir = os.path.join(rad_gen_settings.env_settings.design_output_path, rad_gen_settings.common_asic_flow.top_lvl_module)
 
     # find the newest obj_dir
     obj_dir_list = []
@@ -837,7 +838,7 @@ def parse_yml_config(yaml_file: str, validate_paths: bool = True) -> dict:
     
     return sanitize_config(config, validate_paths)
 
-def find_common_root_dir(dpaths: List[str]) -> Union[None, List[str]]:
+def find_common_root_dir(dpaths: List[str]) -> None | List[str]:
     """
         Finds the common root of a list of unsorted directories and makes sure they all exist in it and the common root was provided in the list
         Returns the common root if conditions are met, None otherwise 
@@ -896,37 +897,109 @@ def find_common_root_dir(dpaths: List[str]) -> Union[None, List[str]]:
 """
 
 
-def init_dataclass(dataclass_type: Type, in_config: dict, add_arg_config: dict = {}, validate_paths: bool = True) -> dict:
+
+def init_dataclass(dataclass_type: Type, in_config: dict, add_arg_config: dict = {}, module_lib: Any = None, validate_paths: bool = True) -> Any:
     """
-        Initializes dictionary values for fields defined in input data structure, basically acts as sanitation for keywords defined in data class fields
-        
-        Priority order:
+    Initializes a dataclass with values from the dataclasses internal initialization functions and input configuration dictionaries
+    which have key value pairs mapped to dataclass fields. 
+    
+    Extremely useful function as it allows for defined priority to merge args coming from different sources at different levels of priority
+    
+    There is a priority by which the dataclass is initialized (highest to lowest):
         1. in_config
         2. add_arg_config
+        3. default_factory
 
-        Returns a instantiation of the dataclass
+    Args:
+        dataclass_type: The dataclass type which is to be initialized
+        in_config: The input configuration dictionary which contains the values for the dataclass fields
+        add_arg_config: Additional argument configuration dictionary which contains values for the dataclass fields
+            which may or may not be defined in the input configuration
+        module_lib: The module library which contains the dataclass (and subdataclasses if any) in the dataclass_type.
+            This is used to recursively initialize the dataclass and its subdataclasses so a precondition is that dataclasses 
+            and thier subdataclasses are in the same python module. 
+        validate_paths: A boolean flag which determines if paths in the dataclass should be validated to exist on the system
+
+    Returns:
+        dataclass instantiation with values from merge of data sources in priority order
+
+    Raises:
+        Exception: If a nested dataclass is found and the module_lib argument is not provided
+        
     """
     dataclass_inputs = {}
-    for field in dataclass_type.__dataclass_fields__:
-        # if the field is read in from input config file
-        if field in in_config.keys():
-            dataclass_inputs[field] = in_config[field]
-        # additional arg values for fields not defined in input config (defined in default_value_config[field])
-        elif field in add_arg_config.keys():
-            dataclass_inputs[field] = add_arg_config[field]
-        # clean path and make sure it exists (if "path" keyword in field name)
-        if "path" in field and field in dataclass_inputs:
-            if isinstance(dataclass_inputs[field], list):
-                for idx, path in enumerate(dataclass_inputs[field]):
-                    dataclass_inputs[field][idx] = clean_path(path, validate_paths) 
-            elif isinstance(dataclass_inputs[field], str):
-                dataclass_inputs[field] = clean_path(dataclass_inputs[field], validate_paths) 
+    field: dataclasses.Field
+    for field in dataclass_type.__dataclass_fields__.values():
+        field_name = field.name
+
+        # Start with the factory default if it exists
+        if field.default_factory != MISSING:
+            dataclass_inputs[field_name] = field.default_factory()
+
+        # Hierarchical keys in the input config
+        hier_keys = {k: v for k, v in in_config.items() if k.startswith(f"{field_name}.")}
+        if hier_keys:
+            if not module_lib:
+                raise Exception("ERROR: module_lib must be provided if a nested dataclass is found")
+            # Get a in config dict for the nested dataclass
+            nested_config = {k.replace(f"{field_name}.",""): v for k, v in hier_keys.items()}
+            # Get the type from the input module lib
+            nested_dataclass_type = getattr(module_lib, field.type)
+            if field.default_factory != MISSING:
+                default_fac_config = dataclasses.asdict(field.default_factory())
+            ## Initialize the nested dataclass
+            dataclass_inputs[field_name] = init_dataclass(nested_dataclass_type, nested_config, default_fac_config, module_lib, validate_paths)
+        elif field_name in in_config:
+            dataclass_inputs[field_name] = in_config[field_name]
+        elif field_name in add_arg_config:
+            dataclass_inputs[field_name] = add_arg_config[field_name]
+        
+        # Clean path and ensure it exists (if "path" keyword in field name)
+        if "path" in field_name and field_name in dataclass_inputs:
+            if isinstance(dataclass_inputs[field_name], list):
+                for idx, path in enumerate(dataclass_inputs[field_name]):
+                    dataclass_inputs[field_name][idx] = clean_path(path, validate_paths)
+            elif isinstance(dataclass_inputs[field_name], str):
+                dataclass_inputs[field_name] = clean_path(dataclass_inputs[field_name], validate_paths)
             else:
                 pass
-    # return created dataclass instance
-    # The constructor below will fail if
-    # - key in in_config != field name in dataclass 
+
+    # Return created dataclass instance
     return dataclass_type(**dataclass_inputs)
+
+
+
+# def init_dataclass(dataclass_type: Type, in_config: dict, add_arg_config: dict = {}, validate_paths: bool = True) -> Any:
+#     """
+#         Initializes dictionary values for fields defined in input data structure, basically acts as sanitation for keywords defined in data class fields
+        
+#         Priority order:
+#         1. in_config
+#         2. add_arg_config
+
+#         Returns a instantiation of the dataclass
+#     """
+#     dataclass_inputs = {}
+#     for field in dataclass_type.__dataclass_fields__:
+#         # if the field is read in from input config file
+#         if field in in_config.keys():
+#             dataclass_inputs[field] = in_config[field]
+#         # additional arg values for fields not defined in input config (defined in default_value_config[field])
+#         elif field in add_arg_config.keys():
+#             dataclass_inputs[field] = add_arg_config[field]
+#         # clean path and make sure it exists (if "path" keyword in field name)
+#         if "path" in field and field in dataclass_inputs:
+#             if isinstance(dataclass_inputs[field], list):
+#                 for idx, path in enumerate(dataclass_inputs[field]):
+#                     dataclass_inputs[field][idx] = clean_path(path, validate_paths) 
+#             elif isinstance(dataclass_inputs[field], str):
+#                 dataclass_inputs[field] = clean_path(dataclass_inputs[field], validate_paths) 
+#             else:
+#                 pass
+#     # return created dataclass instance
+#     # The constructor below will fail if
+#     # - key in in_config != field name in dataclass 
+#     return dataclass_type(**dataclass_inputs)
 
 
 
@@ -1105,21 +1178,20 @@ def merge_cli_and_config_args(cli: Dict[str, Any], config: Dict[str, Any], defau
 
 
 
-def strip_hier(in_dict: Dict[str, Any], strip_tag: str = None) -> Dict[str, Any]:
+def strip_hier(in_dict: Dict[str, Any], strip_tag: str, only_tagged_keys: bool = True) -> Dict[str, Any]:
     """
         Removes heirarchy from keys in a dictionary
         - If strip_tag is provided then only keys which contain the strip_tag will be stripped
+        - only_tagged_keys is a bool which determines if keys without the strip tag will be put into the output dict
     """
-    strip_tag_re = re.compile(f".*{strip_tag}\.")
+    strip_tag_re = re.compile(f"^{strip_tag}\.", re.MULTILINE)
     out_dict = {}
     for k, v in in_dict.items():
-        if strip_tag != None:
-            if strip_tag in k:
-                out_dict[strip_tag_re.sub("", k)] = v
-            else:
-                out_dict[k] = v
-        else:
-            out_dict[strip_tag_re.sub("", k)] = v            
+        # If the strip tag with a dot suffix is in the key
+        if strip_tag_re.search(k):
+            out_dict[strip_tag_re.sub("", k)] = v
+        elif not only_tagged_keys:
+            out_dict[k] = v
     return out_dict
 
 
@@ -1220,7 +1292,7 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
 def init_hammer_config(conf_tree: rg_ds.Tree, conf_path: str) -> str:
     """
         This function is specifically to clean up the configs passed to hammer prior to initialization of the
-        ASICFlowSettings data structure.
+        HammerFlow data structure.
         Hammer only accepts absolute paths so we need to convert our paths with home dir to abspaths
     """
     # Generate the directories using the structure specifed in env
@@ -1471,37 +1543,67 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     # tech_inputs = {k.replace("tech.",""):v for k,v in asic_dse_conf.items() if "tech." in k}
 
     # Init meathod from heirarchical cli / configs to dataclasses
-    stdcell_lib = init_dataclass(rg_ds.StdCellLib, strip_hier(asic_dse_conf, strip_tag="stdcell_lib"))
-    scripts = init_dataclass(rg_ds.ScriptInfo, strip_hier(asic_dse_conf, strip_tag="scripts"))
+    stdcell_lib: rg_ds.StdCellLib = init_dataclass(rg_ds.StdCellLib, strip_hier(asic_dse_conf, strip_tag="stdcell_lib"))
+    scripts: rg_ds.ScriptInfo = init_dataclass(rg_ds.ScriptInfo, strip_hier(asic_dse_conf, strip_tag="scripts"))
+    
+    # Defaults
+    # These are default values for CommonAsicFlow fields that shouldn't be exposed to the user for whatver reason
+    common_asic_flow: rg_ds.CommonAsicFlow = init_dataclass(
+        rg_ds.CommonAsicFlow, 
+        strip_hier(asic_dse_conf, strip_tag="common_asic_flow"),
+        module_lib = rg_ds,
+    )
+    common_asic_flow.init(stdcell_lib.pdk_name)
+    
+    asic_dse_mode: rg_ds.AsicDseMode = init_dataclass(
+        rg_ds.AsicDseMode, 
+        strip_hier(asic_dse_conf, strip_tag="mode"),
+        module_lib = rg_ds, 
+    )
+    # Perform post init operations to set fields requiring external / internal dependancies
+    asic_dse_mode.init(
+        asic_dse_conf["sweep_conf_fpath"],
+        asic_dse_conf["compile_results"],
+    )
+    asic_dse_mode.vlsi.init(
+        asic_dse_conf["flow_conf_fpaths"],
+        common_asic_flow.top_lvl_module,
+        common_asic_flow.hdl_path,
+    )
+
+
+    # update the common asic flow settings that required
+
 
     # Initialize optional parameters
     custom_asic_flow_settings = None
     
     common_asic_flow_inputs = {} # settings common to different modes of asic flow "hammer" vs "custom"
-    asic_flow_settings_input = {} # asic flow settings
-    mode_inputs = {} # Set appropriate tool modes
-    vlsi_mode_inputs = {} # vlsi flow modes
+    hammer_flow_inputs = {} # asic flow settings
+    # mode_inputs = {} # Set appropriate tool modes
+    # vlsi_mode_inputs = {} # vlsi flow modes
     high_lvl_inputs = {} # high level setting parameters (associated with a single invocation of rad_gen from cmd line)
     design_sweep_infos = [] # list of design sweep info objects
-    if asic_dse_conf["design_sweep_config"] != None:
+    if asic_dse_conf["sweep_conf_fpath"] != None:
         ######################################################
         #  _____      _____ ___ ___   __  __  ___  ___  ___  #
         # / __\ \    / / __| __| _ \ |  \/  |/ _ \|   \| __| #
         # \__ \\ \/\/ /| _|| _||  _/ | |\/| | (_) | |) | _|  #
         # |___/ \_/\_/ |___|___|_|   |_|  |_|\___/|___/|___| #
         ######################################################                               
-        asic_flow_settings = rg_ds.ASICFlowSettings() 
-        common_asic_flow = rg_ds.CommonAsicFlow()
+        hammer_flow = rg_ds.HammerFlow() 
+        # common_asic_flow = rg_ds.CommonAsicFlow()
+
         # If a sweep file is specified with result compile flag, results across sweep points will be compiled
-        if not asic_dse_conf["compile_results"]:
-            mode_inputs["sweep_gen"] = True # generate config, rtl, etc related to sweep config
-        else:
-            mode_inputs["result_parse"] = True # parse results for each sweep point
-        sweep_config = parse_config(asic_dse_conf["design_sweep_config"], validate_paths = True, sanitize = True)
+        # if not asic_dse_conf["compile_results"]:
+        #     mode_inputs["sweep_gen"] = True # generate config, rtl, etc related to sweep config
+        # else:
+        #     mode_inputs["result_parse"] = True # parse results for each sweep point
+        sweep_config = parse_config(asic_dse_conf["sweep_conf_fpath"], validate_paths = True, sanitize = True)
 
         # sweep_config = parse_yml_config(asic_dse_conf["design_sweep_config"])
 
-        high_lvl_inputs["sweep_config_path"] = asic_dse_conf["design_sweep_config"]
+        high_lvl_inputs["sweep_conf_fpath"] = asic_dse_conf["sweep_conf_fpath"]
         
         for design in sweep_config["design_sweeps"]:
             sweep_type_inputs = {} # parameters for a specific type of sweep
@@ -1517,21 +1619,21 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 # Check to see if the RTL was passed in via CLI params
                 # Priority of getting to RTL + HDL search Paths for RTL
                 # 1. Conglomerated CLI/Conf ( asic_dse_conf["flow_conf_fpath"] ) -> sweep_config["base_config_path"] 
-                if asic_dse_conf.get("flow_conf_paths") and len(asic_dse_conf["flow_conf_paths"]) == 1:
-                    base_config = parse_config(asic_dse_conf["flow_conf_paths"][0])
+                if asic_dse_conf.get("flow_conf_fpaths") and len(asic_dse_conf["flow_conf_fpaths"]) == 1:
+                    base_config = parse_config(asic_dse_conf["flow_conf_fpaths"][0])
                 else:                
                     base_config = parse_config(design["base_config_path"])
 
-                if asic_dse_conf.get("hdl_path"):
+                if common_asic_flow.hdl_path:
                     exts = ['.v','.sv','.vhd',".vhdl", ".vh", ".svh"]
-                    _, hdl_search_paths = rec_get_flist_of_ext(asic_dse_conf.get("hdl_path"), exts)
+                    _, hdl_search_paths = rec_get_flist_of_ext(common_asic_flow.hdl_path, exts)
                 else:
                     hdl_search_paths = base_config.get("synthesis.inputs.hdl_search_paths")
                 # Priority of Copying RTL from user inputs to project tree
                 # 1. Search for RTL inside of user provided HDL search paths 
                 #   a. Priority order: CLI -> base_config["synthesis.inputs.hdl_search_paths"] -> base_config["synthesis.inputs.input_files"] if equivalent files we do a diff to make sure they are the same, if not equal we copy them over
                 # Priority of HDL search paths:
-                # 1. Conglom CLI/Conf (asic_dse_conf["hdl_path"]) -> base_config["synthesis.inputs.hdl_search_paths"]
+                # 1. Conglom CLI/Conf (common_asic_flow.hdl_path) -> base_config["synthesis.inputs.hdl_search_paths"]
                 if hdl_search_paths:
                     # Is assumed sanitized by the parse_config (ie path exists)
                     rtl_src_dpath = find_common_root_dir(hdl_search_paths)
@@ -1563,7 +1665,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
             design_inputs = {}
             design_inputs["type_info"] = sweep_type_info
             # Pass in the parsed sweep config and strip out the "shared" hierarchy tags
-            design_sweep_infos.append(init_dataclass(rg_ds.DesignSweepInfo, strip_hier({**design, **sweep_config} , strip_tag="shared"), design_inputs))
+            design_sweep_infos.append(init_dataclass(rg_ds.DesignSweepInfo, {**design, **strip_hier(sweep_config , strip_tag="shared")}, design_inputs))
 
     # Currently only enabling VLSI mode when other modes turned off
     else:
@@ -1577,26 +1679,31 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
         design_sweep_infos = None
 
 
-        if asic_dse_conf["flow_conf_paths"] != None:
+        if asic_dse_conf["flow_conf_fpaths"] != None:
 
             # enable asic flow to be run
-            vlsi_mode_inputs["enable"] = True
-            vlsi_mode_inputs["flow_mode"] = asic_dse_conf["flow_mode"]
-            vlsi_mode_inputs["run_mode"] = asic_dse_conf["run_mode"]
+            # vlsi_mode_inputs["enable"] = True
+            # vlsi_mode_inputs["flow"] = asic_dse_conf["flow"]
+            # vlsi_mode_inputs["run"] = asic_dse_conf["run"]
     
-            if asic_dse_conf["flow_mode"] == "custom":
-                asic_flow_settings = None
+            if asic_dse_mode.vlsi.flow == "custom":
+                hammer_flow = None
                 # Don't want any preprocessing on custom flow
-                vlsi_mode_inputs["config_pre_proc"] = False
+                # vlsi_mode_inputs["config_pre_proc"] = False
 
                 print("WARNING: Custom flow mode requires the following tools:")
                 print("\tSynthesis: Snyopsys Design Compiler")
                 print("\tPlace & Route: Cadence Encounter OR Innovus")
                 print("\tTiming & Power: Synopsys PrimeTime")
                 # If custom flow is enabled there should only be a single config file
-                assert len(asic_dse_conf["flow_conf_paths"]) == 1, "ERROR: Custom flow mode requires a single config file"
-                custom_asic_flow_settings = load_hb_params(clean_path(asic_dse_conf["flow_conf_paths"][0]))
-                top_lvl_module = custom_asic_flow_settings["top_level"]
+                assert len(asic_dse_conf["flow_conf_fpaths"]) == 1, "ERROR: Custom flow mode requires a single config file"
+                custom_asic_flow_settings = load_hb_params(clean_path(asic_dse_conf["flow_conf_fpaths"][0]))
+                assert len(custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]) == 1, "ERROR: Custom flow mode requires a single hardblock"
+                # TODO either change the custom flow format or assert that there is only a single hardblock in there,
+                # Currently the file format allows multiple hardblocks to be speified (from COFFE) but in the task of the ASIC flow, we only allow a single design
+                # Kinda tricky though because the support for multiple hardblocks exists past this point but to also allow for user CLI we would also have
+                # to allow multiple hardblocks to be specified which seems a bit weird at this point
+                top_lvl_module = common_asic_flow.top_lvl_module 
 
                 # modify the project tree after top level module is found
                 design_out_tree_copy = copy.deepcopy(design_out_tree)
@@ -1606,26 +1713,26 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}.outputs", design_out_tree_copy, is_hier_tag = True) # append our asic_dse outputs
 
 
-            elif asic_dse_conf["flow_mode"] == "hammer":
+            elif asic_dse_mode.vlsi.flow == "hammer":
                 # TODO add global checking for valid paths all input args
                 # If we are in SRAM compiler mode, this means we are only running srams through the flow and thier configs should be at below path
-                if asic_dse_conf["sram_compiler"]:
+                if common_asic_flow.flow_stages.sram.run:
                     proj_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees("shared_resources.sram_lib.configs", is_hier_tag = True)[0] 
                 else:
                     # search for conf tree below in our project_name dir
                     proj_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees(f"{asic_dse_conf['common'].project_name}.configs", is_hier_tag = True)[0] 
                 # Before parsing asic flow config we should run them through pre processing to all input files
-                for idx, conf_path in enumerate(asic_dse_conf["flow_conf_paths"]):
-                    asic_dse_conf["flow_conf_paths"][idx] = init_hammer_config(proj_conf_tree, conf_path)
+                for idx, conf_path in enumerate(asic_dse_conf["flow_conf_fpaths"]):
+                    asic_dse_conf["flow_conf_fpaths"][idx] = init_hammer_config(proj_conf_tree, conf_path)
                 # Search for the shared conf tree in the project tree
                 shared_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees("shared_resources.configs.asic_dse", is_hier_tag = True)[0]
                 # Pre process & validate env config path
-                for idx, conf_path in enumerate(asic_dse_conf["tool_env_conf_paths"]):
-                    asic_dse_conf["tool_env_conf_paths"][idx] = init_hammer_config(shared_conf_tree, conf_path)
+                for idx, conf_path in enumerate(asic_dse_conf["tool_env_conf_fpaths"]):
+                    asic_dse_conf["tool_env_conf_fpaths"][idx] = init_hammer_config(shared_conf_tree, conf_path)
 
 
                 # Initialize the hammer tree
-                # asic_flow_settings_input["hammer_tree"] = rg_ds.Tree(  
+                # hammer_flow_inputs["hammer_tree"] = rg_ds.Tree(  
                 #     asic_dse_conf["common"].hammer_home_path,
                 #     [
                 #         rg_ds.Tree("asic_dse"),
@@ -1638,8 +1745,8 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 # Initialize a Hammer Driver, this will deal with the defaults & will allow us to load & manipulate configs before running hammer flow
                 driver_opts = HammerDriver.get_default_driver_options()
                 # update values
-                driver_opts = driver_opts._replace(environment_configs = list(asic_dse_conf["tool_env_conf_paths"]))
-                driver_opts = driver_opts._replace(project_configs = list(asic_dse_conf["flow_conf_paths"]))
+                driver_opts = driver_opts._replace(environment_configs = list(asic_dse_conf["tool_env_conf_fpaths"]))
+                driver_opts = driver_opts._replace(project_configs = list(asic_dse_conf["flow_conf_fpaths"]))
                 hammer_driver = HammerDriver(driver_opts)
 
                 # Instantiating a hammer driver class creates an obj_dir named "obj_dir" in the current directory, as a quick fix we will delete this directory after its created
@@ -1651,13 +1758,15 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                     shutil.rmtree(dummy_obj_dir_path)
 
                 # if cli provides a top level module and hdl path, we will modify the provided design config file to use them
-                if asic_dse_conf["top_lvl_module"] != None and asic_dse_conf["hdl_path"] != None:
-                    vlsi_mode_inputs["config_pre_proc"] = True
-                    top_lvl_module = asic_dse_conf["top_lvl_module"]
-                    asic_flow_settings_input["hdl_path"] = asic_dse_conf["hdl_path"]
+                if common_asic_flow.top_lvl_module != None and common_asic_flow.hdl_path != None:
+                    # vlsi_mode_inputs["config_pre_proc"] = True
+                    top_lvl_module = common_asic_flow.top_lvl_module
+                    # hammer_flow_inputs["common_asic_flow.hdl_path"] = common_asic_flow.hdl_path
                 else:
-                    vlsi_mode_inputs["config_pre_proc"] = False
+                    # vlsi_mode_inputs["config_pre_proc"] = False
                     top_lvl_module = hammer_driver.database.get_setting("synthesis.inputs.top_module")
+                    # Set the new top lvl module to our struct
+                    common_asic_flow.top_lvl_module = top_lvl_module
 
                 # modify the project tree after top level module is found
                 design_out_tree_copy = copy.deepcopy(design_out_tree)
@@ -1667,7 +1776,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 
                 # Create output directory for obj dirs to be created inside of
                 out_dir = asic_dse_conf["common"].project_tree.search_subtrees(f"outputs.{top_lvl_module}.obj_dirs", is_hier_tag = True)[0].path
-                #os.path.join(env_settings.design_output_path, asic_flow_settings_input["top_lvl_module"])
+                #os.path.join(env_settings.design_output_path, hammer_flow_inputs["common_asic_flow.top_lvl_module"])
                 obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp()}" # Still putting top level mod naming convension on obj_dirs because who knows where they will end up
                 
                 # Throw error if both obj_dir options are specified
@@ -1734,36 +1843,38 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
 
                 hammer_driver.obj_dir = obj_dir_path
                 # At this point hammer driver should be fully initialized
-                asic_flow_settings_input["hammer_driver"] = hammer_driver
-                asic_flow_settings_input["obj_dir_path"] = obj_dir_path
+                hammer_flow_inputs["hammer_driver"] = hammer_driver
+                # hammer_flow_inputs["obj_dir_path"] = obj_dir_path
 
                 # if not specified the flow will run all the stages by defualt
-                run_all_flow = not (asic_dse_conf["synthesis"] or asic_dse_conf["place_n_route"] or asic_dse_conf["primetime"]) and not asic_dse_conf["compile_results"]
+                # run_all_flow = not (asic_dse_conf["synthesis"] or asic_dse_conf["place_n_route"] or asic_dse_conf["primetime"]) and not asic_dse_conf["compile_results"]
                 
-                # TODO implement "flow_stages" element of ASICFlowSettings struct
-                asic_flow_settings_input["make_build"] = asic_dse_conf["make_build"]
-                asic_flow_settings_input["run_sram"] = asic_dse_conf["sram_compiler"]
-                asic_flow_settings_input["run_syn"] = asic_dse_conf["synthesis"] or run_all_flow
-                asic_flow_settings_input["run_par"] = asic_dse_conf["place_n_route"] or run_all_flow
-                asic_flow_settings_input["run_pt"] = asic_dse_conf["primetime"] or run_all_flow
+                # TODO implement "flow_stages" element of HammerFlow struct
+                # asic_flow_settings_input["make_build"] = asic_dse_conf["make_build"]
+                # asic_flow_settings_input["run_sram"] = asic_dse_conf["sram_compiler"]
+                # asic_flow_settings_input["run_syn"] = asic_dse_conf["synthesis"] or run_all_flow
+                # asic_flow_settings_input["run_par"] = asic_dse_conf["place_n_route"] or run_all_flow
+                # asic_flow_settings_input["run_pt"] = asic_dse_conf["primetime"] or run_all_flow
 
-                asic_flow_settings_input["top_lvl_module"] = top_lvl_module
+                # asic_flow_settings_input["common_asic_flow.top_lvl_module"] = top_lvl_module
+
                 # if "asic_flow" in env_conf.keys():
                 #     config_file_input = env_conf["asic_flow"]
                 # else:
                 #     config_file_input = {}
                 
                 # TODO REFACTOR see if we can do less intermediate transfer from asic_dse_conf to asic_flow_settings_input, and just pass asic_dse_conf to below function 
-                asic_flow_settings = init_dataclass(rg_ds.ASICFlowSettings, {}, asic_flow_settings_input, validate_paths = not vlsi_mode_inputs["config_pre_proc"] )
+                hammer_flow = init_dataclass(rg_ds.HammerFlow, {}, hammer_flow_inputs, validate_paths = not asic_dse_mode.vlsi.config_pre_proc )
             
-            # Perform all intiailizations which require "top_lvl_module" to be set (Common to both "custom" & "hammer")
-            # high_lvl_inputs["top_lvl_module"] = top_lvl_module
+            # Perform all intiailizations which require "common_asic_flow.top_lvl_module" to be set (Common to both "custom" & "hammer")
+            # high_lvl_inputs["common_asic_flow.top_lvl_module"] = top_lvl_module
 
             # UNCOMMENT WHEN REFACTORING FOR COMMON ASIC FLOW
-            common_asic_flow_inputs["top_lvl_module"] = asic_flow_settings_input["top_lvl_module"] 
+            # common_asic_flow_inputs["common_asic_flow.top_lvl_module"] = top_lvl_module
             # Don't look in sram db libs if we don't use SRAM in design
-            common_asic_flow_inputs["db_libs"] = ["sram_db_libs",f"{stdcell_lib.pdk_name}_db_libs"] if asic_dse_conf["sram_compiler"] else [f"{stdcell_lib.pdk_name}_db_libs"]
-            common_asic_flow = init_dataclass(rg_ds.CommonAsicFlow, common_asic_flow_inputs)
+            # common_asic_flow_inputs["db_libs"] = ["sram_db_libs", f"{stdcell_lib.pdk_name}_db_libs"] if asic_dse_conf["sram_compiler"] else [f"{stdcell_lib.pdk_name}_db_libs"]
+            
+            # common_asic_flow = init_dataclass(rg_ds.CommonAsicFlow, common_asic_flow_inputs)
 
 
             # Create copy of output tree (rename to top_lvl_module)
@@ -1781,6 +1892,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
 
         else:
             print("ERROR: no flow config files provided, cannot run ASIC flow")
+            exit()
 
     # Initializations common to all modes of asic flow
     design_out_tree_copy = copy.deepcopy(design_out_tree) 
@@ -1793,21 +1905,21 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     # display project tree
     # asic_dse_conf["common"].project_tree.display_tree()
 
-    vlsi_flow = init_dataclass(rg_ds.VLSIMode, vlsi_mode_inputs, {})
-    rad_gen_mode = init_dataclass(rg_ds.RADGenMode, mode_inputs, {"vlsi_flow" : vlsi_flow})
+    # vlsi = init_dataclass(rg_ds.VLSIMode, vlsi_mode_inputs, {})
+    # rad_gen_mode = init_dataclass(rg_ds.AsicDseMode, mode_inputs, {"vlsi" : vlsi})
     high_lvl_inputs = {
         **high_lvl_inputs,
-        "mode": rad_gen_mode,
+        "mode": asic_dse_mode,
         "stdcell_lib": stdcell_lib,
         "scripts": scripts,
         "design_sweep_infos": design_sweep_infos,
-        "asic_flow_settings": asic_flow_settings,
+        "asic_flow_settings": hammer_flow,
         "custom_asic_flow_settings": custom_asic_flow_settings,
         # "env_settings": env_settings,
         "common_asic_flow": common_asic_flow, 
         "common": asic_dse_conf["common"],
     }
-    asic_dse = init_dataclass(rg_ds.AsicDSE, high_lvl_inputs, {})
+    asic_dse = init_dataclass(rg_ds.AsicDSE, high_lvl_inputs)
 
     return asic_dse
 
@@ -1840,7 +1952,7 @@ def init_coffe_structs(coffe_conf: Dict[str, Any]):
             for hb_conf in hb_confs:
                 # pray this is pass by copy not reference
                 asic_dse_cli_args = { **asic_dse_cli_args_base }
-                asic_dse_cli_args["flow_conf_paths"] = hb_conf["flow_conf_paths"]
+                asic_dse_cli_args["flow_conf_fpaths"] = hb_conf["flow_conf_fpaths"]
                 asic_dse_cli = init_dataclass(rg_ds.AsicDseCLI, asic_dse_cli_args)
                 hb_inputs = {
                     "asic_dse_cli": asic_dse_cli

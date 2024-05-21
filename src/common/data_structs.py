@@ -565,8 +565,10 @@ class ParentCLI:
         #     if field.default_factory != MISSING:
         #         setattr(self, field.name, field.default_factory())
         # If cli_args still not generated we use the arg_definitions to generate them
-        if self.cli_args == None:
+        if self.cli_args == None and self.arg_definitions != None:
             self.cli_args = [ GeneralCLI(**arg_dict) for arg_dict in self.arg_definitions ]
+        elif self.cli_args == None:
+            raise Exception("No cli_args or arg_definitions provided for CLI class")
         self._fields = {_field.key : _field.datatype for _field in self.cli_args}
         self._defaults = {_field.key : _field.default_val for _field in self.cli_args}
     
@@ -726,28 +728,72 @@ class AsicDseCLI(ParentCLI):
         Command line interface settings for asic-dse subtool
     """
     cli_args: List[GeneralCLI] = field(default_factory = lambda: [
-        GeneralCLI(key = "tool_env_conf_paths", shortcut = "-e", datatype = str, nargs = "*", help_msg = "Path to hammer environment configuration file (used to specify industry tool paths + licenses)"),
-        GeneralCLI(key = "design_sweep_config", shortcut = "-s", datatype = str, help_msg = "Path to design sweep config file"),
+        GeneralCLI(key = "tool_env_conf_fpaths", shortcut = "-e", datatype = str, nargs = "*", help_msg = "Path to hammer environment configuration file (used to specify industry tool paths + licenses)"),
+        GeneralCLI(key = "sweep_conf_fpath", shortcut = "-s", datatype = str, help_msg = "Path to config file describing sweep tasks and containing design parameters to sweep"),
+        # GeneralCLI(key = "design_sweep_config", shortcut = "-s", datatype = str, help_msg = "Path to config file describing sweep tasks and containing design parameters to sweep"),
         # RUN MODE
-        GeneralCLI(key = "run_mode", shortcut = "-r", datatype = str, choices = ["serial", "parallel", "gen_scripts"], default_val = "serial", help_msg = "Specify if flow is run in serial or parallel for sweeps"),
+        # GeneralCLI(key = "run_mode", shortcut = "-r", datatype = str, choices = ["serial", "parallel", "gen_scripts"], default_val = "serial", help_msg = "Specify if flow is run in serial or parallel for sweeps"),
+        GeneralCLI(key = "mode.vlsi.run", shortcut = "-r", datatype = str, choices = ["serial", "parallel", "gen_scripts"], default_val = "serial", help_msg = "Specify if flow is run in serial or parallel for sweeps"),
+        
         # FLOW MODE
-        GeneralCLI(key = "flow_mode", shortcut = "-m", datatype = str, choices = ["hammer", "custom"], default_val = "hammer", help_msg = "Mode in which asic flow is run hammer or custom modes"),
-        GeneralCLI(key = "top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
-        GeneralCLI(key = "hdl_path", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
-        GeneralCLI(key = "flow_conf_paths", shortcut = "-p", datatype = str, nargs = "*", help_msg = "Paths to flow config files, these can be either custom or hammer format"),
+        GeneralCLI(key = "mode.vlsi.flow", shortcut = "-m", datatype = str, choices = ["hammer", "custom"], default_val = "hammer", help_msg = "Mode in which asic flow is run hammer or custom modes"),
+        # GeneralCLI(key = "flow_mode", shortcut = "-m", datatype = str, choices = ["hammer", "custom"], default_val = "hammer", help_msg = "Mode in which asic flow is run hammer or custom modes"),
+        
+        # GeneralCLI(key = "top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
+        # GeneralCLI(key = "hdl_path", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
+        GeneralCLI(key = "flow_conf_fpaths", shortcut = "-p", datatype = str, nargs = "*", help_msg = "Paths to flow config files, these can be either custom or hammer format"),
         # GeneralCLI(key = "use_latest_obj_dir", shortcut = "-l", action = "store_true", help_msg = "Uses latest obj / work dir found in the respective output_design_files/<top_module> dir"),
         # GeneralCLI(key = "use_manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj / work dir"),
         GeneralCLI(key = "compile_results", shortcut = "-c", datatype = bool, action = "store_true", help_msg = "Flag to compile results related a specific asic flow or sweep depending on additional provided configs"),
-        GeneralCLI(key = "synthesis", shortcut = "-syn", datatype = bool, action = "store_true", help_msg = "Flag to run synthesis"),
-        GeneralCLI(key = "place_n_route", shortcut = "-par", datatype = bool, action = "store_true", help_msg = "Flag to run place & route"),
-        GeneralCLI(key = "primetime", shortcut = "-pt", datatype = bool, action = "store_true", help_msg = "Flag to run primetime (timing & power)"),
-        GeneralCLI(key = "sram_compiler", shortcut = "-sram", datatype = bool, action = "store_true", help_msg = "Flag that must be provided if sram macros exist in design (ASIC-DSE)"),
-        GeneralCLI(key = "make_build", shortcut = "-make", datatype = bool, action = "store_true", help_msg = "<TAG> <UNDER DEV> Generates a makefile to manage flow dependencies and execution"),
+        # GeneralCLI(key = "synthesis", shortcut = "-syn", datatype = bool, action = "store_true", help_msg = "Flag to run synthesis"),
+        # GeneralCLI(key = "place_n_route", shortcut = "-par", datatype = bool, action = "store_true", help_msg = "Flag to run place & route"),
+        # GeneralCLI(key = "primetime", shortcut = "-pt", datatype = bool, action = "store_true", help_msg = "Flag to run primetime (timing & power)"),
+        # GeneralCLI(key = "sram_compiler", shortcut = "-sram", datatype = bool, action = "store_true", help_msg = "Flag that must be provided if sram macros exist in design (ASIC-DSE)"),
+        # GeneralCLI(key = "make_build", shortcut = "-make", datatype = bool, action = "store_true", help_msg = "<TAG> <UNDER DEV> Generates a makefile to manage flow dependencies and execution"),
         # Below are definitions for params nested in the hierarchy of AsicDSE dataclass
-        # GeneralCLI(key = "tech.name", datatype= str, help_msg = "Name of tech lib for use with Cadence Virtuoso", default_val = "asap7"),
-        GeneralCLI(key = "stdcell_lib.cds_lib", datatype= str, help_msg = "Name of cds lib for use with Cadence Virtuoso", default_val = "asap7_TechLib"),
-        GeneralCLI(key = "stdcell_lib.pdk_rundir_path", datatype= str, help_msg = "Path to rundir of pdk being used for Cadence Virtuoso"),
-        GeneralCLI(key = "scripts.virtuoso_setup_path", datatype= str, help_msg = "Path to env setup script for virtuoso environment"),
+        GeneralCLI(key = "stdcell_lib.cds_lib", datatype = str, help_msg = "Name of cds lib for use with Cadence Virtuoso", default_val = "asap7_TechLib"),
+        GeneralCLI(key = "stdcell_lib.pdk_rundir_path", datatype = str, help_msg = "Path to rundir of pdk being used for Cadence Virtuoso"),
+        GeneralCLI(key = "stdcell_lib.sram_lib_path", datatype = str, help_msg = "Path to sram lib containing macro .lefs for running through ASIC CAD flow"),
+        GeneralCLI(key = "stdcell_lib.pdk_name", datatype = str, help_msg = "Name of technology lib, this is what is searched for in either hammer or whatever other tool to find stuff like sram macros", default_val = "asap7"),
+        GeneralCLI(key = "scripts.virtuoso_setup_path", datatype = str, help_msg = "Path to env setup script for virtuoso environment"),
+        # TODO move below cli arg to different structure which deals with arbitrarily defined filenames either created or ingested
+        GeneralCLI(key = "scripts.gds_to_area_fname", datatype = str, help_msg = "Filename for converting GDS to area and of output .csv file"),
+        # TODO rename with fpath convension
+        # GeneralCLI(key = "result_search_path", datatype = str, help_msg = "Path to config file describing sweep tasks and containing design parameters to sweep"),
+        
+        # args for CommonAsicFlow data structure
+        GeneralCLI(key = "common_asic_flow.top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
+        GeneralCLI(key = "common_asic_flow.hdl_path", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
+        
+        GeneralCLI(key = "common_asic_flow.db_libs", datatype = str, nargs = "*", help_msg = "db libs used in synopsys tool interactions, directory names not paths"),
+        GeneralCLI(key = "common_asic_flow.flow_stages.build.run", shortcut = "-build", datatype = bool, action = "store_true", help_msg = "<UNDER DEV> Generates a makefile to manage flow dependencies and execution"),
+        GeneralCLI(key = "common_asic_flow.flow_stages.build.tool", datatype = str, default_val= "hammer", help_msg = "<UNDER DEV>"),
+        GeneralCLI(key = "common_asic_flow.flow_stages.build.tag", datatype = str, default_val= "build", help_msg = "<UNDER DEV>"),
+
+        
+        GeneralCLI(key = "common_asic_flow.flow_stages.sram.run", shortcut = "-sram", datatype = bool, action = "store_true", help_msg = "Flag that must be provided if sram macros exist in design (ASIC-DSE)"),
+        GeneralCLI(key = "common_asic_flow.flow_stages.syn.run", shortcut = "-syn", datatype = bool, action = "store_true", help_msg = "Flag to run synthesis"),
+        GeneralCLI(key = "common_asic_flow.flow_stages.par.run", shortcut = "-par", datatype = bool, action = "store_true", help_msg = "Flag to run place & route"),
+        GeneralCLI(key = "common_asic_flow.flow_stages.pt.run", shortcut = "-pt", datatype = bool, action = "store_true", help_msg = "Flag to run primetime (timing & power)"),
+        
+
+
+        
+        # TODO DUPLICATE figure out how to deal with this data structure being the same as the 'top_lvl_module' data strucutre described above
+        # really both cli args send the information to the same endpoint, making the 'top_lvl_module' a sort of shortcut 
+        
+        # args for HammerFlow data struct, this should really be changed to HammerFlowSettings as its hammer specific
+        # TODO move this to the filename path or dir tree structure
+        GeneralCLI(key = "asic_flow_settings.hammer_cli_driver_path", datatype = str, help_msg = "path to hammer driver executable"),
+        # asic_flow_settings.hammer_driver is a class unable to be defined in CLI
+        # TODO DUPLICATE same as 'hdl_path' above
+        # GeneralCLI(key = "asic_flow_settings.hdl_path", datatype = str, help_msg = "NOT USABLE: Path to directory containing hdl files"),
+        
+        # SRAMCompilerSettings
+        # GeneralCLI(key = "sram_compiler_settings.rtl_out_dpath", datatype = str, help_msg = "Path to output directory for RTL files generated by SRAM compiler"),
+        # GeneralCLI(key = "sram_compiler_settings.config_out_dpath", datatype = str, help_msg = "Path to output directory for config files generated by SRAM compiler"),
+        # GeneralCLI(key = "sram_compiler_settings.scripts_out_dpath", datatype = str, help_msg = "Path to output directory for scripts generated by SRAM compiler"),
+
     ] )
 
 
@@ -788,13 +834,42 @@ class VLSIMode:
     """ 
         Mode settings associated with running VLSI flow
     """
-    run_mode: str = None # specify if flow is run in serial or parallel for sweeps 
-    flow_mode: str = None # mode in which asic flow is run "hammer" or "custom" modes
-    enable: bool = False # run VLSI flow
-    config_pre_proc: bool = False # Don't create a modified config file for this design
+    # specify if flow is run in serial or parallel for sweeps 
+    run: str = None # choices: ["serial", "parallel", "gen_scripts"]
+    # mode in which asic flow is run
+    flow: str = None # choices: ["hammer", "custom"]
+    enable: bool = None # run VLSI flow
+    config_pre_proc: bool = None # Don't create a modified config file for this design
+
+    def init(
+            self, 
+            flow_conf_fpaths: List[str],
+            top_lvl_module: str,
+            hdl_path: str,
+    ):
+        """
+            Uses dependancies from inside + outside the dataclass to determine values for fields
+            not defined as __post_init__ as I want to call it when I please
+        """
+        if flow_conf_fpaths != None:
+            self.enable = True
+            if self.flow == "custom":
+                self.config_pre_proc = True
+            elif self.flow == "hammer":
+                if top_lvl_module != None and hdl_path != None:
+                    self.config_pre_proc = True
+                else:
+                    self.config_pre_proc = False
+        else:
+            self.enable = False
+            # We don't set config_pre_proc to false as its an invalid parameter to be set for this mode of operation
+                
+
+
+            
 
 @dataclass 
-class RADGenMode:
+class AsicDseMode:
     """ 
     The mode in which the RADGen tool is running
     Ex. 
@@ -803,7 +878,23 @@ class RADGenMode:
     """
     sweep_gen: bool = False # run sweep config, header, script generation
     result_parse: bool = False # parse results 
-    vlsi_flow: VLSIMode = field(default_factory = VLSIMode)# modes for running VLSI flow
+    vlsi: VLSIMode = field(default_factory = VLSIMode) # modes for running VLSI flow
+
+    def init(
+            self,
+            sweep_conf_fpath: str, 
+            compile_results: bool,
+    ):
+        # If in sweep mode
+        if sweep_conf_fpath != None:
+            # If result flat not set we generate sweeps
+            if not compile_results:
+                self.sweep_gen = True
+                self.result_parse = False
+            else:
+                self.sweep_gen = False
+                self.result_parse = True
+
 
 
 @dataclass
@@ -879,8 +970,8 @@ class DesignSweepInfo:
     flow_threads: int = 1 # number of vlsi runs which will be executed in parallel (in terms of sweep parameters)
     type_info: Any = None # contains either RTLSweepInfo or SRAMSweepInfo depending on sweep type
     # Optional params for hammer env or hammer flow configs which are shared across design sweeps
-    tool_env_conf_paths: List[str] = None # paths to hammer flow config files
-    flow_conf_paths: List[str] = None # paths to hammer env config files
+    tool_env_conf_fpaths: List[str] = None # paths to hammer flow config files
+    flow_conf_fpaths: List[str] = None # paths to hammer env config files
 
 
 @dataclass
@@ -891,9 +982,47 @@ class ScriptInfo:
     gds_to_area_fname: str = "get_area" # name for gds to area script & output csv file
     virtuoso_setup_path: str = None
 
+@dataclass
+class FlowStage:
+    """
+        In arbitrary tooling flow, information about a specific stage of the flow
+        *Currently only supported for ASIC flow
+    """
+    tag: str  = None # What stage of flow is this? TODO link to a list of legal tags
+    exec_idx: int = None # Index of execution in flow
+    run: bool = None # Should this stage be run?
+    tool: str = None # What tool should be used for this stage? TODO link to a list of legal tools
+
+@dataclass
+class FlowStages:
+    """
+        This struct stores the possible + default flow stages for a design through the ASIC DSE flow
+    """
+    build: FlowStage = field(
+        default_factory = lambda: FlowStage(
+            tag = "build", run = False, tool = "hammer")
+    )
+    sram: FlowStage = field(
+        default_factory = lambda: FlowStage(
+            tag = "sram", run = False, tool = "custom")
+    )
+    syn: FlowStage = field(
+        default_factory = lambda: FlowStage(
+            tag = "syn", run = False, tool = "cadence")
+    )
+    par: FlowStage = field(
+        default_factory = lambda: FlowStage(
+            tag = "par", run = False, tool = "cadence")
+    )
+    pt: FlowStage = field(
+        default_factory = lambda: FlowStage(
+            tag = "pt", run = False, tool = "synopsys")
+    )
+
+
 
 @dataclass 
-class ASICFlowSettings:
+class HammerFlow:
     """ 
         ASIC flow related design specific settings relevant the following catagories:
         - paths
@@ -909,41 +1038,42 @@ class ASICFlowSettings:
     #design_config : Dict[str, Any] = None # Hammer IR parsable configuration info
     
     # Paths
-    hdl_path: str = None # path to directory containing hdl files
-    config_path: str = None # path to hammer IR parsable configuration file
-    top_lvl_module: str = None # top level module of design
-    obj_dir_path: str = None # hammer object directory containing subdir for each flow stage
+    # hdl_path: str = None # path to directory containing hdl files
+    # config_path: str = None # path to hammer IR parsable configuration file
+    # top_lvl_module: str = None # top level module of design
+    # obj_dir_path: str = None # hammer object directory containing subdir for each flow stage
     
     # use_latest_obj_dir: bool # looks for the most recently created obj directory associated with design (TODO & design parameters) and use this for the asic run
     # manual_obj_dir: str # specify a specific obj directory to use for the asic run (existing or non-existing)
     # Stages being run
-    run_sram: bool = False
-    run_syn: bool = False
-    run_par: bool = False
-    run_pt: bool = False
-    make_build: bool = False # Use the Hammer provided make build to manage asic flow execution
+    # run_sram: bool = False
+    # run_syn: bool = False
+    # run_par: bool = False
+    # run_pt: bool = False
+    # make_build: bool = False # Use the Hammer provided make build to manage asic flow execution
+    
     # flow stages
-    flow_stages: dict = field(default_factory = lambda: {
-        "sram": {
-            "name": "sram",
-            "run": False,
-        },
-        "syn": {
-            "name": "syn",
-            "run": False,
-            "tool": "cadence",
-        },
-        "par": {
-            "name": "par",
-            "run": False,
-            "tool": "cadence",
-        },
-        "pt": {
-            "name": "pt",
-            "run": False,
-            "tool": "synopsys",
-        },
-    })
+    # flow_stages: dict = field(default_factory = lambda: {
+    #     "sram": {
+    #         "name": "sram",
+    #         "run": False,
+    #     },
+    #     "syn": {
+    #         "name": "syn",
+    #         "run": False,
+    #         "tool": "cadence",
+    #     },
+    #     "par": {
+    #         "name": "par",
+    #         "run": False,
+    #         "tool": "cadence",
+    #     },
+    #     "pt": {
+    #         "name": "pt",
+    #         "run": False,
+    #         "tool": "synopsys",
+    #     },
+    # })
 
     def __post_init__(self):
         if self.hammer_cli_driver_path is None:
@@ -956,7 +1086,7 @@ class ASICFlowSettings:
 
 
 
-# TODO remove this data structure, moving all its contents to AsicFlowSettings and Common
+# TODO remove this data structure, moving all its contents to HammerFlow and Common
 # @dataclass
 # class EnvSettings:
 #     """ 
@@ -1032,8 +1162,65 @@ class ASICFlowSettings:
 @dataclass
 class CommonAsicFlow:
     top_lvl_module: str = None # top level module of design
+    hdl_path: str       = None # path to directory containing hdl files
+    flow_conf_fpaths: List[str] = None # paths to flow config files, these can be either custom or hammer format
+    # Path to environment configuration file (used to specify industry tool paths + licenses)
+    tool_env_conf_fpaths: List[str] = None # In hammer format but is general enough to be used across modes
     # db libs used in synopsys tool interactions, directory names not paths
     db_libs: List[str] = None
+    # Flow stages being run Ex. synthesis, place and route, primetime (timing + power), etc
+    flow_stages: FlowStages = field(
+        default_factory = lambda: FlowStages() # flow stages being run 
+    )
+    def init(self, pdk_name: str):
+        if not self.db_libs and pdk_name is not None:
+            if self.flow_stages.sram.run:
+                self.db_libs = ["sram_db_libs", f"{pdk_name}_db_libs"]
+            else:
+                self.db_libs = [f"{pdk_name}_db_libs"]
+
+    # Uncomment below block for dynamic instantiation of flow stages
+    '''
+    flow_stages: List[FlowStage] = field(
+        default_factory = lambda: []
+    ) # flow stages being run
+
+    def custom_init(self, full_run: bool):
+        """
+            Similar to regular __post_init__ but we want to call it at a particular point in time
+            rather than immediately after constructor
+        """
+        # Indexed by order of execution
+        flow_stage_defaults = [
+            FlowStage(tag = "build", run = False, tool = "hammer"),
+            FlowStage(tag = "sram", run = False),
+            FlowStage(tag = "syn", run = False, tool = "cadence"),
+            FlowStage(tag = "par", run = False, tool = "cadence"),
+            FlowStage(tag = "pt", run = False, tool = "synopsys")
+        ]
+        assert len(set([fs.tag for fs in self.flow_stages])) == len(self.flow_stages), "Flow stages must have unique tags"
+        
+        if full_run:
+            # Which tags we enable in case of a 'full run'
+            full_run_tags = ["syn", "par", "pt"]
+            for def_fs in flow_stage_defaults:
+                if def_fs.tag in full_run_tags:
+                    def_fs.run = True
+                # If the list of flow stages was initalized by user prior to calling this function
+                # We should just set the run flag to true but not mess with other fields.
+                
+                # Used any to not get index error on empty list but should only have a single element
+                if any([ fs.tag in full_run_tags for fs in self.flow_stages if fs.tag == def_fs.tag ]):
+                    # Gets the index of the flow stage with the same tag as the default flow stage
+                    self.flow_stages[ [ fs.tag for fs in self.flow_stages ].index(def_fs.tag) ].run = True
+                else:
+                    self.flow_stages.append(flow_stage)
+        # if the flow_stages are empty list or None
+        if not self.flow_stages:
+            for flow_stage in flow_stage_defaults:
+                self.flow_stages.append(flow_stage)
+    '''    
+
 
 @dataclass
 class AsicDSE:
@@ -1046,15 +1233,15 @@ class AsicDSE:
     """
     common: Common # common settings for RAD Gen
     # env_settings: EnvSettings # env settings relative to paths and filenames for RAD Gen
-    mode: RADGenMode # mode in which RAD Gen is running
+    mode: AsicDseMode # mode in which RAD Gen is running
     stdcell_lib: StdCellLib # technology information for the design
     scripts: ScriptInfo = None # script information for RAD Gen
-    project_name: str = None # name of project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them
-    sweep_config_path: str = None # path to sweep configuration file containing design parameters to sweep
+    # project_name: str = None # name of project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them
+    sweep_conf_fpath: str = None # path to sweep configuration file containing design parameters to sweep
     result_search_path: str = None # path which will look for various output obj directories to parse results from
     # top_lvl_module: str = None # top level module of design being run or swept 
     common_asic_flow: CommonAsicFlow = None # common asic flow settings for all designs
-    asic_flow_settings: ASICFlowSettings = None # asic flow settings for single design
+    asic_flow_settings: HammerFlow = None # asic flow settings for single design
     custom_asic_flow_settings: Dict[str, Any] = None # custom asic flow settings
     design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
     sram_compiler_settings: SRAMCompilerSettings = None # paths related to SRAM compiler outputs

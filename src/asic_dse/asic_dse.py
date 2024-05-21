@@ -38,7 +38,7 @@ def compile_results(asic_dse: rg_ds.AsicDSE):
     csv_lines = []
     reports = []
     for design in asic_dse.design_sweep_infos:
-        rg_utils.rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {asic_dse.sweep_config_path}",rad_gen_log_fd)
+        rg_utils.rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {asic_dse.sweep_conf_fpath}",rad_gen_log_fd)
         if design.type != None:
             if design.type == "sram":
                 for mem in design.type_info.mems:
@@ -50,7 +50,7 @@ def compile_results(asic_dse: rg_ds.AsicDSE):
                 """ Currently focused on NoC rtl params"""
                 reports = asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module, design)
             else:
-                rg_utils.rad_gen_log(f"Error: Unknown design type {design.type} in {asic_dse.sweep_config_path}",rad_gen_log_fd)
+                rg_utils.rad_gen_log(f"Error: Unknown design type {design.type} in {asic_dse.sweep_conf_fpath}",rad_gen_log_fd)
                 sys.exit(1)
         else:
             # This parsing of reports just looks at top level and takes whatever is in the obj dir
@@ -69,12 +69,12 @@ def compile_results(asic_dse: rg_ds.AsicDSE):
     result_summary_outdir = os.path.join(asic_dse.env_settings.design_output_path,"result_summaries")
     if not os.path.isdir(result_summary_outdir):
         os.makedirs(result_summary_outdir)
-    csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(asic_dse.sweep_config_path))[0] )
+    csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(asic_dse.sweep_conf_fpath))[0] )
     rg_utils.write_dict_to_csv(csv_lines,csv_fname)
 
 def design_sweep(asic_dse: rg_ds.AsicDSE):
     # Starting with just SRAM configurations for a single rtl file (changing parameters in header file)
-    rg_utils.rad_gen_log(f"Running design sweep from config file {asic_dse.sweep_config_path}",rad_gen_log_fd)
+    rg_utils.rad_gen_log(f"Running design sweep from config file {asic_dse.sweep_conf_fpath}",rad_gen_log_fd)
     
     
 
@@ -88,7 +88,7 @@ def design_sweep(asic_dse: rg_ds.AsicDSE):
     #     os.makedirs(scripts_outdir)
 
 
-    # design_sweep_config = yaml.safe_load(open(asic_dse.sweep_config_path))
+    # design_sweep_config = yaml.safe_load(open(asic_dse.sweep_conf_fpath))
     for id, design_sweep in enumerate(asic_dse.design_sweep_infos):
         """ General flow for all designs in sweep config """
 
@@ -149,12 +149,12 @@ def design_sweep(asic_dse: rg_ds.AsicDSE):
                         sweep_script_lines += cmd_lines
                         # with open(modified_config_path, 'w') as fd:
                         #     yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
-                        # if design_sweep.tool_env_conf_paths == None:
-                        #     rg_utils.rad_gen_log(f"WARN: No tool environment config files specified in {asic_dse.sweep_config_path}, cmd script won't be generated!",rad_gen_log_fd)
+                        # if design_sweep.tool_env_conf_fpaths == None:
+                        #     rg_utils.rad_gen_log(f"WARN: No tool environment config files specified in {asic_dse.sweep_conf_fpath}, cmd script won't be generated!",rad_gen_log_fd)
                         #     continue
                         # asic_dse_args = rg_ds.AsicDseArgs(
-                        #         flow_conf_paths = design_sweep.flow_conf_paths + [sweep_point_config_fpath] if design_sweep.flow_conf_paths != None else [sweep_point_config_fpath],
-                        #         tool_env_conf_paths = design_sweep.tool_env_conf_paths,
+                        #         flow_conf_fpaths = design_sweep.flow_conf_fpaths + [sweep_point_config_fpath] if design_sweep.flow_conf_fpaths != None else [sweep_point_config_fpath],
+                        #         tool_env_conf_fpaths = design_sweep.tool_env_conf_fpaths,
                         # )
                         # # Create the Rad Gen CLI command struct to call the tool for this sweep point
                         # rad_gen_args = rg_ds.RadGenArgs(
@@ -255,19 +255,19 @@ def design_sweep(asic_dse: rg_ds.AsicDSE):
             # rg_utils.run_shell_cmd_no_logs(permission_cmd)
 
 def run_asic_flow(asic_dse: rg_ds.AsicDSE) -> Dict[str, Any]:
-    if asic_dse.mode.vlsi_flow.flow_mode == "custom":
-        if asic_dse.mode.vlsi_flow.run_mode == "serial":
+    if asic_dse.mode.vlsi.flow == "custom":
+        if asic_dse.mode.vlsi.run == "serial":
             for hb_settings in asic_dse.custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]:
                 flow_results = asic_custom.hardblock_flow(hb_settings)
-        elif asic_dse.mode.vlsi_flow.run_mode == "parallel":
+        elif asic_dse.mode.vlsi.run == "parallel":
             for hb_settings in asic_dse.custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]:
                 # Maybe 
                 asic_custom.hardblock_parallel_flow(hb_settings)
                 flow_results = None
-    elif asic_dse.mode.vlsi_flow.flow_mode == "hammer":
+    elif asic_dse.mode.vlsi.flow == "hammer":
       # If the args for top level and rtl path are not set, we will use values from the config file
       in_configs = []
-      if asic_dse.mode.vlsi_flow.config_pre_proc:
+      if asic_dse.mode.vlsi.config_pre_proc:
           """ Check to make sure all parameters are assigned and modify if required to"""
           mod_config_file = asic_hammer.modify_config_file(asic_dse)
           in_configs.append(mod_config_file)
@@ -306,7 +306,7 @@ def run_asic_dse(asic_dse_cli: rg_ds.AsicDseCLI) -> Tuple[float]:
     # If a design sweep config file is specified, modify the flow settings for each design in sweep
     elif asic_flow_dse_info.mode.sweep_gen:
         design_sweep(asic_flow_dse_info)
-    elif asic_flow_dse_info.mode.vlsi_flow.enable:
+    elif asic_flow_dse_info.mode.vlsi.enable:
         ret_info = run_asic_flow(asic_flow_dse_info)
 
     return ret_info

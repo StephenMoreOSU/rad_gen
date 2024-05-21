@@ -129,7 +129,7 @@ def main(args: Optional[argparse.Namespace] = None) -> Union[None, Any]:
         # If a design sweep config file is specified, modify the flow settings for each design in sweep
         elif rad_gen_info["asic_dse"].mode.sweep_gen:
             asic_dse.design_sweep(rad_gen_info["asic_dse"])
-        elif rad_gen_info["asic_dse"].mode.vlsi_flow.enable:
+        elif rad_gen_info["asic_dse"].mode.vlsi.enable:
             asic_dse.run_asic_flow(rad_gen_info["asic_dse"])
     elif "coffe" in rad_gen_info.keys():
         # COFFE RUN OPTIONS
