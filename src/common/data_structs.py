@@ -11,7 +11,7 @@ from pathlib import Path
 import shutil
 import argparse
 
-
+from collections import OrderedDict
 
 from third_party.hammer.hammer.vlsi.driver import HammerDriver
 
@@ -23,6 +23,10 @@ import plotly.subplots as subplots
 import plotly.express as px
 import math
 from itertools import combinations
+
+# Constants
+CLI_HIER_KEY = "."
+STRUCT_HIER_KEY = "__"
 
 
 # ██████╗  █████╗ ██████╗        ██████╗ ███████╗███╗   ██╗
@@ -569,8 +573,12 @@ class ParentCLI:
             self.cli_args = [ GeneralCLI(**arg_dict) for arg_dict in self.arg_definitions ]
         elif self.cli_args == None:
             raise Exception("No cli_args or arg_definitions provided for CLI class")
-        self._fields = {_field.key : _field.datatype for _field in self.cli_args}
-        self._defaults = {_field.key : _field.default_val for _field in self.cli_args}
+        self._fields = dict(sorted( 
+            {_field.key : _field.datatype for _field in self.cli_args}.items() 
+        ))
+        self._defaults = dict(sorted( 
+            {_field.key : _field.default_val for _field in self.cli_args}.items()
+        ))
     
     def get_dataclass_fields(self, is_cli: bool = False) -> Dict[str, List[Any]]:
         """
@@ -578,12 +586,21 @@ class ParentCLI:
         """
         # To deal with problem of "." character being invalid for field names we replace it with double underscore here, has to be converted back to "." when cli args are written to console
         for key in self._fields.copy().keys():
-            if "." in key:
-                self._fields[key.replace(".", "__")] = self._fields.pop(key)
+            if CLI_HIER_KEY in key:
+                self._fields[key.replace(CLI_HIER_KEY, STRUCT_HIER_KEY)] = self._fields.pop(key)
         # Adds the dynamic fields propegated from cli_args to the dataclass
-        keys = list(self._fields.keys())
-        dtypes = list(self._fields.values())
-        defaults = list(self._defaults.values())
+        keys = []
+        dtypes = []
+        defaults = []
+        for key, dtype in self._fields.items():
+            keys.append(key)
+            dtypes.append(dtype)
+            default_key: str = key.replace(STRUCT_HIER_KEY, CLI_HIER_KEY)
+            defaults.append(self._defaults[default_key])
+
+        # keys = list(self._fields.keys())
+        # dtypes = list(self._fields.values())
+        # defaults = list(self._defaults.values())
         # A behavior that is convenient is to be able to instantiate the dataclass with the same fields as the cli_args, which can store all operation modes for a subtool
         if not is_cli:
             # All statically defined fields in the original dataclass added here
@@ -660,41 +677,49 @@ class RadGenCLI(ParentCLI):
         if obj == None:
             obj = self
         val = getattr(obj, _field)
+        # Convert data structure fields to format expected by the CLI
+        _cli_field: str = _field.replace(STRUCT_HIER_KEY, CLI_HIER_KEY)
         # Make sure the value is not its default value or None / False (initial values)
         if val != None and val != False:
             # This dict is used to be able to do something like "import rad_gen" "rad_gen.main(**sys_args_dict)" to call rad gen from another python script
             # This in a different if statement as it sets up for the next if by converting value to str if its a list
             if isinstance(val, list):
-                args_dict[_field] = val.copy()
+                args_dict[_cli_field] = val.copy()
                 val = " ".join(val)
             else:
-                args_dict[_field] = val
+                args_dict[_cli_field] = val
             # Be careful bools can be positivly evaluated as strings as well so this should be above the str eval
             if isinstance(val, bool):
-                cmd_str += f" --{_field}"
+                cmd_str += f" --{_cli_field}"
             elif isinstance(val, str) or isinstance(val, int) or isinstance(val, float):    
-                cmd_str += f" --{_field} {val}"
+                cmd_str += f" --{_cli_field} {val}"
             else:
-                raise Exception(f"Unsupported type for {_field} in {obj}")
+                raise Exception(f"Unsupported type for {_cli_field} in {obj}")
         return cmd_str
 
     def get_rad_gen_cli_cmd(self, rad_gen_home: str) -> Tuple[str, List[str], Dict[str, str]]:
         sys_args_dict = {}
         sys_args = []
         cmd_str = f"python3 {rad_gen_home}/rad_gen.py"
+        _field: str
         for _field in self.__class__.__dataclass_fields__:
+            # If the key is formatted coming from subtool Arg instantiation we need to convert it back to the CLI style keys
+            _field_cli_key: str = _field.replace(STRUCT_HIER_KEY, CLI_HIER_KEY)
             # List of arguments derived from cli_args are the only ones we should use to call RAD-Gen
             # Also don't pass argument values if they are the defaults that already exist in the CLI defs
-            cli_default = next((cli_field.default_val for cli_field in self.cli_args if cli_field.key == _field), None) # This gets default value for the feild in question
-            if _field in [ cli_field.key for cli_field in self.cli_args ] and getattr(self, _field) != cli_default: #!= "no_use_arg_list":
+            cli_default = next((cli_field.default_val for cli_field in self.cli_args if cli_field.key == _field_cli_key), None) # This gets default value for the feild in question
+            if _field_cli_key in [ cli_field.key for cli_field in self.cli_args ] and getattr(self, _field) != cli_default: #!= "no_use_arg_list":
                 # no use arg list is used specifically to skip an otherwise valid argument in the cli call  
                 if not ( self.no_use_arg_list != None and ( _field in self.no_use_arg_list ) ):
                     cmd_str = self.decode_dataclass_to_cli(cmd_str = cmd_str, _field = _field, args_dict = sys_args_dict)
         if self.subtool_args != None:
             for _field in self.subtool_args.__dataclass_fields__:
-                cli_default = next((cli_field.default_val for cli_field in self.subtool_args.cli_args if cli_field.key == _field), None) # This gets default value for the feild in question
+                # If the key is formatted coming from subtool Arg instantiation we need to convert it back to the CLI style keys
+                _field_cli_key: str = _field.replace(STRUCT_HIER_KEY, CLI_HIER_KEY)
+
+                cli_default = next((cli_field.default_val for cli_field in self.subtool_args.cli_args if cli_field.key == _field_cli_key), None) # This gets default value for the feild in question
                 # List of arguments derived from subtool cli_args are the only ones we should use to call the subtool
-                if _field in [ _field.key for _field in self.subtool_args.cli_args ] and getattr(self.subtool_args, _field) != cli_default: # != "no_use_arg_list":
+                if _field_cli_key in [ _field.key for _field in self.subtool_args.cli_args ] and getattr(self.subtool_args, _field) != cli_default: # != "no_use_arg_list":
                     if not (self.no_use_arg_list != None and ( _field in self.no_use_arg_list ) ):
                         cmd_str = self.decode_dataclass_to_cli(obj = self.subtool_args, cmd_str = cmd_str, _field = _field, args_dict = sys_args_dict)
         sys_args = cmd_str.split(" ")[2:] # skip over the <python3 rad_gen.py>
@@ -784,7 +809,8 @@ class AsicDseCLI(ParentCLI):
         
         # args for HammerFlow data struct, this should really be changed to HammerFlowSettings as its hammer specific
         # TODO move this to the filename path or dir tree structure
-        GeneralCLI(key = "asic_flow_settings.hammer_cli_driver_path", datatype = str, help_msg = "path to hammer driver executable"),
+        GeneralCLI(key = "hammer_flow.cli_driver_bpath", datatype = str, help_msg = "path to hammer driver executable"),
+        
         # asic_flow_settings.hammer_driver is a class unable to be defined in CLI
         # TODO DUPLICATE same as 'hdl_path' above
         # GeneralCLI(key = "asic_flow_settings.hdl_path", datatype = str, help_msg = "NOT USABLE: Path to directory containing hdl files"),
@@ -843,6 +869,7 @@ class VLSIMode:
 
     def init(
             self, 
+            sweep_conf_fpath: str,
             flow_conf_fpaths: List[str],
             top_lvl_module: str,
             hdl_path: str,
@@ -851,7 +878,7 @@ class VLSIMode:
             Uses dependancies from inside + outside the dataclass to determine values for fields
             not defined as __post_init__ as I want to call it when I please
         """
-        if flow_conf_fpaths != None:
+        if flow_conf_fpaths != None and sweep_conf_fpath == None:
             self.enable = True
             if self.flow == "custom":
                 self.config_pre_proc = True
@@ -921,40 +948,44 @@ class StdCellLib:
     pdk_rundir_path: str = None # path to PDK run directory which allows Cadence Virtuoso to run in it
 
 
-@dataclass
-class VLSISweepInfo:
-    params: Dict #[Dict[str, Any]] 
+
     
 
 @dataclass 
 class SRAMSweepInfo:
-    sram_rtl_template_fpath: str # path to RTL file which will be modified by SRAM scripts to generate SRAMs, its an SRAM instantiation (supporting dual and single ports with ifdefs) wrapped in registers
+    sram_rtl_template_fpath: str = None # path to RTL file which will be modified by SRAM scripts to generate SRAMs, its an SRAM instantiation (supporting dual and single ports with ifdefs) wrapped in registers
     """
         List of dicts each of which contain the following elements:
         - rw_ports -> number of read/write ports
         - w -> sram width
         - d -> sram depth
     """
-    mems: List[Dict[str, int]] # Contains sram information to be created from existing SRAM macros using mappers
+    mems: List[Dict[str, int]] = None# Contains sram information to be created from existing SRAM macros using mappers
     # parameters for explicit macro generation
-    rw_ports: List[int]
-    widths: List[int]
-    depths: List[int]
+    rw_ports: List[int] = None
+    widths: List[int] = None
+    depths: List[int] = None
+
 
 @dataclass
-class RTLSweepInfo:
+class ParamSweepInfo:
+    params: dict
+@dataclass
+class VLSISweepInfo(ParamSweepInfo):
+    pass
+@dataclass
+class RTLSweepInfo(ParamSweepInfo):
     """
-        Contains information for sweeping designs 
-    """
-    base_header_path: str # path to  containing RTL header file for parameter sweeping
-    """
+        Contains information for sweeping designs
+
         parameters to sweep, each [key, dict] pair contains the following elements:
         - key = name of parameter to sweep
         - dict elements:
             - vals -> sweep values for parameter defined in "key"
             - <arbirary_additional_param_values> -> sweep values of same length of "vals" for any additional parameters which need to be swept at the same time
+ 
     """
-    params: Dict #[Dict[str, Any]] 
+    base_header_path: str # path to  containing RTL header file for parameter sweeping
 
 # TODO add validators
 @dataclass
@@ -1018,6 +1049,15 @@ class FlowStages:
         default_factory = lambda: FlowStage(
             tag = "pt", run = False, tool = "synopsys")
     )
+    def init(self):
+        run_all_flow: bool = not (
+            self.syn.run or self.par.run or self.pt.run
+        )
+        if run_all_flow:
+            self.syn.run = True
+            self.par.run = True
+            self.pt.run = True
+
 
 
 
@@ -1030,133 +1070,51 @@ class HammerFlow:
     """
     
     # Hammer Info
-    # hammer_env_paths: List[str] = None # paths to hammer environment file containing absolute paths to asic tools and licenses
-    hammer_cli_driver_path: str = None # path to hammer driver
+    cli_driver_bpath: str = None # path to hammer driver
     hammer_driver: HammerDriver = None # hammer settings
-    
-    # Replace design_config with hammer_driver 
-    #design_config : Dict[str, Any] = None # Hammer IR parsable configuration info
-    
-    # Paths
-    # hdl_path: str = None # path to directory containing hdl files
-    # config_path: str = None # path to hammer IR parsable configuration file
-    # top_lvl_module: str = None # top level module of design
-    # obj_dir_path: str = None # hammer object directory containing subdir for each flow stage
-    
-    # use_latest_obj_dir: bool # looks for the most recently created obj directory associated with design (TODO & design parameters) and use this for the asic run
-    # manual_obj_dir: str # specify a specific obj directory to use for the asic run (existing or non-existing)
-    # Stages being run
-    # run_sram: bool = False
-    # run_syn: bool = False
-    # run_par: bool = False
-    # run_pt: bool = False
-    # make_build: bool = False # Use the Hammer provided make build to manage asic flow execution
-    
-    # flow stages
-    # flow_stages: dict = field(default_factory = lambda: {
-    #     "sram": {
-    #         "name": "sram",
-    #         "run": False,
-    #     },
-    #     "syn": {
-    #         "name": "syn",
-    #         "run": False,
-    #         "tool": "cadence",
-    #     },
-    #     "par": {
-    #         "name": "par",
-    #         "run": False,
-    #         "tool": "cadence",
-    #     },
-    #     "pt": {
-    #         "name": "pt",
-    #         "run": False,
-    #         "tool": "synopsys",
-    #     },
-    # })
 
     def __post_init__(self):
-        if self.hammer_cli_driver_path is None:
+        if self.cli_driver_bpath is None:
             # the hammer-vlsi exec should point to default cli driver in hammer repo if everything installed correctly
-            self.hammer_cli_driver_path = "hammer-vlsi"
-        # else: 
-        #     self.hammer_cli_driver_path = f"python3 {self.hammer_cli_driver_path}"
+            self.cli_driver_bpath = "hammer-vlsi"
+
+    def init(
+            self,
+            sweep_conf_fpath: str,
+            flow: str,
+            tool_env_conf_fpaths: List[str],
+            flow_conf_fpaths: List[str], 
+    ):
+        hammer_flow_enable: bool = (
+            # Not in sweep mode
+            sweep_conf_fpath == None and
+            # We have a flow config
+            flow_conf_fpaths != None and
+            # We are in hammer flow mode
+            flow == "hammer"
+        )
+        if hammer_flow_enable and self.hammer_driver is None:
+            # Make sure we are in the correct mode to initialize our hammer stuff
+            # Initialize a Hammer Driver, this will deal with the defaults & will allow us to load & manipulate configs before running hammer flow
+            driver_opts = HammerDriver.get_default_driver_options()
+            # update values
+            driver_opts = driver_opts._replace(environment_configs = tool_env_conf_fpaths)
+            driver_opts = driver_opts._replace(project_configs = flow_conf_fpaths)
+            self.hammer_driver = HammerDriver(driver_opts)
+
+            # Instantiating a hammer driver class creates an obj_dir named "obj_dir" in the current directory, as a quick fix we will delete this directory after its created
+            # TODO this should be fixed somewhere
+            dummy_obj_dir_path = os.path.join(os.getcwd(),"obj_dir")
+            if os.path.isdir(dummy_obj_dir_path):
+                # Please be careful changing things here, always scary when you're calling "rm -rf"
+                shutil.rmtree(dummy_obj_dir_path)
+        if hammer_flow_enable and self.cli_driver_bpath is None:
+            # the hammer-vlsi exec should point to default cli driver in hammer repo if everything installed correctly
+            self.cli_driver_bpath = "hammer-vlsi"
 
 
 
 
-
-# TODO remove this data structure, moving all its contents to HammerFlow and Common
-# @dataclass
-# class EnvSettings:
-#     """ 
-#         Settings which are specific to a user of the RAD Gen tool including the following:
-#         - paths specified to system running RAD Gen
-#         - log settings
-#         - directory structures for inputs and outputs
-#     """
-#     # RAD-Gen
-#     rad_gen_home_path: str # path to top level rad gen repo 
-#     # Hammer
-#     hammer_home_path: str  # path to hammer repository
-#     env_paths: List[str] # paths to hammer environment file containing absolute paths to asic tools and licenses
-
-#     # OpenRAM 
-#     # openram_path: str  # path to openram repository
-    
-#     # Top level input # TODO remove this, deprecated config path
-#     top_lvl_config_path: str = None # high level rad gen configuration file path
-    
-#     # Name of directory which stores parameter sweep headers
-#     # param_sweep_hdr_dir: str = "param_sweep_hdrs" TODO remove this and use input_dir_structure defined below (gen)
-    
-#     # Verbosity level
-#     # 0 - Brief output
-#     # 1 - Brief output + I/O + command line access
-#     # 2 - Hammer and asic tool outputs will be printed to console    
-#     logger: logging.Logger = logging.getLogger(f"rad-gen-{create_timestamp()}") # logger for RAD Gen
-#     log_file: str = f"rad-gen-{create_timestamp()}.log" # path to log file for current RAD Gen run
-#     log_verbosity: int = 1 # verbosity level for log file 
-    
-#     # Input and output directory structure, these are initialized with design specific paths
-#     design_input_path: str = None # path to directory which inputs will be read from. Ex ~/rad_gen/input_designs
-#     design_output_path: str = None # path to directory which object directories will be created. Ex ~/rad_gen/output_designs
-#     hammer_tech_path: str = None # path to hammer technology directory containing tech files
-
-#     # Directory structure for auto-dse hammer asic flow
-#     input_dir_struct: dict = field(default_factory = lambda: {
-#         # Design configuration files
-#         "configs": {
-#             # Auto-generated configuration files from sweep
-#             "gen" : "gen",
-#             # Tmp directory for storing modified configuration files by user passing in top_lvl & hdl_path & original config 
-#             "mod" : "mod",
-#         },
-#         # Design RTL files
-#         "rtl" : {
-#             "gen" : "gen", # Auto-generated directories containing RTL
-#             "src" : "src", # Contains design RTL files
-#             "include": "include", # Contains design RTL header files
-#             "verif" : "verif", # verification related files
-#             "build" : "build", # build related files for this design
-#         }
-#     })
-
-#     # Regex Info
-#     res: Regexes = field(default_factory = Regexes)
-#     # Sript path information
-#     scripts_info: ScriptInfo = None
-#     # Report information
-#     report_info: ReportInfo = field(default_factory = ReportInfo)
-
-#     def __post_init__(self):
-#         # Assign defaults for input and output design dir, these will be overridden if specified in top level yaml file
-#         if self.design_input_path is None:
-#             self.design_input_path = os.path.join(self.rad_gen_home_path, "input_designs") 
-#         if self.design_output_path is None:
-#             self.design_output_path = os.path.join(self.rad_gen_home_path, "output_designs")
-#         if self.hammer_tech_path is None:
-#             self.hammer_tech_path = os.path.join(self.hammer_home_path, "hammer", "technology")
 
 
 @dataclass

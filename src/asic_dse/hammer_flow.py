@@ -306,7 +306,7 @@ def run_hammer_stage(asic_flow: rg_ds.HammerFlow, flow_stage: str, config_paths:
     env_path_args = " ".join(env_path_args)
 
     # Load path to hammer driver
-    hammer_cli = asic_flow.hammer_cli_driver_path
+    hammer_cli = asic_flow.cli_driver_bpath
     
     # rad_gen_log(f'Running hammer with input configs: {" ".join(config_paths)}...',rad_gen_log_fd)
 

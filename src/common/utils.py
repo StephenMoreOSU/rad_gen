@@ -769,7 +769,15 @@ def sanitize_element(param: str, ele_val: Any, validate_paths: bool = True, *arg
     # Here are the key matches which makes sanitizer think its a path
     # TODO there may be a better way to do but this way you just have to list all path related keys below
     path_keys = ["path", "sram_parameters", "file", "dir", "home"]
-    inv_path_keys = ["meta", "use_latest_obj_dir", "manual_obj_dir"] # even if path keys are in param if negative keys are in param then its not a path
+    inv_path_keys = [
+        "meta", "use_latest_obj_dir", "manual_obj_dir", 
+        # Custom flow params
+        "read_saif_file",
+        "generate_activity_file",
+    ]
+    
+     # even if path keys are in param if negative keys are in param then its not a path
+    
     # Special list for lists of dicts, we want to ignore any element with this key in the parent dict
     parent_inv_path_keys = ["placement_constraints"]
     # We check if the supplied inv path keys exist in our parent key as its expected to be heirarchical Ex.  "a.b.c"
@@ -1269,7 +1277,7 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
             # { k.replace("common.","") : v for k,v in result_conf.items() if "common" in k})
 
         subtool_confs[subtool] = {
-            "common": common,
+            # "common": common,
             **result_conf,
         }
         
@@ -1278,12 +1286,12 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
 
     # Loop through subtool keys and call init function to return data structures
     # init functions are in the form init_<subtool>_structs
-    for subtool in subtool_confs.keys():
+    for subtool in list(subtool_confs.keys()):
         fn_to_call = getattr(sys.modules[__name__], f"init_{subtool}_structs")
         if callable(fn_to_call):
             # do the renaming of keys to take out the "<subtool>." portion of heirarchy, this is because by definition all keys that are passed in are only for the respective subtool
             # (subtools are independant of one another), and the common dataclass is passed through the "common" key
-            rad_gen_info[subtool] = fn_to_call( {k.replace(f"{subtool}.","") : v for k,v in subtool_confs[subtool].items()} ) 
+            rad_gen_info[subtool] = fn_to_call( {k.replace(f"{subtool}.","") : v for k,v in subtool_confs[subtool].items()}, common ) 
         else:
             raise ValueError(f"ERROR: {subtool} is not a valid subtool ('init_{subtool}_structs' is not a defined function)")
     return rad_gen_info
@@ -1450,7 +1458,85 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
 
 
 
-def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
+def init_obj_dir(
+        common: rg_ds.Common,
+        top_lvl_module: str,
+) -> str:
+    # Create output directory for obj dirs to be created inside of
+    out_dir = common.project_tree.search_subtrees(f"outputs.{top_lvl_module}.obj_dirs", is_hier_tag = True)[0].path
+    #os.path.join(env_settings.design_output_path, hammer_flow_inputs["common_asic_flow.top_lvl_module"])
+    obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp()}" # Still putting top level mod naming convension on obj_dirs because who knows where they will end up
+    
+    # Throw error if both obj_dir options are specified
+    assert not (common.override_outputs and common.manual_obj_dir != None), "ERROR: cannot use both latest obj dir and manual obj dir arguments for ASIC-DSE subtool"
+    
+    obj_dir_path = None
+    # Users can specify a specific obj directory
+    if common.manual_obj_dir != None:
+        obj_dir_path = os.path.realpath(os.path.expanduser(common.manual_obj_dir))
+        # if this does not exist create it now
+        os.makedirs(obj_dir_path, exist_ok = True)
+    # Or they can use the latest created obj dir
+    elif common.override_outputs:
+        if os.path.isdir(out_dir):
+            obj_dir_path = find_newest_obj_dir(search_dir = out_dir, obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
+        else:
+            print( f"WARNING: No latest obj dirs found in {out_dir} of format {top_lvl_module}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
+    # If no value given or no obj dir found, we will create a new one
+    if obj_dir_path == None:
+        obj_dir_path = os.path.join(out_dir,obj_dir_fmt)
+        print( f"WARNING: No obj dir specified or found, creating new one @: {obj_dir_path}")
+
+    # This could be either at the same path as next variable or at manual specified location
+    obj_dname = os.path.basename(obj_dir_path)
+    # This will always be at consistent project path
+    project_obj_dpath = os.path.join(out_dir, obj_dname)
+    
+    if common.manual_obj_dir:
+        # Check to see if symlink already points to the correct location
+        if os.path.islink(project_obj_dpath) and os.readlink(project_obj_dpath) == obj_dir_path:
+            rad_gen_log(f"Symlink already exists @ {project_obj_dpath}", rad_gen_log_fd)
+        else:
+            os.symlink(obj_dir_path, project_obj_dpath)
+        mkdirs = False
+    else:
+        mkdirs = True
+    # If we don't specify a manual obj directory we can directly append our new obj directory to the project tree to create it + add to data structure
+    # Won't create it if symlink already exists
+    obj_tree = rg_ds.Tree(
+        path = os.path.basename(obj_dir_path),
+        tag = "cur_flow_obj_dir" # NAMING CONVENTION FOR OUR ACTIVE OBJ DIRECTORY
+    )
+    common.project_tree.append_tagged_subtree(
+        f"{common.project_name}.outputs.{top_lvl_module}.obj_dirs",
+        obj_tree,
+        is_hier_tag = True,
+        mkdirs = mkdirs
+    )
+    return obj_dir_path
+
+
+def get_hammer_flow_conf(common: rg_ds.Common, common_asic_flow: rg_ds.CommonAsicFlow, asic_dse_conf: dict) -> dict:
+    # If we are in SRAM compiler mode, this means we are only running srams through the flow and thier configs should be at below path
+    proj_conf_tree: rg_ds.Tree
+    if common_asic_flow.flow_stages.sram.run:
+        proj_conf_tree = common.project_tree.search_subtrees("shared_resources.sram_lib.configs", is_hier_tag = True)[0] 
+    else:
+        # search for conf tree below in our project_name dir
+        proj_conf_tree = common.project_tree.search_subtrees(f"{common.project_name}.configs", is_hier_tag = True)[0] 
+    # Before parsing asic flow config we should run them through pre processing to all input files
+    for idx, conf_path in enumerate(asic_dse_conf["flow_conf_fpaths"]):
+        asic_dse_conf["flow_conf_fpaths"][idx] = init_hammer_config(proj_conf_tree, conf_path)
+    # Search for the shared conf tree in the project tree
+    shared_conf_tree = common.project_tree.search_subtrees("shared_resources.configs.asic_dse", is_hier_tag = True)[0]
+    # Pre process & validate env config path
+    for idx, conf_path in enumerate(asic_dse_conf["tool_env_conf_fpaths"]):
+        asic_dse_conf["tool_env_conf_fpaths"][idx] = init_hammer_config(shared_conf_tree, conf_path)
+    
+    return asic_dse_conf
+
+
+def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -> rg_ds.AsicDSE:
     """
         Initializes the data structures used by the ASIC DSE flow:
         ASIC-DSE:
@@ -1466,7 +1552,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
         [
             # Obj directories exist here
             rg_ds.Tree("obj_dirs", tag="obj_dirs"),
-            # Guessing there should be a place to put high level reports / logs / scripts (by high level I mean not specific to a single obj dir)
+            # Below Trees are a place to put high level reports / logs / scripts (by high level I mean not specific to a single obj dir)
             rg_ds.Tree("reports", tag="report"),
             rg_ds.Tree("scripts", tag="script"),
             rg_ds.Tree("logs", tag="logs"),
@@ -1475,8 +1561,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     
     configs_tree = rg_ds.Tree("configs", 
         [
-            # rg_ds.Tree("pre_proc"),
-            # once we have a top_lvl_module name we will put that tree here
             rg_ds.Tree("sweeps", tag="sweep"),
             rg_ds.Tree("gen", tag="gen"),
             rg_ds.Tree("mod", tag="mod"),
@@ -1494,7 +1578,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     )
 
     # Create a copy of the conf tree with name configs to use for sram_compiler
-
     sram_tree = rg_ds.Tree("sram_lib", 
         [   
             copy.deepcopy(configs_tree),
@@ -1505,55 +1588,40 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
     )
 
     # Make tree defined directories
-    asic_dse_conf["common"].project_tree.create_tree()
-
+    common.project_tree.create_tree()
 
     # updating project tree from common
-    if asic_dse_conf["common"].project_name != None:
-        asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}", copy.deepcopy(configs_tree), is_hier_tag = True) # append asic_dse specific conf tree to the project conf tree
-        asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}", rtl_tree, is_hier_tag = True) # add rtl to the project tree
+    if common.project_name != None:
+        common.project_tree.append_tagged_subtree(f"{common.project_name}", copy.deepcopy(configs_tree), is_hier_tag = True) # append asic_dse specific conf tree to the project conf tree
+        common.project_tree.append_tagged_subtree(f"{common.project_name}", rtl_tree, is_hier_tag = True) # add rtl to the project tree
     conf_tree_copy = copy.deepcopy(configs_tree)
     conf_tree_copy.update_tree_top_path(new_path = "asic_dse", new_tag = "asic_dse")
-    asic_dse_conf["common"].project_tree.append_tagged_subtree("shared_resources.configs", conf_tree_copy, is_hier_tag = True) # append our shared configs tree to the project tree
-    asic_dse_conf["common"].project_tree.append_tagged_subtree(f"shared_resources", copy.deepcopy(sram_tree), is_hier_tag = True) # append our pdk tree to the project tree
-
-
-    """
-        if asic_dse_conf["env_config_path"] != None:
-            env_conf = parse_yml_config(asic_dse_conf["env_config_path"])
-        else:
-            raise ValueError(f"ASIC-DSE env config file not provided from {asic_dse_conf['env_config_path']}")
-        
-            
-        script_info_inputs = env_conf["scripts"] if "scripts" in env_conf.keys() else {}
-        scripts_info = init_dataclass(rg_ds.ScriptInfo, script_info_inputs)
-
-        # create additional dicts for argument passed information
-        env_inputs = {
-            # TODO change in EnvSettings to be env_config_path
-            "env_config_path": asic_dse_conf["env_config_path"],
-            "scripts_info": scripts_info,
-        }
-        env_settings = init_dataclass(rg_ds.EnvSettings, env_conf["env"], env_inputs)
-
-        # TODO we should get tech info from another place, but for determining ASAP7 rundir is kinda hard
-        if "tech" in env_conf.keys():
-            tech_info = init_dataclass(rg_ds.StdCellTechInfo, env_conf["tech"], {})
-    """
-    # tech_inputs = {k.replace("tech.",""):v for k,v in asic_dse_conf.items() if "tech." in k}
+    common.project_tree.append_tagged_subtree("shared_resources.configs", conf_tree_copy, is_hier_tag = True) # append our shared configs tree to the project tree
+    common.project_tree.append_tagged_subtree(f"shared_resources", copy.deepcopy(sram_tree), is_hier_tag = True) # append our pdk tree to the project tree
 
     # Init meathod from heirarchical cli / configs to dataclasses
-    stdcell_lib: rg_ds.StdCellLib = init_dataclass(rg_ds.StdCellLib, strip_hier(asic_dse_conf, strip_tag="stdcell_lib"))
-    scripts: rg_ds.ScriptInfo = init_dataclass(rg_ds.ScriptInfo, strip_hier(asic_dse_conf, strip_tag="scripts"))
-    
-    # Defaults
-    # These are default values for CommonAsicFlow fields that shouldn't be exposed to the user for whatver reason
+    stdcell_lib: rg_ds.StdCellLib = init_dataclass(
+        rg_ds.StdCellLib, 
+        strip_hier(asic_dse_conf, strip_tag="stdcell_lib")
+    )
+
+    scripts: rg_ds.ScriptInfo = init_dataclass(
+        rg_ds.ScriptInfo, 
+        strip_hier(asic_dse_conf, strip_tag="scripts")
+    )
+
     common_asic_flow: rg_ds.CommonAsicFlow = init_dataclass(
         rg_ds.CommonAsicFlow, 
         strip_hier(asic_dse_conf, strip_tag="common_asic_flow"),
         module_lib = rg_ds,
     )
     common_asic_flow.init(stdcell_lib.pdk_name)
+    common_asic_flow.flow_stages.init()
+    # Control signals
+    top_lvl_valid: bool = (
+        common_asic_flow.top_lvl_module != None and 
+        common_asic_flow.hdl_path != None
+    )
     
     asic_dse_mode: rg_ds.AsicDseMode = init_dataclass(
         rg_ds.AsicDseMode, 
@@ -1566,51 +1634,35 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
         asic_dse_conf["compile_results"],
     )
     asic_dse_mode.vlsi.init(
+        asic_dse_conf["sweep_conf_fpath"],
         asic_dse_conf["flow_conf_fpaths"],
         common_asic_flow.top_lvl_module,
         common_asic_flow.hdl_path,
     )
 
+    # Assert valid combinations
+    assert not (asic_dse_conf["sweep_conf_fpath"] == None and asic_dse_conf["flow_conf_fpaths"] == None), "ERROR: No task can be run from given user parameters"
 
-    # update the common asic flow settings that required
+    asic_dse_inputs: dict = {} # asic dse parameters
+    design_sweep_infos: List[rg_ds.DesignSweepInfo] = [] # List of sweeps to generate 
+    custom_asic_flow_settings: dict = None # TODO get rid of this with updated custom flow init
+    #   _____      _____ ___ ___    ___ ___ _  _ 
+    #  / __\ \    / / __| __| _ \  / __| __| \| |
+    #  \__ \\ \/\/ /| _|| _||  _/ | (_ | _|| .` |
+    #  |___/ \_/\_/ |___|___|_|    \___|___|_|\_|
 
-
-    # Initialize optional parameters
-    custom_asic_flow_settings = None
-    
-    common_asic_flow_inputs = {} # settings common to different modes of asic flow "hammer" vs "custom"
-    hammer_flow_inputs = {} # asic flow settings
-    # mode_inputs = {} # Set appropriate tool modes
-    # vlsi_mode_inputs = {} # vlsi flow modes
-    high_lvl_inputs = {} # high level setting parameters (associated with a single invocation of rad_gen from cmd line)
-    design_sweep_infos = [] # list of design sweep info objects
+    # TODO this section needs refactoring and requires converting the format of sweep config files to allow for an easy nested init
     if asic_dse_conf["sweep_conf_fpath"] != None:
-        ######################################################
-        #  _____      _____ ___ ___   __  __  ___  ___  ___  #
-        # / __\ \    / / __| __| _ \ |  \/  |/ _ \|   \| __| #
-        # \__ \\ \/\/ /| _|| _||  _/ | |\/| | (_) | |) | _|  #
-        # |___/ \_/\_/ |___|___|_|   |_|  |_|\___/|___/|___| #
-        ######################################################                               
-        hammer_flow = rg_ds.HammerFlow() 
-        # common_asic_flow = rg_ds.CommonAsicFlow()
-
-        # If a sweep file is specified with result compile flag, results across sweep points will be compiled
-        # if not asic_dse_conf["compile_results"]:
-        #     mode_inputs["sweep_gen"] = True # generate config, rtl, etc related to sweep config
-        # else:
-        #     mode_inputs["result_parse"] = True # parse results for each sweep point
+        asic_dse_inputs["sweep_conf_fpath"] = asic_dse_conf["sweep_conf_fpath"]
+        
         sweep_config = parse_config(asic_dse_conf["sweep_conf_fpath"], validate_paths = True, sanitize = True)
-
-        # sweep_config = parse_yml_config(asic_dse_conf["design_sweep_config"])
-
-        high_lvl_inputs["sweep_conf_fpath"] = asic_dse_conf["sweep_conf_fpath"]
         
         for design in sweep_config["design_sweeps"]:
             sweep_type_inputs = {} # parameters for a specific type of sweep
             if design["type"] == "sram":
                 # point the base_rtl_path to the default one in the project tree (will be overridden if another value provided in sweep config)
-                sweep_type_inputs["sram_rtl_template_fpath"] = os.path.join ( 
-                    asic_dse_conf["common"].project_tree.search_subtrees("shared_resources.sram_lib.rtl.src", is_hier_tag = True)[0].path,
+                sweep_type_inputs["sram_rtl_template_fpath"] = os.path.join( 
+                    common.project_tree.search_subtrees("shared_resources.sram_lib.rtl.src", is_hier_tag = True)[0].path,
                     "sram_template.sv"
                 )
                 sweep_type_info = init_dataclass(rg_ds.SRAMSweepInfo, design, sweep_type_inputs)
@@ -1637,25 +1689,23 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 if hdl_search_paths:
                     # Is assumed sanitized by the parse_config (ie path exists)
                     rtl_src_dpath = find_common_root_dir(hdl_search_paths)
-                    rtl_dst_tree = asic_dse_conf["common"].project_tree.search_subtrees(f"{asic_dse_conf['common'].project_name}.rtl.src", is_hier_tag = True)[0]
+                    rtl_dst_tree: rg_ds.Tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
                     rtl_dst_tree.scan_dir = True
                     rtl_dst_dpath = rtl_dst_tree.path
                     # Copy tree recursivley to project tree, just including all files assuming they will be part of the RTL we want, possibly could filter for specific files in the future
                     shutil.copytree(rtl_src_dpath, rtl_dst_dpath, dirs_exist_ok=True)
                     rtl_dst_tree.update_tree()
 
-                    # rtl_dst_tree = rg_ds.Tree(rtl_dst_dpath, scan_dir = True)
 
                 # Now get RTL from the synthesis input files, will look through the current RTL src path and if the files already exist will not copy them over
                 rtl_src_fpaths = base_config.get("synthesis.inputs.input_files.input_file")
                 if rtl_src_fpaths:
                     # Search for file recursivley
-                    rtl_dst_tree = asic_dse_conf["common"].project_tree.search_subtrees(f"{asic_dse_conf['common'].project_name}.rtl.src", is_hier_tag = True)[0]
+                    rtl_dst_tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
                     for fpath in rtl_src_fpaths:
                         # If we don't find a matching file in our rtl.src dir we will copy what exists in our conf over
                         if not rec_find_fpath(rtl_dst_tree.path, os.path.basename(fpath)):
                             shutil.copy(fpath, rtl_dst_tree.path)
-
 
                 if design["type"] == "rtl_params":
                     sweep_type_info = init_dataclass(rg_ds.RTLSweepInfo, design, sweep_type_inputs)
@@ -1667,30 +1717,21 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
             # Pass in the parsed sweep config and strip out the "shared" hierarchy tags
             design_sweep_infos.append(init_dataclass(rg_ds.DesignSweepInfo, {**design, **strip_hier(sweep_config , strip_tag="shared")}, design_inputs))
 
-    # Currently only enabling VLSI mode when other modes turned off
-    else:
-        ################################################
-        # \ \ / / |  / __|_ _| |  \/  |/ _ \|   \| __| #
-        #  \ V /| |__\__ \| |  | |\/| | (_) | |) | _|  #
-        #   \_/ |____|___/___| |_|  |_|\___/|___/|___| #
-        ################################################
-        # Initializes Data structures to be used for running stages in ASIC flow
+    #  __   ___    ___ ___   ___ _    _____      _____ 
+    #  \ \ / / |  / __|_ _| | __| |  / _ \ \    / / __|
+    #   \ V /| |__\__ \| |  | _|| |_| (_) \ \/\/ /\__ \
+    #    \_/ |____|___/___| |_| |____\___/ \_/\_/ |___/
 
-        design_sweep_infos = None
-
-
-        if asic_dse_conf["flow_conf_fpaths"] != None:
-
-            # enable asic flow to be run
-            # vlsi_mode_inputs["enable"] = True
-            # vlsi_mode_inputs["flow"] = asic_dse_conf["flow"]
-            # vlsi_mode_inputs["run"] = asic_dse_conf["run"]
-    
-            if asic_dse_mode.vlsi.flow == "custom":
-                hammer_flow = None
-                # Don't want any preprocessing on custom flow
-                # vlsi_mode_inputs["config_pre_proc"] = False
-
+    if asic_dse_mode.vlsi.enable:
+        custom_asic_flow_settings: dict
+        # Hammer Flow
+        if asic_dse_mode.vlsi.flow == "hammer":
+            custom_asic_flow_settings = None
+            asic_dse_conf = get_hammer_flow_conf(common, common_asic_flow, asic_dse_conf)
+        # Custom Flow
+        # TODO move to a defined dataclass 
+        elif asic_dse_mode.vlsi.flow == "custom":
+            if top_lvl_valid:
                 print("WARNING: Custom flow mode requires the following tools:")
                 print("\tSynthesis: Snyopsys Design Compiler")
                 print("\tPlace & Route: Cadence Encounter OR Innovus")
@@ -1703,223 +1744,403 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any]) -> rg_ds.AsicDSE:
                 # Currently the file format allows multiple hardblocks to be speified (from COFFE) but in the task of the ASIC flow, we only allow a single design
                 # Kinda tricky though because the support for multiple hardblocks exists past this point but to also allow for user CLI we would also have
                 # to allow multiple hardblocks to be specified which seems a bit weird at this point
-                top_lvl_module = common_asic_flow.top_lvl_module 
+            else:
+                print("ERROR: input top_lvl_module or hdl_path invalid for custom flow")
+                sys.exit(1)
+    
+    # Hammer Flow
+    hammer_flow: rg_ds.HammerFlow = init_dataclass(
+        rg_ds.HammerFlow,
+        strip_hier(asic_dse_conf, strip_tag="hammer_flow"),
+    )
+    hammer_flow.init(
+        asic_dse_conf["sweep_conf_fpath"],
+        asic_dse_mode.vlsi.flow,
+        asic_dse_conf["tool_env_conf_fpaths"],
+        asic_dse_conf["flow_conf_fpaths"],
+    )
 
-                # modify the project tree after top level module is found
-                design_out_tree_copy = copy.deepcopy(design_out_tree)
-                design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
+    # Top level module init
+    if asic_dse_mode.vlsi.enable:
+        if asic_dse_mode.vlsi.flow == "hammer":
+            if top_lvl_valid:
+                top_lvl_module: str = common_asic_flow.top_lvl_module
+            else:
+                top_lvl_module: str = hammer_flow.hammer_driver.database.get_setting("synthesis.inputs.top_module")
+                # update value in common asic flow to reflect the correct top lvl
+                common_asic_flow.top_lvl_module = top_lvl_module
+        elif asic_dse_mode.vlsi.flow == "custom":
+            if top_lvl_valid:
+                top_lvl_module: str = common_asic_flow.top_lvl_module
+            else:
+                print("ERROR: input top_lvl_module or hdl_path invalid for custom flow")
+                sys.exit(1)
+        
+        # modify the project tree after top level module is found
+        design_out_tree_copy = copy.deepcopy(design_out_tree)
+        design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
+        # Append to project tree
+        common.project_tree.append_tagged_subtree(f"{common.project_name}.outputs", design_out_tree_copy, is_hier_tag = True) # append our asic_dse outputs
+
+
+    # Object dir init
+    if asic_dse_mode.vlsi.enable:
+        obj_dir_path: str = init_obj_dir(common, top_lvl_module)
+        # update value in common to reflect correct obj dir
+        common.obj_dir = obj_dir_path
+        if asic_dse_mode.vlsi.flow == "hammer":
+            hammer_flow.hammer_driver.obj_dir = obj_dir_path # TODO use the common.obj through flow instead of this 
+
+
+
+
+    # update the common asic flow settings that required
+
+
+    # Initialize optional parameters
+    # custom_asic_flow_settings = None
+    
+    # common_asic_flow_inputs = {} # settings common to different modes of asic flow "hammer" vs "custom"
+    # hammer_flow_inputs = {} # asic flow settings
+    # mode_inputs = {} # Set appropriate tool modes
+    # vlsi_mode_inputs = {} # vlsi flow modes
+    # high_lvl_inputs = {} # high level setting parameters (associated with a single invocation of rad_gen from cmd line)
+    # design_sweep_infos = [] # list of design sweep info objects
+    # if asic_dse_conf["sweep_conf_fpath"] != None:
+    #     ######################################################
+    #     #  _____      _____ ___ ___   __  __  ___  ___  ___  #
+    #     # / __\ \    / / __| __| _ \ |  \/  |/ _ \|   \| __| #
+    #     # \__ \\ \/\/ /| _|| _||  _/ | |\/| | (_) | |) | _|  #
+    #     # |___/ \_/\_/ |___|___|_|   |_|  |_|\___/|___/|___| #
+    #     ######################################################                               
+    #     # hammer_flow = rg_ds.HammerFlow() 
+    #     # common_asic_flow = rg_ds.CommonAsicFlow()
+
+    #     # If a sweep file is specified with result compile flag, results across sweep points will be compiled
+    #     # if not asic_dse_conf["compile_results"]:
+    #     #     mode_inputs["sweep_gen"] = True # generate config, rtl, etc related to sweep config
+    #     # else:
+    #     #     mode_inputs["result_parse"] = True # parse results for each sweep point
+    #     sweep_config = parse_config(asic_dse_conf["sweep_conf_fpath"], validate_paths = True, sanitize = True)
+
+    #     # sweep_config = parse_yml_config(asic_dse_conf["design_sweep_config"])
+
+    #     high_lvl_inputs["sweep_conf_fpath"] = asic_dse_conf["sweep_conf_fpath"]
+        
+    #     for design in sweep_config["design_sweeps"]:
+    #         sweep_type_inputs = {} # parameters for a specific type of sweep
+    #         if design["type"] == "sram":
+    #             # point the base_rtl_path to the default one in the project tree (will be overridden if another value provided in sweep config)
+    #             sweep_type_inputs["sram_rtl_template_fpath"] = os.path.join( 
+    #                 common.project_tree.search_subtrees("shared_resources.sram_lib.rtl.src", is_hier_tag = True)[0].path,
+    #                 "sram_template.sv"
+    #             )
+    #             sweep_type_info = init_dataclass(rg_ds.SRAMSweepInfo, design, sweep_type_inputs)
+    #         else:                
+    #             # If we are either doing RTL or VLSI sweep then we should copy over the source RTL to our project tree
+    #             # Check to see if the RTL was passed in via CLI params
+    #             # Priority of getting to RTL + HDL search Paths for RTL
+    #             # 1. Conglomerated CLI/Conf ( asic_dse_conf["flow_conf_fpath"] ) -> sweep_config["base_config_path"] 
+    #             if asic_dse_conf.get("flow_conf_fpaths") and len(asic_dse_conf["flow_conf_fpaths"]) == 1:
+    #                 base_config = parse_config(asic_dse_conf["flow_conf_fpaths"][0])
+    #             else:                
+    #                 base_config = parse_config(design["base_config_path"])
+
+    #             if common_asic_flow.hdl_path:
+    #                 exts = ['.v','.sv','.vhd',".vhdl", ".vh", ".svh"]
+    #                 _, hdl_search_paths = rec_get_flist_of_ext(common_asic_flow.hdl_path, exts)
+    #             else:
+    #                 hdl_search_paths = base_config.get("synthesis.inputs.hdl_search_paths")
+    #             # Priority of Copying RTL from user inputs to project tree
+    #             # 1. Search for RTL inside of user provided HDL search paths 
+    #             #   a. Priority order: CLI -> base_config["synthesis.inputs.hdl_search_paths"] -> base_config["synthesis.inputs.input_files"] if equivalent files we do a diff to make sure they are the same, if not equal we copy them over
+    #             # Priority of HDL search paths:
+    #             # 1. Conglom CLI/Conf (common_asic_flow.hdl_path) -> base_config["synthesis.inputs.hdl_search_paths"]
+    #             if hdl_search_paths:
+    #                 # Is assumed sanitized by the parse_config (ie path exists)
+    #                 rtl_src_dpath = find_common_root_dir(hdl_search_paths)
+    #                 rtl_dst_tree: rg_ds.Tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
+    #                 rtl_dst_tree.scan_dir = True
+    #                 rtl_dst_dpath = rtl_dst_tree.path
+    #                 # Copy tree recursivley to project tree, just including all files assuming they will be part of the RTL we want, possibly could filter for specific files in the future
+    #                 shutil.copytree(rtl_src_dpath, rtl_dst_dpath, dirs_exist_ok=True)
+    #                 rtl_dst_tree.update_tree()
+
+    #                 # rtl_dst_tree = rg_ds.Tree(rtl_dst_dpath, scan_dir = True)
+
+    #             # Now get RTL from the synthesis input files, will look through the current RTL src path and if the files already exist will not copy them over
+    #             rtl_src_fpaths = base_config.get("synthesis.inputs.input_files.input_file")
+    #             if rtl_src_fpaths:
+    #                 # Search for file recursivley
+    #                 rtl_dst_tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
+    #                 for fpath in rtl_src_fpaths:
+    #                     # If we don't find a matching file in our rtl.src dir we will copy what exists in our conf over
+    #                     if not rec_find_fpath(rtl_dst_tree.path, os.path.basename(fpath)):
+    #                         shutil.copy(fpath, rtl_dst_tree.path)
+
+
+    #             if design["type"] == "rtl_params":
+    #                 sweep_type_info = init_dataclass(rg_ds.RTLSweepInfo, design, sweep_type_inputs)
+    #             elif design["type"] == "vlsi_params":
+    #                 sweep_type_info = init_dataclass(rg_ds.VLSISweepInfo, design, sweep_type_inputs)
+            
+    #         design_inputs = {}
+    #         design_inputs["type_info"] = sweep_type_info
+    #         # Pass in the parsed sweep config and strip out the "shared" hierarchy tags
+    #         design_sweep_infos.append(init_dataclass(rg_ds.DesignSweepInfo, {**design, **strip_hier(sweep_config , strip_tag="shared")}, design_inputs))
+
+    # # Currently only enabling VLSI mode when other modes turned off
+    # else:
+    #     ################################################
+    #     # \ \ / / |  / __|_ _| |  \/  |/ _ \|   \| __| #
+    #     #  \ V /| |__\__ \| |  | |\/| | (_) | |) | _|  #
+    #     #   \_/ |____|___/___| |_|  |_|\___/|___/|___| #
+    #     ################################################
+    #     # Initializes Data structures to be used for running stages in ASIC flow
+
+    #     # design_sweep_infos = None
+
+
+    #     if asic_dse_conf["flow_conf_fpaths"] != None:
+
+    #         # enable asic flow to be run
+    #         # vlsi_mode_inputs["enable"] = True
+    #         # vlsi_mode_inputs["flow"] = asic_dse_conf["flow"]
+    #         # vlsi_mode_inputs["run"] = asic_dse_conf["run"]
+    
+    #         if asic_dse_mode.vlsi.flow == "custom":
+    #             hammer_flow = None
+    #             # Don't want any preprocessing on custom flow
+    #             # vlsi_mode_inputs["config_pre_proc"] = False
+
+    #             print("WARNING: Custom flow mode requires the following tools:")
+    #             print("\tSynthesis: Snyopsys Design Compiler")
+    #             print("\tPlace & Route: Cadence Encounter OR Innovus")
+    #             print("\tTiming & Power: Synopsys PrimeTime")
+    #             # If custom flow is enabled there should only be a single config file
+    #             assert len(asic_dse_conf["flow_conf_fpaths"]) == 1, "ERROR: Custom flow mode requires a single config file"
+    #             custom_asic_flow_settings = load_hb_params(clean_path(asic_dse_conf["flow_conf_fpaths"][0]))
+    #             assert len(custom_asic_flow_settings["asic_hardblock_params"]["hardblocks"]) == 1, "ERROR: Custom flow mode requires a single hardblock"
+    #             # TODO either change the custom flow format or assert that there is only a single hardblock in there,
+    #             # Currently the file format allows multiple hardblocks to be speified (from COFFE) but in the task of the ASIC flow, we only allow a single design
+    #             # Kinda tricky though because the support for multiple hardblocks exists past this point but to also allow for user CLI we would also have
+    #             # to allow multiple hardblocks to be specified which seems a bit weird at this point
+    #             top_lvl_module = common_asic_flow.top_lvl_module 
+
+    #             # modify the project tree after top level module is found
+    #             design_out_tree_copy = copy.deepcopy(design_out_tree)
+    #             design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
                 
-                # Append to project tree
-                asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}.outputs", design_out_tree_copy, is_hier_tag = True) # append our asic_dse outputs
+    #             # Append to project tree
+    #             common.project_tree.append_tagged_subtree(f"{common.project_name}.outputs", design_out_tree_copy, is_hier_tag = True) # append our asic_dse outputs
 
 
-            elif asic_dse_mode.vlsi.flow == "hammer":
-                # TODO add global checking for valid paths all input args
-                # If we are in SRAM compiler mode, this means we are only running srams through the flow and thier configs should be at below path
-                if common_asic_flow.flow_stages.sram.run:
-                    proj_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees("shared_resources.sram_lib.configs", is_hier_tag = True)[0] 
-                else:
-                    # search for conf tree below in our project_name dir
-                    proj_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees(f"{asic_dse_conf['common'].project_name}.configs", is_hier_tag = True)[0] 
-                # Before parsing asic flow config we should run them through pre processing to all input files
-                for idx, conf_path in enumerate(asic_dse_conf["flow_conf_fpaths"]):
-                    asic_dse_conf["flow_conf_fpaths"][idx] = init_hammer_config(proj_conf_tree, conf_path)
-                # Search for the shared conf tree in the project tree
-                shared_conf_tree = asic_dse_conf["common"].project_tree.search_subtrees("shared_resources.configs.asic_dse", is_hier_tag = True)[0]
-                # Pre process & validate env config path
-                for idx, conf_path in enumerate(asic_dse_conf["tool_env_conf_fpaths"]):
-                    asic_dse_conf["tool_env_conf_fpaths"][idx] = init_hammer_config(shared_conf_tree, conf_path)
+    #         elif asic_dse_mode.vlsi.flow == "hammer":
+    #             pass
+    #             # TODO add global checking for valid paths all input args
+    #             # If we are in SRAM compiler mode, this means we are only running srams through the flow and thier configs should be at below path
+    #             # if common_asic_flow.flow_stages.sram.run:
+    #             #     proj_conf_tree = common.project_tree.search_subtrees("shared_resources.sram_lib.configs", is_hier_tag = True)[0] 
+    #             # else:
+    #             #     # search for conf tree below in our project_name dir
+    #             #     proj_conf_tree = common.project_tree.search_subtrees(f"{common.project_name}.configs", is_hier_tag = True)[0] 
+    #             # # Before parsing asic flow config we should run them through pre processing to all input files
+    #             # for idx, conf_path in enumerate(asic_dse_conf["flow_conf_fpaths"]):
+    #             #     asic_dse_conf["flow_conf_fpaths"][idx] = init_hammer_config(proj_conf_tree, conf_path)
+    #             # # Search for the shared conf tree in the project tree
+    #             # shared_conf_tree = common.project_tree.search_subtrees("shared_resources.configs.asic_dse", is_hier_tag = True)[0]
+    #             # # Pre process & validate env config path
+    #             # for idx, conf_path in enumerate(asic_dse_conf["tool_env_conf_fpaths"]):
+    #             #     asic_dse_conf["tool_env_conf_fpaths"][idx] = init_hammer_config(shared_conf_tree, conf_path)
 
 
-                # Initialize the hammer tree
-                # hammer_flow_inputs["hammer_tree"] = rg_ds.Tree(  
-                #     asic_dse_conf["common"].hammer_home_path,
-                #     [
-                #         rg_ds.Tree("asic_dse"),
-                #         rg_ds.Tree("coffe"),
-                #         rg_ds.Tree("ic_3d"),
-                #     ]
-                # )
+    #             # Initialize the hammer tree
+    #             # hammer_flow_inputs["hammer_tree"] = rg_ds.Tree(  
+    #             #     asic_dse_conf["common"].hammer_home_path,
+    #             #     [
+    #             #         rg_ds.Tree("asic_dse"),
+    #             #         rg_ds.Tree("coffe"),
+    #             #         rg_ds.Tree("ic_3d"),
+    #             #     ]
+    #             # )
                 
                 
-                # Initialize a Hammer Driver, this will deal with the defaults & will allow us to load & manipulate configs before running hammer flow
-                driver_opts = HammerDriver.get_default_driver_options()
-                # update values
-                driver_opts = driver_opts._replace(environment_configs = list(asic_dse_conf["tool_env_conf_fpaths"]))
-                driver_opts = driver_opts._replace(project_configs = list(asic_dse_conf["flow_conf_fpaths"]))
-                hammer_driver = HammerDriver(driver_opts)
+    #             # Initialize a Hammer Driver, this will deal with the defaults & will allow us to load & manipulate configs before running hammer flow
+    #             # driver_opts = HammerDriver.get_default_driver_options()
+    #             # # update values
+    #             # driver_opts = driver_opts._replace(environment_configs = list(asic_dse_conf["tool_env_conf_fpaths"]))
+    #             # driver_opts = driver_opts._replace(project_configs = list(asic_dse_conf["flow_conf_fpaths"]))
+    #             # hammer_driver = HammerDriver(driver_opts)
 
-                # Instantiating a hammer driver class creates an obj_dir named "obj_dir" in the current directory, as a quick fix we will delete this directory after its created
-                # TODO this should be fixed somewhere
+    #             # Instantiating a hammer driver class creates an obj_dir named "obj_dir" in the current directory, as a quick fix we will delete this directory after its created
+    #             # TODO this should be fixed somewhere
 
-                dummy_obj_dir_path = os.path.join(os.getcwd(),"obj_dir")
-                if os.path.isdir(dummy_obj_dir_path):
-                    # Please be careful changing things here, always scary when you're calling "rm -rf"
-                    shutil.rmtree(dummy_obj_dir_path)
+    #             # dummy_obj_dir_path = os.path.join(os.getcwd(),"obj_dir")
+    #             # if os.path.isdir(dummy_obj_dir_path):
+    #             #     # Please be careful changing things here, always scary when you're calling "rm -rf"
+    #             #     shutil.rmtree(dummy_obj_dir_path)
 
-                # if cli provides a top level module and hdl path, we will modify the provided design config file to use them
-                if common_asic_flow.top_lvl_module != None and common_asic_flow.hdl_path != None:
-                    # vlsi_mode_inputs["config_pre_proc"] = True
-                    top_lvl_module = common_asic_flow.top_lvl_module
-                    # hammer_flow_inputs["common_asic_flow.hdl_path"] = common_asic_flow.hdl_path
-                else:
-                    # vlsi_mode_inputs["config_pre_proc"] = False
-                    top_lvl_module = hammer_driver.database.get_setting("synthesis.inputs.top_module")
-                    # Set the new top lvl module to our struct
-                    common_asic_flow.top_lvl_module = top_lvl_module
+    #             # if cli provides a top level module and hdl path, we will modify the provided design config file to use them
+    #             # if common_asic_flow.top_lvl_module != None and common_asic_flow.hdl_path != None:
+    #             #     # vlsi_mode_inputs["config_pre_proc"] = True
+    #             #     top_lvl_module = common_asic_flow.top_lvl_module
+    #             #     # hammer_flow_inputs["common_asic_flow.hdl_path"] = common_asic_flow.hdl_path
+    #             # else:
+    #             #     # vlsi_mode_inputs["config_pre_proc"] = False
+    #             #     top_lvl_module = hammer_driver.database.get_setting("synthesis.inputs.top_module")
+    #             #     # Set the new top lvl module to our struct
+    #             #     common_asic_flow.top_lvl_module = top_lvl_module
 
-                # modify the project tree after top level module is found
-                design_out_tree_copy = copy.deepcopy(design_out_tree)
-                design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
-                # Append to project tree
-                asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}.outputs", design_out_tree_copy, is_hier_tag = True) # append our asic_dse outputs
+    #             # # modify the project tree after top level module is found
+    #             # design_out_tree_copy = copy.deepcopy(design_out_tree)
+    #             # design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
+    #             # # Append to project tree
+    #             # common.project_tree.append_tagged_subtree(f"{common.project_name}.outputs", design_out_tree_copy, is_hier_tag = True) # append our asic_dse outputs
                 
-                # Create output directory for obj dirs to be created inside of
-                out_dir = asic_dse_conf["common"].project_tree.search_subtrees(f"outputs.{top_lvl_module}.obj_dirs", is_hier_tag = True)[0].path
-                #os.path.join(env_settings.design_output_path, hammer_flow_inputs["common_asic_flow.top_lvl_module"])
-                obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp()}" # Still putting top level mod naming convension on obj_dirs because who knows where they will end up
+    #             # Create output directory for obj dirs to be created inside of
+    #             # out_dir = common.project_tree.search_subtrees(f"outputs.{top_lvl_module}.obj_dirs", is_hier_tag = True)[0].path
+    #             # #os.path.join(env_settings.design_output_path, hammer_flow_inputs["common_asic_flow.top_lvl_module"])
+    #             # obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp()}" # Still putting top level mod naming convension on obj_dirs because who knows where they will end up
                 
-                # Throw error if both obj_dir options are specified
-                assert not (asic_dse_conf["common"].override_outputs and asic_dse_conf["common"].manual_obj_dir != None), "ERROR: cannot use both latest obj dir and manual obj dir arguments for ASIC-DSE subtool"
+    #             # # Throw error if both obj_dir options are specified
+    #             # assert not (common.override_outputs and common.manual_obj_dir != None), "ERROR: cannot use both latest obj dir and manual obj dir arguments for ASIC-DSE subtool"
                 
-                obj_dir_path = None
-                # Users can specify a specific obj directory
-                if asic_dse_conf["common"].manual_obj_dir != None:
-                    obj_dir_path = os.path.realpath(os.path.expanduser(asic_dse_conf["common"].manual_obj_dir))
-                    # if this does not exist create it now
-                    os.makedirs(obj_dir_path, exist_ok = True)
-                # Or they can use the latest created obj dir
-                elif asic_dse_conf["common"].override_outputs:
-                    if os.path.isdir(out_dir):
-                        obj_dir_path = find_newest_obj_dir(search_dir = out_dir, obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
-                    else:
-                        print( f"WARNING: No latest obj dirs found in {out_dir} of format {top_lvl_module}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
-                # If no value given or no obj dir found, we will create a new one
-                if obj_dir_path == None:
-                    obj_dir_path = os.path.join(out_dir,obj_dir_fmt)
-                    print( f"WARNING: No obj dir specified or found, creating new one @: {obj_dir_path}")
+    #             # obj_dir_path = None
+    #             # # Users can specify a specific obj directory
+    #             # if common.manual_obj_dir != None:
+    #             #     obj_dir_path = os.path.realpath(os.path.expanduser(common.manual_obj_dir))
+    #             #     # if this does not exist create it now
+    #             #     os.makedirs(obj_dir_path, exist_ok = True)
+    #             # # Or they can use the latest created obj dir
+    #             # elif common.override_outputs:
+    #             #     if os.path.isdir(out_dir):
+    #             #         obj_dir_path = find_newest_obj_dir(search_dir = out_dir, obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
+    #             #     else:
+    #             #         print( f"WARNING: No latest obj dirs found in {out_dir} of format {top_lvl_module}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
+    #             # # If no value given or no obj dir found, we will create a new one
+    #             # if obj_dir_path == None:
+    #             #     obj_dir_path = os.path.join(out_dir,obj_dir_fmt)
+    #             #     print( f"WARNING: No obj dir specified or found, creating new one @: {obj_dir_path}")
 
-                # This could be either at the same path as next variable or at manual specified location
-                obj_dname = os.path.basename(obj_dir_path)
-                # This will always be at consistent project path
-                project_obj_dpath = os.path.join(out_dir, obj_dname)
+    #             # # This could be either at the same path as next variable or at manual specified location
+    #             # obj_dname = os.path.basename(obj_dir_path)
+    #             # # This will always be at consistent project path
+    #             # project_obj_dpath = os.path.join(out_dir, obj_dname)
                 
-                if asic_dse_conf["common"].manual_obj_dir:
-                    # Check to see if symlink already points to the correct location
-                    if os.path.islink(project_obj_dpath) and os.readlink(project_obj_dpath) == obj_dir_path:
-                        rad_gen_log(f"Symlink already exists @ {project_obj_dpath}", rad_gen_log_fd)
-                    else:
-                        os.symlink(obj_dir_path, project_obj_dpath)
-                    mkdirs = False
-                else:
-                    mkdirs = True
-                # If we don't specify a manual obj directory we can directly append our new obj directory to the project tree to create it + add to data structure
-                # Won't create it if symlink already exists
-                obj_tree = rg_ds.Tree(
-                    path = os.path.basename(obj_dir_path),
-                    tag = "cur_flow_obj_dir" # NAMING CONVENTION FOR OUR ACTIVE OBJ DIRECTORY
-                )
-                asic_dse_conf["common"].project_tree.append_tagged_subtree(
-                    f"{asic_dse_conf['common'].project_name}.outputs.{top_lvl_module}.obj_dirs",
-                    obj_tree,
-                    is_hier_tag = True,
-                    mkdirs = mkdirs
-                )
+    #             # if common.manual_obj_dir:
+    #             #     # Check to see if symlink already points to the correct location
+    #             #     if os.path.islink(project_obj_dpath) and os.readlink(project_obj_dpath) == obj_dir_path:
+    #             #         rad_gen_log(f"Symlink already exists @ {project_obj_dpath}", rad_gen_log_fd)
+    #             #     else:
+    #             #         os.symlink(obj_dir_path, project_obj_dpath)
+    #             #     mkdirs = False
+    #             # else:
+    #             #     mkdirs = True
+    #             # # If we don't specify a manual obj directory we can directly append our new obj directory to the project tree to create it + add to data structure
+    #             # # Won't create it if symlink already exists
+    #             # obj_tree = rg_ds.Tree(
+    #             #     path = os.path.basename(obj_dir_path),
+    #             #     tag = "cur_flow_obj_dir" # NAMING CONVENTION FOR OUR ACTIVE OBJ DIRECTORY
+    #             # )
+    #             # common.project_tree.append_tagged_subtree(
+    #             #     f"{common.project_name}.outputs.{top_lvl_module}.obj_dirs",
+    #             #     obj_tree,
+    #             #     is_hier_tag = True,
+    #             #     mkdirs = mkdirs
+    #             # )
 
-                # else:
-                #     # create directory @ manual location, then create sym link
-                #     os.makedirs(obj_dir_path, exist_ok = True)
-                #     os.symlink()
+    #             # else:
+    #             #     # create directory @ manual location, then create sym link
+    #             #     os.makedirs(obj_dir_path, exist_ok = True)
+    #             #     os.symlink()
 
-                # # TODO move directory creation / destruction to Tree class
-                # if not os.path.isdir(obj_dir_path):
-                #     os.makedirs(obj_dir_path)
-                    # if this was a manually specified path, to be able to find this later we should create a sym link to it inside of our project tree
-                    # if asic_dse_conf["common"].manual_obj_dir != None:
+    #             # # TODO move directory creation / destruction to Tree class
+    #             # if not os.path.isdir(obj_dir_path):
+    #             #     os.makedirs(obj_dir_path)
+    #                 # if this was a manually specified path, to be able to find this later we should create a sym link to it inside of our project tree
+    #                 # if asic_dse_conf["common"].manual_obj_dir != None:
 
                         
 
-                # rad_gen_log(f"Using obj_dir: {obj_dir_path}",rad_gen_log_fd)
+    #             # rad_gen_log(f"Using obj_dir: {obj_dir_path}",rad_gen_log_fd)
 
-                hammer_driver.obj_dir = obj_dir_path
-                # At this point hammer driver should be fully initialized
-                hammer_flow_inputs["hammer_driver"] = hammer_driver
-                # hammer_flow_inputs["obj_dir_path"] = obj_dir_path
+    #             # hammer_driver.obj_dir = obj_dir_path
+    #             # At this point hammer driver should be fully initialized
+    #             # hammer_flow_inputs["hammer_driver"] = hammer_driver
 
-                # if not specified the flow will run all the stages by defualt
-                # run_all_flow = not (asic_dse_conf["synthesis"] or asic_dse_conf["place_n_route"] or asic_dse_conf["primetime"]) and not asic_dse_conf["compile_results"]
+
+    #             # hammer_flow_inputs["obj_dir_path"] = obj_dir_path
+
+    #             # if not specified the flow will run all the stages by defualt
+    #             # run_all_flow = not (asic_dse_conf["synthesis"] or asic_dse_conf["place_n_route"] or asic_dse_conf["primetime"]) and not asic_dse_conf["compile_results"]
                 
-                # TODO implement "flow_stages" element of HammerFlow struct
-                # asic_flow_settings_input["make_build"] = asic_dse_conf["make_build"]
-                # asic_flow_settings_input["run_sram"] = asic_dse_conf["sram_compiler"]
-                # asic_flow_settings_input["run_syn"] = asic_dse_conf["synthesis"] or run_all_flow
-                # asic_flow_settings_input["run_par"] = asic_dse_conf["place_n_route"] or run_all_flow
-                # asic_flow_settings_input["run_pt"] = asic_dse_conf["primetime"] or run_all_flow
+    #             # TODO implement "flow_stages" element of HammerFlow struct
+    #             # asic_flow_settings_input["make_build"] = asic_dse_conf["make_build"]
+    #             # asic_flow_settings_input["run_sram"] = asic_dse_conf["sram_compiler"]
+    #             # asic_flow_settings_input["run_syn"] = asic_dse_conf["synthesis"] or run_all_flow
+    #             # asic_flow_settings_input["run_par"] = asic_dse_conf["place_n_route"] or run_all_flow
+    #             # asic_flow_settings_input["run_pt"] = asic_dse_conf["primetime"] or run_all_flow
 
-                # asic_flow_settings_input["common_asic_flow.top_lvl_module"] = top_lvl_module
+    #             # asic_flow_settings_input["common_asic_flow.top_lvl_module"] = top_lvl_module
 
-                # if "asic_flow" in env_conf.keys():
-                #     config_file_input = env_conf["asic_flow"]
-                # else:
-                #     config_file_input = {}
+    #             # if "asic_flow" in env_conf.keys():
+    #             #     config_file_input = env_conf["asic_flow"]
+    #             # else:
+    #             #     config_file_input = {}
                 
-                # TODO REFACTOR see if we can do less intermediate transfer from asic_dse_conf to asic_flow_settings_input, and just pass asic_dse_conf to below function 
-                hammer_flow = init_dataclass(rg_ds.HammerFlow, {}, hammer_flow_inputs, validate_paths = not asic_dse_mode.vlsi.config_pre_proc )
+    #             # TODO REFACTOR see if we can do less intermediate transfer from asic_dse_conf to asic_flow_settings_input, and just pass asic_dse_conf to below function 
+    #             # hammer_flow = init_dataclass(rg_ds.HammerFlow, {}, hammer_flow_inputs, validate_paths = not asic_dse_mode.vlsi.config_pre_proc )
             
-            # Perform all intiailizations which require "common_asic_flow.top_lvl_module" to be set (Common to both "custom" & "hammer")
-            # high_lvl_inputs["common_asic_flow.top_lvl_module"] = top_lvl_module
+    #         # Perform all intiailizations which require "common_asic_flow.top_lvl_module" to be set (Common to both "custom" & "hammer")
+    #         # high_lvl_inputs["common_asic_flow.top_lvl_module"] = top_lvl_module
 
-            # UNCOMMENT WHEN REFACTORING FOR COMMON ASIC FLOW
-            # common_asic_flow_inputs["common_asic_flow.top_lvl_module"] = top_lvl_module
-            # Don't look in sram db libs if we don't use SRAM in design
-            # common_asic_flow_inputs["db_libs"] = ["sram_db_libs", f"{stdcell_lib.pdk_name}_db_libs"] if asic_dse_conf["sram_compiler"] else [f"{stdcell_lib.pdk_name}_db_libs"]
+    #         # UNCOMMENT WHEN REFACTORING FOR COMMON ASIC FLOW
+    #         # common_asic_flow_inputs["common_asic_flow.top_lvl_module"] = top_lvl_module
+    #         # Don't look in sram db libs if we don't use SRAM in design
+    #         # common_asic_flow_inputs["db_libs"] = ["sram_db_libs", f"{stdcell_lib.pdk_name}_db_libs"] if asic_dse_conf["sram_compiler"] else [f"{stdcell_lib.pdk_name}_db_libs"]
             
-            # common_asic_flow = init_dataclass(rg_ds.CommonAsicFlow, common_asic_flow_inputs)
+    #         # common_asic_flow = init_dataclass(rg_ds.CommonAsicFlow, common_asic_flow_inputs)
 
 
-            # Create copy of output tree (rename to top_lvl_module)
-            # design_out_tree_copy = copy.deepcopy(design_out_tree)
-            # design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
+    #         # Create copy of output tree (rename to top_lvl_module)
+    #         # design_out_tree_copy = copy.deepcopy(design_out_tree)
+    #         # design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
 
-            # design_out_tree_copy.path = top_lvl_module
-            # design_out_tree_copy.tag = top_lvl_module
+    #         # design_out_tree_copy.path = top_lvl_module
+    #         # design_out_tree_copy.tag = top_lvl_module
 
-            # # Append to project tree
-            # asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}.outputs", design_out_tree, is_hier_tag = True) # append our asic_dse outputs
+    #         # # Append to project tree
+    #         # asic_dse_conf["common"].project_tree.append_tagged_subtree(f"{asic_dse_conf['common'].project_name}.outputs", design_out_tree, is_hier_tag = True) # append our asic_dse outputs
             
-            # create the tree for the vlsi outputs (its ok to call multiple times, or if dirs already exist)
-            # asic_dse_conf["common"].project_tree.create_tree()
+    #         # create the tree for the vlsi outputs (its ok to call multiple times, or if dirs already exist)
+    #         # asic_dse_conf["common"].project_tree.create_tree()
 
-        else:
-            print("ERROR: no flow config files provided, cannot run ASIC flow")
-            exit()
+    #     else:
+    #         print("ERROR: no flow config files provided, cannot run ASIC flow")
+    #         exit()
 
     # Initializations common to all modes of asic flow
     design_out_tree_copy = copy.deepcopy(design_out_tree) 
-    high_lvl_inputs["design_out_tree"] = design_out_tree_copy
+    asic_dse_inputs["design_out_tree"] = design_out_tree_copy
     
     # By default set the result search path to the design output path, possibly could be changed in later functions if needed
-    #high_lvl_inputs["result_search_path"] = asic_dse_conf["common"].project_tree.search_subtrees(f'{asic_dse_conf["common"].project_name}.outputs', is_hier_tag = True)[0].path
-    high_lvl_inputs["result_search_path"] = asic_dse_conf["common"].project_tree.search_subtrees(f'projects', is_hier_tag = True)[0].path
+    asic_dse_inputs["result_search_path"] = common.project_tree.search_subtrees(f'projects', is_hier_tag = True)[0].path
 
     # display project tree
-    # asic_dse_conf["common"].project_tree.display_tree()
+    # common.project_tree.display_tree()
 
-    # vlsi = init_dataclass(rg_ds.VLSIMode, vlsi_mode_inputs, {})
-    # rad_gen_mode = init_dataclass(rg_ds.AsicDseMode, mode_inputs, {"vlsi" : vlsi})
-    high_lvl_inputs = {
-        **high_lvl_inputs,
+    asic_dse_inputs = {
+        **asic_dse_inputs,
         "mode": asic_dse_mode,
         "stdcell_lib": stdcell_lib,
         "scripts": scripts,
         "design_sweep_infos": design_sweep_infos,
         "asic_flow_settings": hammer_flow,
         "custom_asic_flow_settings": custom_asic_flow_settings,
-        # "env_settings": env_settings,
         "common_asic_flow": common_asic_flow, 
-        "common": asic_dse_conf["common"],
+        "common": common,
     }
-    asic_dse = init_dataclass(rg_ds.AsicDSE, high_lvl_inputs)
+    asic_dse = init_dataclass(rg_ds.AsicDSE, asic_dse_inputs)
 
     return asic_dse
 
