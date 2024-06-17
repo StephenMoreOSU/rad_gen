@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """@package docstring
 RADGen documentation can be found at https://rad-gen.readthedocs.io/en/latest/
 
@@ -56,6 +58,8 @@ import src.coffe.coffe as coffe
 ##### 3D IC IMPORTS ##### 
 import src.ic_3d.ic_3d as ic_3d
 
+import src.common.constants as consts
+
 
 rad_gen_log_fd = "rad_gen.log"
 log_verbosity = 2
@@ -71,7 +75,7 @@ cur_env = os.environ.copy()
 
 def init_logger():
     # Init Logger
-    logger = logging.getLogger("rad_gen_root")
+    logger = logging.getLogger(consts.LOGGER_NAME)
     
     logger.root.setLevel(logging.DEBUG)
     # Create Stream Handler
@@ -95,7 +99,7 @@ def init_logger():
 # ██║  ██║██║  ██║██████╔╝    ╚██████╔╝███████╗██║ ╚████║    ███████╗██╔╝ ██╗███████╗╚██████╗    ██║ ╚═╝ ██║╚██████╔╝██████╔╝███████╗███████║
 # ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝      ╚═════╝ ╚══════╝╚═╝  ╚═══╝    ╚══════╝╚═╝  ╚═╝╚══════╝ ╚═════╝    ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝
 
-def main(args: Optional[argparse.Namespace] = None) -> Union[None, Any]:
+def main(args: argparse.Namespace | None = None) -> Tuple[ Any | None, rg_ds.Tree]:
     global cur_env
     global rad_gen_log_fd
     global log_verbosity
@@ -108,8 +112,6 @@ def main(args: Optional[argparse.Namespace] = None) -> Union[None, Any]:
     fd.close()
 
     # Parse command line arguments
-    # args = parse_cli_args()
-
     args, default_arg_vals = rg_utils.parse_rad_gen_top_cli_args(args)
 
     # rad_gen_settings = init_structs(args)
@@ -118,23 +120,28 @@ def main(args: Optional[argparse.Namespace] = None) -> Union[None, Any]:
     arg_dict = vars(args)
     # If we want to return initialized data structs for a subtool, just return here
     if arg_dict["common.just_config_init"]:
-        return rad_gen_info
+        return rad_gen_info, list(rad_gen_info.values())[0].common.project_tree
 
     cur_env = os.environ.copy()
 
+    ret_val = None
+    subtool: str = None
     """ Ex. args python3 rad_gen.py -s param_sweep/configs/noc_sweep.yml -c """
     if "asic_dse" in rad_gen_info.keys():
+        subtool = "asic_dse"
         if rad_gen_info["asic_dse"].mode.result_parse:
             asic_dse.compile_results(rad_gen_info["asic_dse"])
         # If a design sweep config file is specified, modify the flow settings for each design in sweep
         elif rad_gen_info["asic_dse"].mode.sweep_gen:
-            asic_dse.design_sweep(rad_gen_info["asic_dse"])
+            ret_val = asic_dse.design_sweep(rad_gen_info["asic_dse"])
         elif rad_gen_info["asic_dse"].mode.vlsi.enable:
             asic_dse.run_asic_flow(rad_gen_info["asic_dse"])
     elif "coffe" in rad_gen_info.keys():
+        subtool = "coffe"
         # COFFE RUN OPTIONS
         coffe.run_coffe_flow(rad_gen_info["coffe"])
     elif "ic_3d" in rad_gen_info.keys():
+        subtool = "ic_3d"
         if rad_gen_info["ic_3d"].args.buffer_dse:
             # ic_3d.run_buffer_dse(rad_gen_info["ic_3d"])
             ic_3d.run_buffer_dse_updated(rad_gen_info["ic_3d"]) 
@@ -152,8 +159,9 @@ def main(args: Optional[argparse.Namespace] = None) -> Union[None, Any]:
             ]
             for sp_process in debug_procs:
                 ic_3d.run_spice_debug(sp_process)
-        
-        
+
+    # Return a tuple of the value returned by whatever task executed and the project tree 
+    return ret_val, rad_gen_info.get(subtool).common.project_tree
 
 
     

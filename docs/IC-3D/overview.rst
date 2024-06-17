@@ -80,5 +80,7 @@ Bibliography
 -----------------------------
 
 `[1]: ASAP7: A 7-nm finFET predictive process design kit <https://www.sciencedirect.com/science/article/pii/S002626921630026X>`_
+
 `[2]: Global Is the New Local: FPGA Architecture at 5nm and Beyond <https://dl.acm.org/doi/pdf/10.1145/3431920.3439300>`_
+
 `[3]: Design Flows and Collateral for the ASAP7 7nm FinFET Predictive Process Design Kit <https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7945071&tag=1>`_

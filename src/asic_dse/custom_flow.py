@@ -2034,7 +2034,7 @@ def parse_parallel_outputs(flow_settings):
   parallel_results_path = os.path.expanduser(flow_settings["parallel_hardblock_folder"])
   #for parsing decimal values in report directories
 
-  valid_rpt_dir_re = re.compile("^dimlen_[0-9]+|\.[0-9]+_ptn$",re.MULTILINE)
+  valid_rpt_dir_re = re.compile(r"^dimlen_[0-9]+|\.[0-9]+_ptn$",re.MULTILINE)
   os.chdir(parallel_results_path)
   results_path = os.getcwd()
   #list containing an output dict for each top level module

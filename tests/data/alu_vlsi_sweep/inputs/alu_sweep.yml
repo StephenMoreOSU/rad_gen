@@ -1,0 +1,23 @@
+
+# shared env configs for all sweeps
+shared:
+  tool_env_conf_fpaths: [ ${RAD_GEN_HOME}/tests/data/asic_dse/env.yml]
+  flow_conf_fpaths: [ ${RAD_GEN_HOME}/tests/data/asic_dse/pdks/asap7.yml, ${RAD_GEN_HOME}/tests/data/asic_dse/cad_tools/cadence_tools.yml]
+
+
+design_sweeps:
+  # base config is the hammer config file which is used as a template for designs which will be swept over
+  - base_config_path: ${RAD_GEN_HOME}/tests/data/alu_vlsi_sweep/inputs/alu_base.yml
+    # These two args are required for each run of hammer flow
+    top_lvl_module: alu_ver
+    hdl_dpath:  ${RAD_GEN_HOME}/unit_tests/inputs/asic_dse/alu/rtl
+    type: "vlsi_params"
+    flow_threads: 2
+    params:
+      {
+        "clk_periods": [0.0, 2.0]
+        # "clocks": [{
+        #   "name": "clk",
+        #   "clk": [0.0, 2.0] # List of periods to sweep over
+        # }]
+      }

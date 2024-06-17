@@ -6,6 +6,12 @@ import json
 
 import argparse
 import yaml
+import copy
+import re
+
+from deepdiff import DeepDiff
+from pprint import pprint
+
 
 from typing import List, Dict, Any, Tuple, Type, NamedTuple, Set, Optional
 
@@ -20,6 +26,9 @@ import src.common.utils as rg_utils
 import subprocess as sp
 
 import multiprocessing as mp
+
+from third_party.hammer.hammer.vlsi.driver import HammerDriver
+
 
 @dataclass
 class Test:
@@ -114,15 +123,6 @@ class TestSuite:
         rg_cli = rg_ds.RadGenCLI()
         rg_cli_fields = rg_cli.get_dataclass_fields()
 
-        
-        # field_defs = [ (name, dtype, field(default_factory=lambda: default)) for name, dtype, default in zip(rg_cli_fields["keys"], rg_cli_fields["dtypes"], rg_cli_fields["defaults"]) ]
-        # Create custom dataclass for RadGenArgs
-        # RadGenArgs = make_dataclass(
-        #     "RadGenArgs", 
-        #     fields = field_defs, 
-        #     bases = (rg_ds.RadGenCLI,)
-        # )
-        
         RadGenArgs = rg_ds.get_dyn_class(
             cls_name = "RadGenArgs",
             fields = rg_cli_fields,
@@ -141,9 +141,6 @@ class TestSuite:
         
         asic_dse_cli = rg_ds.AsicDseCLI()
         asic_dse_fields = asic_dse_cli.get_dataclass_fields()
-        # asic_dse_fields["keys"] += rg_cli_fields["keys"]
-        # asic_dse_fields["dtypes"] += rg_cli_fields["dtypes"]
-        # asic_dse_fields["defaults"] += rg_cli_fields["defaults"]
 
         # Make a custom dataclass for asic dse input arguments
         AsicDseArgs = rg_ds.get_dyn_class(
@@ -151,13 +148,6 @@ class TestSuite:
             fields = asic_dse_fields,
             bases= (rg_ds.AsicDseCLI, ))
         
-
-        # AsicDseArgs = make_dataclass(
-        #     "AsicDseArgs", 
-        #     fields = [ (name, dtype, field(default_factory=lambda: default)) for name, dtype, default in zip(asic_dse_fields["keys"], asic_dse_fields["dtypes"], asic_dse_fields["defaults"]) ], 
-        #     bases = (rg_ds.AsicDseCLI,)
-        # )
-
         if self.alu_tests is None:
             self.alu_tests = []
 
@@ -168,7 +158,7 @@ class TestSuite:
             #   / _ \| |_| |_| |  \ V /| |__\__ \| |  \__ \\ \/\/ /| _|| _||  _/   | | | _|\__ \ | |  
             #  /_/ \_\____\___/    \_/ |____|___/___| |___/ \_/\_/ |___|___|_|     |_| |___|___/ |_|  
 
-            alu_sweep_config = os.path.expanduser(f"{self.asic_dse_inputs}/sweeps/alu_sweep.yml")
+            alu_sweep_config = os.path.expanduser(f"{self.rad_gen_home}/sweeps/alu_sweep.yml")
             # Init the arguments we want to use for this test
             asic_dse_args = AsicDseArgs(
                 sweep_conf_fpath = alu_sweep_config,
@@ -263,7 +253,7 @@ class TestSuite:
                 # top_config_path = self.top_config_path,
                 tool_env_conf_fpaths = [tool_env_conf_path],
                 flow_conf_fpaths = self.sys_configs + [sram_config],
-                sram_compiler = True,
+                common_asic_flow__flow_stages__sram__run = True,
                 # Top level module Is used for logging so we don't want to pass to cli (the correct top level and other configs will be generated from previous test)
                 common_asic_flow__top_lvl_module = top_lvl_mod,
             )
@@ -287,7 +277,7 @@ class TestSuite:
             asic_dse_args = AsicDseArgs(
                 tool_env_conf_fpaths = [tool_env_conf_path],
                 flow_conf_fpaths = self.sys_configs + [sram_compiled_macro_config],
-                sram_compiler = True,
+                common_asic_flow__flow_stages__sram__run = True,
                 common_asic_flow__top_lvl_module = top_lvl_mod,
             )
             sram_compiled_macro_test = RadGenArgs(
@@ -311,7 +301,7 @@ class TestSuite:
 
             noc_sweep_config = os.path.expanduser(f"{self.asic_dse_inputs}/sweeps/noc_sweep.yml")
             asic_dse_args = AsicDseArgs(
-                tool_env_conf_fpath = tool_env_conf_path,
+                # tool_env_conf_fpaths = tool_env_conf_path,
                 sweep_conf_fpath = noc_sweep_config,
             )
             noc_sweep_test = RadGenArgs(
@@ -321,21 +311,26 @@ class TestSuite:
             )
             noc_sweep_test = Test(rad_gen_args=noc_sweep_test, test_name="noc_sweep")
             self.noc_tests.append(noc_sweep_test)
-            # NoC SINGLE ASIC TEST [6]
+
+            #   _  _  ___   ___   _____      _____ ___ ___   ___  ___ ___ _  _ _____    __  _  _   _   __  __ __  __ ___ ___  __  
+            #  | \| |/ _ \ / __| / __\ \    / / __| __| _ \ | _ \/ _ \_ _| \| |_   _|  / / | || | /_\ |  \/  |  \/  | __| _ \ \ \ 
+            #  | .` | (_) | (__  \__ \\ \/\/ /| _|| _||  _/ |  _/ (_) | || .` | | |   | |  | __ |/ _ \| |\/| | |\/| | _||   /  | |
+            #  |_|\_|\___/ \___| |___/ \_/\_/ |___|___|_|   |_|  \___/___|_|\_| |_|   | |  |_||_/_/ \_\_|  |_|_|  |_|___|_|_\  | |
+
             top_lvl_mod = "router_wrap_bk"
             noc_config = os.path.expanduser(f"{self.asic_dse_inputs}/NoC/configs/vcr_config_num_message_classes_5_buffer_size_20_num_nodes_per_router_1_num_dimensions_2_flit_data_width_124_num_vcs_5.yaml")
             asic_dse_args = AsicDseArgs(
-                tool_env_conf_fpath = tool_env_conf_path,
+                tool_env_conf_fpaths = tool_env_conf_path,
                 flow_conf_fpaths = self.sys_configs + [noc_config],
                 common_asic_flow__top_lvl_module = top_lvl_mod,
                 common_asic_flow__hdl_path = os.path.expanduser(f"{self.asic_dse_inputs}/NoC/rtl/src"),
-                manual_obj_dir=os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
             )
-            
             noc_asic_test = RadGenArgs(
                 # top_config_path = self.top_config_path,
+                project_name = "NoC",
                 subtools = ["asic_dse"],
                 subtool_args = asic_dse_args,
+                manual_obj_dir = os.path.join(self.asic_dse_outputs, top_lvl_mod, f"{top_lvl_mod}_{ci_test_obj_dir_suffix}"),
             )
             noc_asic_test = Test(rad_gen_args=noc_asic_test, test_name="noc_hammer_flow")
             self.noc_tests.append(noc_asic_test)
@@ -473,17 +468,29 @@ class TestSuite:
         if self.config_parse_init_tests is None:
             # Careful this isn't copying these tests but putting references
             self.config_parse_init_tests = [
-                *self.alu_tests,
-                *self.sram_tests,
-                *self.noc_tests,
-                *self.coffe_tests,
-                *self.buff_dse_tests,
-                *self.pdn_tests
+                *copy.deepcopy(self.alu_tests),
+                *copy.deepcopy(self.sram_tests),
+                *copy.deepcopy(self.noc_tests),
+                # *copy.deepcopy(self.coffe_tests),
+                # *copy.deepcopy(self.buff_dse_tests),
+                # *copy.deepcopy(self.pdn_tests)
             ]
-            # for test in self.config_parse_init_tests:
-            #     test.rad_gen_args.just_config_init = True
+            for test in self.config_parse_init_tests:
+                test.rad_gen_args.just_config_init = True
             
-
+    def run_alu_vlsi_sweep_test(self, args: argparse.Namespace):
+        alu_sw_test = self.alu_tests[0]
+        cmd_str, sys_args, sys_args_dict = alu_sw_test.rad_gen_args.get_rad_gen_cli_cmd(self.rad_gen_home)        
+        print(f"Running Test {alu_sw_test.test_name}: {cmd_str}\n")
+        # Sweep tests will return a list of rad_gen_args which are drivers for the sweeps just generated
+        if not args.just_print:
+            rad_gen_args = argparse.Namespace(**sys_args_dict)
+            rg_sw_drivers = rg.main(rad_gen_args)
+            # Run the first sweep point (0 MHz Target Freq)
+            alu_sw_pt = rg_sw_drivers[0]
+            alu_sw_pt.get_rad_gen_cli_cmd(self.rad_gen_home)
+            
+            
 
 
 
@@ -604,7 +611,11 @@ def dict_diff(d1, d2, path=""):
 def parse_args() -> argparse.Namespace:
     top_lvl_parser = argparse.ArgumentParser(description="RADGen CI Test Suite")
     top_lvl_parser.add_argument("-p", "--just_print",  help="Don't execute test just print commands to console, this parses & compares results if they already exist", action='store_true')
-    #subtools_group = top_lvl_parser.add_argument_group("Subtool Selection", "Select which subtools to run tests for")
+    gen_gold_msg: str = (
+        "Runs tests and overrides current golden results"
+        "WARNING: DESTRUCTIVE ACTION backup your golden results files if they are not version controlled"
+    )
+    top_lvl_parser.add_argument("-g", "--gen_golden", help = gen_gold_msg, action = 'store_true')    
     top_lvl_parser.add_argument("-conf", "--config_parse_init",  help="Run Configuration Parsing / Init Tests", action='store_true')
     top_lvl_parser.add_argument("-ic_3d", "--ic_3d",  help="Run IC 3D tests", action='store_true')
     top_lvl_parser.add_argument("-coffe", "--coffe",  help="Run COFFE test", action='store_true')
@@ -612,7 +623,6 @@ def parse_args() -> argparse.Namespace:
     top_lvl_parser.add_argument("-alu", "--alu",  help="Run ALU tests", action='store_true')
     top_lvl_parser.add_argument("-sram", "--sram",  help="Run SRAM tests", action='store_true')
     top_lvl_parser.add_argument("-noc", "--noc",  help="Run NoC tests", action='store_true')
-    # top_lvl_parser.add_argument_group("Subtool Tests", "Select which subtool tests to run")
     top_lvl_parser.add_argument("-pdn", "--pdn_modeling",  help="Run PDN modeling test", action='store_true')
     top_lvl_parser.add_argument("-buff_dse", "--buff_dse_modeling",  help="Run Buff DSE test", action='store_true')
     top_lvl_parser.add_argument("-buff_sens", "--buff_sens_study",  help="Run Buffer Sensitivity test", action='store_true')
@@ -626,29 +636,46 @@ class EnhancedJSONEncoder(json.JSONEncoder):
             return dataclasses.asdict(obj)
         return super().default(obj)
 
-def rec_convert_dataclass_to_dict(obj):
+def rec_convert_dataclass_to_dict(obj, key: str = None):
     """
         Converts a dict / dataclass of nested dicts / dataclasses into a dictionary object
     """
-    if dataclasses.is_dataclass(obj):
-        return {k: rec_convert_dataclass_to_dict(v) for k, v in dataclasses.asdict(obj).items()}
+    # Checks if its a type we should skip
+    skip_tup = (HammerDriver,)
+    if isinstance(obj, skip_tup):
+        return None
+    elif dataclasses.is_dataclass(obj):
+        try:
+            # If there is a module that's not serializable we will convert manually instead
+            return {k: rec_convert_dataclass_to_dict(v, k) for k, v in dataclasses.asdict(obj).items()}
+        except: 
+            # manually traversing the dataclass fields
+            result = {}
+            for field in dataclasses.fields(obj):
+                field_val = getattr(obj, field.name)
+                result[field.name] = rec_convert_dataclass_to_dict(field_val, field.name)
+            return result
+
     elif isinstance(obj, list):
-        return [rec_convert_dataclass_to_dict(i) for i in obj]
+        return [rec_convert_dataclass_to_dict(i, key) for i in obj]
     elif isinstance(obj, dict):
-        return {k: rec_convert_dataclass_to_dict(v) for k, v in obj.items()}
+        return {k: rec_convert_dataclass_to_dict(v, k) for k, v in obj.items()}
     # checks if instance is any primitive type, if its not then its a non dataclass class so we have to ignore for now
     elif not isinstance(obj, (str, int, float, bool)) and obj is not None:
         return None
+    # Case for exporting paths so tests can be non system specific
+    elif isinstance(obj, str) and key != None and 'path' in key:
+        return obj.replace(os.path.expanduser('~'), '~')
     else:
         return obj
 
 
-
-
-def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], subtool: str, result_path: str = None, golden_ref_path: str = None):
-    golden_ref_base_path = os.path.expanduser( os.path.join(rad_gen_home, "unit_tests", "golden_results", subtool) )
+def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], result_path: str = None, golden_ref_path: str = None):
     
     for idx, test in enumerate(tests):
+        # TODO this won't work if multiple subtools specified but seems kinda like it should be changed to a single subtool
+        subtool: str = test.rad_gen_args.subtools[0] 
+        golden_ref_base_path = os.path.expanduser( os.path.join(rad_gen_home, "unit_tests", "golden_results", subtool) )
         cmd_str, sys_args, sys_args_dict = test.rad_gen_args.get_rad_gen_cli_cmd(rad_gen_home)        
         print(f"Running Test {test.test_name}: {cmd_str}\n")
         if not args.just_print:
@@ -656,11 +683,65 @@ def run_tests(args: argparse.Namespace, rad_gen_home: str, tests: List[Test], su
             rad_gen_args = argparse.Namespace(**sys_args_dict)
             ret_val = rg.main(rad_gen_args)
             if sys_args_dict.get("just_config_init"):
-                # Now we compare the return value from the config initialization with some golden reference for this test
-                json_text = json.dumps(rec_convert_dataclass_to_dict(ret_val), cls=EnhancedJSONEncoder, indent=4)
-                with open(os.path.join(golden_ref_base_path, f"{test.test_name}_init.json"), "w") as f:
-                    f.write(json_text)
-                exit()
+                golden_conf_fpath = os.path.join(golden_ref_base_path, f"{test.test_name}_init.json")
+                if args.gen_golden:
+                    # Now we compare the return value from the config initialization with some golden reference for this test
+                    json_text = json.dumps(rec_convert_dataclass_to_dict(ret_val), cls=EnhancedJSONEncoder, indent=4)
+                    with open(golden_conf_fpath,"w") as f:
+                        f.write(json_text)
+                else:
+                    # Compare results against what's in golden ref files
+                    if rg_utils.check_for_valid_path(golden_conf_fpath):
+                        golden_conf = json.load(open(golden_conf_fpath, "r"))
+                        test_conf = rec_convert_dataclass_to_dict(ret_val)
+                        # Use the DeepDict library to compare the two dictionaries in detail
+                        ddiff = DeepDiff(test_conf, golden_conf, ignore_order=True, verbose_level = 2)
+                        conf_diff_hdr = rg_utils.create_bordered_str(f"TEST {test.test_name} Initial Data Structure Report")
+                        print('\n'.join(conf_diff_hdr))
+                        col_width = 50
+                        # diff_cols = f"{'Test_Key':<{col_width}}{'Golden_Key':<{col_width}}{'Test_Value':<{col_width}}{'Golden_Value':<{col_width}}{'Diff':<{col_width}}"
+                        na_ele = f"{'N/A':<{col_width}}"
+                        # If there are any differences iterate over them
+                        if ddiff:
+                            hier_key_re = re.compile(r"(?<=')\w+(?=')")
+                            # Any values exist in golden but not in test?
+                            items_added_dict: dict = ddiff.get("dictionary_item_added")
+                            if items_added_dict:
+                                golden_added_subhdr = rg_utils.create_bordered_str("GOLDEN Key : Value pairs not found in TEST")
+                                print(golden_added_subhdr[1])
+                                diff_cols = f"{'Key':<{col_width}}{'Value':<{col_width}}"
+                                print(diff_cols)
+                                for k, v in items_added_dict.items():
+                                    hier_key = '.'.join( hier_key_re.findall(k) )
+                                    row = f"{hier_key:<{col_width}}{v:<{col_width}}"
+                                    print(row)
+                            # Any values exist in test but not in golden?
+                            items_removed_dict: dict = ddiff.get("dictionary_item_removed")
+                            if items_removed_dict:
+                                items_removed_subhdr = rg_utils.create_bordered_str("TEST Key : Value pairs not found in GOLDEN")
+                                print(items_removed_subhdr[1])
+                                diff_cols = f"{'Key':<{col_width}}{'Value':<{col_width}}"
+                                print(diff_cols)
+                                for k, v in items_removed_dict.items():
+                                    hier_key = '.'.join( hier_key_re.findall(k) )
+                                    row = f"{hier_key:<{col_width}}{v:<{col_width}}"
+                                    print(row)
+                            # Any values exist in both but are different?
+                            items_changed_dict: dict = ddiff.get("values_changed")
+                            if items_changed_dict:
+                                items_changed_subhdr = rg_utils.create_bordered_str("Differences")
+                                print(items_changed_subhdr[1])
+                                diff_cols = f"{'Key':<{col_width}}{'Test Value':<{col_width}}{'Golden Value':<{col_width}}"
+                                print(diff_cols)
+                                for k, v in items_changed_dict.items():
+                                    hier_key = '.'.join( hier_key_re.findall(k) )
+                                    row = f"{hier_key:<{col_width}}{v['old_value']:<{col_width}}{v['new_value']:<{col_width}}"
+                                    print(row)
+                            
+
+                            
+
+
         
         out_csv_path = None
         # Parse result and compare
@@ -736,9 +817,9 @@ def main():
 
 
 
-    # if args.config_parse_init:
-    #     print("Running Configuration Parsing / Init Tests\n")
-    #     run_tests(args, test_suite.rad_gen_home, test_suite.config_parse_init_tests, "config_parse_init", golden_ref_path = test_suite.golden_ref_path)
+    if args.config_parse_init:
+        print("Running Configuration Parsing / Init Tests\n")
+        run_tests(args, test_suite.rad_gen_home, test_suite.config_parse_init_tests, golden_ref_path = test_suite.golden_ref_path)
 
     # and not args.buff_dse_modeling
     run_all = True if not args.asic_dse and not args.coffe and not args.ic_3d and not args.alu and not args.noc else False
@@ -746,16 +827,16 @@ def main():
     # ASIC DSE SWEEP TESTS
     if args.asic_dse_sweeps:
         print("Running ASIC DSE sweeps tests\n")
-        run_tests(args, test_suite.rad_gen_home, test_suite.asic_dse_sweep_tests, "asic_dse")
+        run_tests(args, test_suite.rad_gen_home, test_suite.asic_dse_sweep_tests)
     if args.alu:
         print("Running ALU tests\n")
-        run_tests(args, test_suite.rad_gen_home, test_suite.alu_tests, "asic_dse")
+        run_tests(args, test_suite.rad_gen_home, test_suite.alu_tests)
     if args.sram:
         print("Running SRAM tests\n")
-        run_tests(args, test_suite.rad_gen_home, test_suite.sram_tests, "asic_dse")
+        run_tests(args, test_suite.rad_gen_home, test_suite.sram_tests)
     if args.noc:
         print("Running NoC tests\n")
-        run_tests(args, test_suite.rad_gen_home, test_suite.noc_tests, "asic_dse")
+        run_tests(args, test_suite.rad_gen_home, test_suite.noc_tests)
 
 
 
@@ -775,7 +856,7 @@ def main():
 
     if args.coffe:
         print("Running COFFE tests\n")
-        run_tests(args, test_suite.rad_gen_home, test_suite.coffe_tests, "coffe")
+        run_tests(args, test_suite.rad_gen_home, test_suite.coffe_tests)
     
     # if run_all or args.pdn_modeling:
     #     print("Running PDN modeling tests\n")
@@ -783,10 +864,10 @@ def main():
         
     if args.buff_dse_modeling:
         print("Running Buffer DSE tests\n")
-        run_tests(args, test_suite.rad_gen_home, test_suite.buff_dse_tests, "ic_3d")
+        run_tests(args, test_suite.rad_gen_home, test_suite.buff_dse_tests)
     if args.buff_sens_study:
         print("Running Buffer Sensitivity tests\n")
-        run_tests(args, test_suite.rad_gen_home, test_suite.buff_sens_tests, "ic_3d")
+        run_tests(args, test_suite.rad_gen_home, test_suite.buff_sens_tests)
 
 
     # print("Running IC 3D tests\n")

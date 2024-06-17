@@ -24,9 +24,12 @@ import plotly.express as px
 import math
 from itertools import combinations
 
+import src.common.constants as consts
+
 # Constants
 CLI_HIER_KEY = "."
 STRUCT_HIER_KEY = "__"
+
 
 
 # ██████╗  █████╗ ██████╗        ██████╗ ███████╗███╗   ██╗
@@ -89,21 +92,21 @@ class Regexes:
         Stores all regexes used in various placed in RAD Gen, its more convenient to have them all in one place
     """
     wspace_re: Pattern = re.compile(r"\s+")
-    find_params_re: Pattern = re.compile(f"parameter\s+\w+(\s|=)+.*;")
-    find_defines_re: Pattern = re.compile(f"`define\s+\w+\s+.*")
-    grab_bw_soft_bkt: Pattern = re.compile(f"\(.*\)")
+    find_params_re: Pattern = re.compile(r"parameter\s+\w+(\s|=)+.*;")
+    find_defines_re: Pattern = re.compile(r"`define\s+\w+\s+.*")
+    grab_bw_soft_bkt: Pattern = re.compile(r"\(.*\)")
     
-    find_localparam_re: Pattern = re.compile(f"localparam\s+\w+(\s|=)+.*?;",re.MULTILINE|re.DOTALL)
-    first_eq_re: Pattern = re.compile("\s=\s")
-    find_soft_brkt_chars_re: Pattern = re.compile(f"\(|\)", re.MULTILINE)
+    find_localparam_re: Pattern = re.compile(r"localparam\s+\w+(\s|=)+.*?;", re.MULTILINE|re.DOTALL)
+    first_eq_re: Pattern = re.compile(r"\s=\s")
+    find_soft_brkt_chars_re: Pattern = re.compile(r"\(|\)", re.MULTILINE)
 
-    find_verilog_fn_re: Pattern = re.compile(f"function.*?function", re.MULTILINE|re.DOTALL)
-    grab_verilog_fn_args: Pattern = re.compile(f"\(.*?\)",re.MULTILINE|re.DOTALL)
-    find_verilog_fn_hdr: Pattern = re.compile("<=?")
+    find_verilog_fn_re: Pattern = re.compile(r"function.*?function", re.MULTILINE|re.DOTALL)
+    grab_verilog_fn_args: Pattern = re.compile(r"\(.*?\)", re.MULTILINE|re.DOTALL)
+    find_verilog_fn_hdr: Pattern = re.compile(r"<=?")
 
-    decimal_re: Pattern = re.compile("\d+\.{0,1}\d*",re.MULTILINE)
-    signed_dec_re: Pattern = re.compile("\-{0,1}\d+\.{0,1}\d*",re.MULTILINE)
-    sci_not_dec_re: Pattern = re.compile("\-{0,1}\d+\.{0,1}\d*[eE]{0,1}\-{0,1}\d+",re.MULTILINE)
+    decimal_re: Pattern = re.compile(r"\d+\.{0,1}\d*", re.MULTILINE)
+    signed_dec_re: Pattern = re.compile(r"\-{0,1}\d+\.{0,1}\d*", re.MULTILINE)
+    sci_not_dec_re: Pattern = re.compile(r"\-{0,1}\d+\.{0,1}\d*[eE]{0,1}\-{0,1}\d+", re.MULTILINE)
 
     # IC 3D
     int_re : re.Pattern = re.compile(r"[0-9]+", re.MULTILINE)
@@ -234,12 +237,7 @@ class Tree:
     
         Tags for parent trees apply to subtrees like so:
             parent_tag/subtree_tag
-
-        Tags:
-            - obj : object directory
-            - 
     """
-
 
     def __init__(self, path: str, subtrees: List['Tree'] = None, tag: str = None, scan_dir: bool = False):
         self.path : Union[str, None] = path
@@ -251,7 +249,6 @@ class Tree:
         self.scan_dir: bool = scan_dir # If true will scan the directory path and add any subdirectories to the tree
         # self.exts: Union[List[str], None] = None # List of file extensions which are searched for in this tree
 
-
         # Set is_leaf flag
         if self.subtrees == None:
             self.is_leaf = True
@@ -261,6 +258,7 @@ class Tree:
         # if tag not provided just use dir name
         if self.tag == None:
             self.tag = self.basename
+            self.heir_tag = self.tag
 
     def append_subtree(self, subtree: 'Tree'):
         # update the subtree paths to reflect its new placement
@@ -320,7 +318,9 @@ class Tree:
 
             if parent.heir_tag:
                 self.heir_tag = f"{parent.heir_tag}.{self.tag}" if self.tag else parent.tag
-
+        
+        if self.scan_dir:
+            self.rec_add_existing_subtrees()
 
         if self.subtrees and self.path:
             for subdir in self.subtrees:
@@ -350,12 +350,13 @@ class Tree:
             print(path.displayable())
 
     def search_subtrees(self, target_tag: str, target_depth: int = None, is_hier_tag = False):
-        result = []
-        self._search_subtrees(target_tag, target_depth, 0, is_hier_tag, result)
-        if not result:
-            # self.print_tree()
+        results: list = []
+        self._search_subtrees(target_tag, target_depth, 0, is_hier_tag, results)
+        if not results:
             raise Exception(f"Tag {target_tag} not found in tree")
-        return result
+        # Sort result by length of each of thier hier_tags (shortest first)
+        results = sorted(results, key = lambda x: len(x.heir_tag.split(".")))
+        return results
 
     def _search_subtrees(self, target_tag, target_depth, current_depth, is_hier_tag, result):
         # set search tag
@@ -368,7 +369,9 @@ class Tree:
                 if found_tag == target_tag:
                     result.append(self)
             else:
-                if target_tag in found_tag:
+                if found_tag is None:
+                    raise Exception(f"Found tag is None in tree, current results: {result}")
+                elif target_tag in found_tag:
                     result.append(self)
 
         if self.subtrees and (target_depth == None or current_depth < target_depth):
@@ -400,9 +403,9 @@ class Tree:
             This updates the data structure and creates a new directory
         """
         # find subtree in question
-        found_subtree = self.search_subtrees(tag, is_hier_tag = is_hier_tag)[0]
+        found_subtree: Tree = self.search_subtrees(tag, is_hier_tag = is_hier_tag)[0]
         # update the subtree paths to reflect its new placement
-        subtree.update_tree(parent = found_subtree )
+        subtree.update_tree(parent = found_subtree)
         if found_subtree:
             if found_subtree.subtrees:
                 found_subtree.subtrees.append(subtree)
@@ -415,31 +418,7 @@ class Tree:
                 found_subtree.create_tree()
         else:
             raise Exception(f"Tag {tag} not found in tree")
-
-    # def replace_tagged_subtree(self, tag: str, subtree: 'Tree'):
-    #     if len(self.search_subtrees(tag)) > 0:
-    #         self.search_subtrees(tag)[0] = subtree
-    #     else:
-    #         raise Exception(f"Tag {tag} not found in tree")        
-
-
-    # def get_leafs(self):
-    #     if self.is_leaf:
-    #         return [self]
-    #     else:
-    #         leaves = []
-    #         for subtree in self.subtrees:
-    #             leaves += subtree.get_leafs()
-    #         return leaves
-        
-
-        
-        # update list of leaves if anything was changed since construction
-        # self.leaves = self.get_leafs()
-        # Create the tree by iterating over all leaf paths (makedirs will make all directories to the target)
-        # for leaf in self.leaves:
-        #     # os.makedirs(leaf.path, exist_ok = True)
-        #     print(leaf.path)        
+      
 
 
 # Accessing the directory structure like a dictionary
@@ -494,19 +473,20 @@ def add_arg(parser: argparse.ArgumentParser, cli_opt: GeneralCLI):
 class Common:
 
     # All user input fields which exist in a dynamic dataclass, and originate from CommonCLI
-    args: Any = None 
+    # TODO remove comment or integrate this
+    # args: Any = None 
 
     # Args 
     override_outputs: bool = False # If true will override any files which already exist in the output directory
     manual_obj_dir: str = None # If set will use this as the object directory for the current run
+
     # Paths
     rad_gen_home_path: str = None
     hammer_home_path: str = None
-    hammer_tech_path: str = None
-    # openram_home_path: str = None
+
     # Logging
-    log_fpath: str = f"rad-gen-{create_timestamp()}.log" # path to log file for current RAD Gen run
-    logger: logging.Logger = logging.getLogger(log_fpath) # logger for RAD Gen
+    logger: logging.Logger = logging.getLogger(consts.LOGGER_NAME) # logger for RAD Gen
+    
     # Verbosity level
     # 0 - Brief output
     # 1 - Brief output + I/O + command line access
@@ -519,16 +499,15 @@ class Common:
     project_tree: Tree = None
     project_name: str = None # Name of the RAD-Gen project
     
+    # TODO figure out if this is needed
     # Sram Compiler Tree (put here because could be used for different tools)
     # sram_tree: Tree = None
 
-    # Name of the PDK we're "creating" for this run, because different subtools can manipulate the PDK, this name is more for seperating  
+    # TODO uncomment and integrate through flow
+    # Name of the PDK we're "creating" for this run, because different subtools can manipulate the PDK, 
+    # this name is more for the user to use a unique name that is the combination of thier input PDK parameters  
     # (maybe use metal stack, maybe use different tx for model cards and stdcells and do some scaling to match them up)
-    pdk_name: str = None
-
-    # ASIC-DSE
-    # Dir structure collateral
-
+    # pdk_name: str = None
 
     # Global regex struct
     res: Regexes = field(default_factory = Regexes)
@@ -538,6 +517,9 @@ class Common:
 
 
 class MetaDataclass(type):
+    # name - name of the class being defined
+    # bases - base classes for constructed class
+    # namespace - dict with methods and fields defined in class  
     fields_dtypes = {}
     fields_defaults = {}
 
@@ -563,11 +545,6 @@ class ParentCLI:
     _defaults: Dict[str, Any] = None # key, default_val pairs for all fields in this dataclass
 
     def __post_init__(self):
-        # Post inits required for structs that use other struct values as inputs and cannot be clearly defined
-        # Call factory defaults to generate the default values for the dataclass
-        # for field in fields(self):
-        #     if field.default_factory != MISSING:
-        #         setattr(self, field.name, field.default_factory())
         # If cli_args still not generated we use the arg_definitions to generate them
         if self.cli_args == None and self.arg_definitions != None:
             self.cli_args = [ GeneralCLI(**arg_dict) for arg_dict in self.arg_definitions ]
@@ -595,12 +572,10 @@ class ParentCLI:
         for key, dtype in self._fields.items():
             keys.append(key)
             dtypes.append(dtype)
+            # default key to hash dict is the hierarchical definition with the "." seperated syntax
             default_key: str = key.replace(STRUCT_HIER_KEY, CLI_HIER_KEY)
             defaults.append(self._defaults[default_key])
 
-        # keys = list(self._fields.keys())
-        # dtypes = list(self._fields.values())
-        # defaults = list(self._defaults.values())
         # A behavior that is convenient is to be able to instantiate the dataclass with the same fields as the cli_args, which can store all operation modes for a subtool
         if not is_cli:
             # All statically defined fields in the original dataclass added here
@@ -627,7 +602,7 @@ def dyn_dataclass_init(self, **kwargs):
     for field_name, field_default_val in self.__dataclass_fields_defaults__.items():
         if field_name not in set_fields:
             setattr(self, field_name, field_default_val)
-# fields: Dict[str, List[Any]],
+
 def get_dyn_class(cls_name: str, fields: Dict[str, List[Any]],  bases: Tuple[Any] = None):
     fields_dtypes = dict(zip(fields["keys"], fields["dtypes"]))
     fields_defaults = dict(zip(fields["keys"], fields["defaults"]))
@@ -639,9 +614,9 @@ def get_dyn_class(cls_name: str, fields: Dict[str, List[Any]],  bases: Tuple[Any
     bases_arg = () if bases == None else bases
 
     return MetaDataclass(cls_name, bases_arg, 
-                       {"__annotations__": fields_dtypes, #+ base_fields["dtypes"], 
-                        "__dataclass_fields_defaults__": fields_defaults, #+ base_fields["defaults"],
-                        "__dataclass_fields__": fields_dtypes.keys(), #+ base_fields["keys"],
+                       {"__annotations__": fields_dtypes, 
+                        "__dataclass_fields_defaults__": fields_defaults, 
+                        "__dataclass_fields__": fields_dtypes.keys(), 
                         "__init__": dyn_dataclass_init})
     
 
@@ -659,16 +634,7 @@ class RadGenCLI(ParentCLI):
                    default_val = "custom_pdk"),
         GeneralCLI(key = "just_config_init", datatype = bool, action = "store_true", help_msg = "Flag to return initialized data structures for whatever subtool is used, without running anything")
         
-        # GeneralCLI(key = "input_tree_top_path", shortcut = "-itree", datatype = str, help_msg = "path to top level dir containing input designs", default_val = os.path.expanduser(f"{os.environ['RAD_GEN_HOME']}/unit_tests/inputs")),
-        # GeneralCLI(key = "output_tree_top_path", shortcut = "-otree", datatype = str, help_msg = "path to top level dir which outputs will be produced into, will have a subdir for each subtool", default_val = os.path.expanduser(f"{os.environ['RAD_GEN_HOME']}/unit_tests/outputs")),
     ])
-    # arg_definitions: List[Dict[str, Any]] = field(default_factory = lambda: [ 
-    #     {"key": "top_config_path", 
-    #         "shortcut": "-tc", "datatype": str, "help_msg": "path to (optional) RAD-GEN top level config file"},
-
-    #     {"key": "subtools",
-    #         "shortcut": "-st", "datatype": str, "nargs": "*", "help_msg": "subtool to run"},
-    # ])
 
     subtool_args: Any = None # Options would be the cli classes for each subtool
     no_use_arg_list: List[str] = None # list of arguments which should not be used in the command line interface
@@ -794,27 +760,20 @@ class AsicDseCLI(ParentCLI):
         GeneralCLI(key = "common_asic_flow.flow_stages.build.run", shortcut = "-build", datatype = bool, action = "store_true", help_msg = "<UNDER DEV> Generates a makefile to manage flow dependencies and execution"),
         GeneralCLI(key = "common_asic_flow.flow_stages.build.tool", datatype = str, default_val= "hammer", help_msg = "<UNDER DEV>"),
         GeneralCLI(key = "common_asic_flow.flow_stages.build.tag", datatype = str, default_val= "build", help_msg = "<UNDER DEV>"),
-
         
         GeneralCLI(key = "common_asic_flow.flow_stages.sram.run", shortcut = "-sram", datatype = bool, action = "store_true", help_msg = "Flag that must be provided if sram macros exist in design (ASIC-DSE)"),
         GeneralCLI(key = "common_asic_flow.flow_stages.syn.run", shortcut = "-syn", datatype = bool, action = "store_true", help_msg = "Flag to run synthesis"),
         GeneralCLI(key = "common_asic_flow.flow_stages.par.run", shortcut = "-par", datatype = bool, action = "store_true", help_msg = "Flag to run place & route"),
         GeneralCLI(key = "common_asic_flow.flow_stages.pt.run", shortcut = "-pt", datatype = bool, action = "store_true", help_msg = "Flag to run primetime (timing & power)"),
         
-
-
-        
-        # TODO DUPLICATE figure out how to deal with this data structure being the same as the 'top_lvl_module' data strucutre described above
-        # really both cli args send the information to the same endpoint, making the 'top_lvl_module' a sort of shortcut 
         
         # args for HammerFlow data struct, this should really be changed to HammerFlowSettings as its hammer specific
         # TODO move this to the filename path or dir tree structure
         GeneralCLI(key = "hammer_flow.cli_driver_bpath", datatype = str, help_msg = "path to hammer driver executable"),
         
         # asic_flow_settings.hammer_driver is a class unable to be defined in CLI
-        # TODO DUPLICATE same as 'hdl_path' above
-        # GeneralCLI(key = "asic_flow_settings.hdl_path", datatype = str, help_msg = "NOT USABLE: Path to directory containing hdl files"),
-        
+        # TODO remove or integrate below lines
+        # Reason for not being integrated already is because they are set in factory default  
         # SRAMCompilerSettings
         # GeneralCLI(key = "sram_compiler_settings.rtl_out_dpath", datatype = str, help_msg = "Path to output directory for RTL files generated by SRAM compiler"),
         # GeneralCLI(key = "sram_compiler_settings.config_out_dpath", datatype = str, help_msg = "Path to output directory for config files generated by SRAM compiler"),
@@ -834,21 +793,6 @@ AsicDseArgs = get_dyn_class(
 )
 
 
-"""
-@dataclass
-class AsicDse(metaclass = AsicDseMeta):
-    # cli args will be added to this dataclass from the cli_init function
-    @classmethod
-    def cli_init(cls, args: List[GeneralCLI], **kwargs):
-        # Create a dictionary with field names and values
-        field_dict = {field.key: field.default_val for field in args}
-
-        # Add provided keyword arguments to the dictionary
-        field_dict.update(kwargs)
-
-        # Create an instance of AsicDseCLI with the combined field values
-        return cls(**field_dict)
-"""
 
 
 
@@ -869,21 +813,20 @@ class VLSIMode:
 
     def init(
             self, 
-            sweep_conf_fpath: str,
-            flow_conf_fpaths: List[str],
-            top_lvl_module: str,
-            hdl_path: str,
+            sweep_conf_valid: bool,
+            flow_conf_valid: bool,
+            top_lvl_valid: bool,
     ):
         """
             Uses dependancies from inside + outside the dataclass to determine values for fields
             not defined as __post_init__ as I want to call it when I please
         """
-        if flow_conf_fpaths != None and sweep_conf_fpath == None:
+        if flow_conf_valid and not sweep_conf_valid:
             self.enable = True
             if self.flow == "custom":
                 self.config_pre_proc = True
             elif self.flow == "hammer":
-                if top_lvl_module != None and hdl_path != None:
+                if top_lvl_valid:
                     self.config_pre_proc = True
                 else:
                     self.config_pre_proc = False
@@ -909,11 +852,11 @@ class AsicDseMode:
 
     def init(
             self,
-            sweep_conf_fpath: str, 
+            sweep_conf_valid: bool, 
             compile_results: bool,
     ):
         # If in sweep mode
-        if sweep_conf_fpath != None:
+        if sweep_conf_valid:
             # If result flat not set we generate sweeps
             if not compile_results:
                 self.sweep_gen = True
@@ -996,6 +939,7 @@ class DesignSweepInfo:
     """
     base_config_path: str # path to hammer config of design
     top_lvl_module: str = None # top level module of design
+    hdl_dpath: str = None # path to directory containing hdl files for design
     # rtl_dir_path: str = None # path to directory containing rtl files for design, files can be in subdirectories
     type: str = None # options are "sram", "rtl_params" or "vlsi_params" TODO this could be instead determined by searching through parameters acceptable to hammer IR
     flow_threads: int = 1 # number of vlsi runs which will be executed in parallel (in terms of sweep parameters)
@@ -1049,14 +993,19 @@ class FlowStages:
         default_factory = lambda: FlowStage(
             tag = "pt", run = False, tool = "synopsys")
     )
-    def init(self):
+    def init(self, only_parse_flag: bool):
         run_all_flow: bool = not (
             self.syn.run or self.par.run or self.pt.run
-        )
+        ) and not only_parse_flag
         if run_all_flow:
             self.syn.run = True
             self.par.run = True
             self.pt.run = True
+        elif only_parse_flag:
+            self.syn.run = False
+            self.par.run = False
+            self.pt.run = False
+        
 
 
 
@@ -1073,10 +1022,6 @@ class HammerFlow:
     cli_driver_bpath: str = None # path to hammer driver
     hammer_driver: HammerDriver = None # hammer settings
 
-    def __post_init__(self):
-        if self.cli_driver_bpath is None:
-            # the hammer-vlsi exec should point to default cli driver in hammer repo if everything installed correctly
-            self.cli_driver_bpath = "hammer-vlsi"
 
     def init(
             self,
@@ -1093,24 +1038,25 @@ class HammerFlow:
             # We are in hammer flow mode
             flow == "hammer"
         )
-        if hammer_flow_enable and self.hammer_driver is None:
-            # Make sure we are in the correct mode to initialize our hammer stuff
-            # Initialize a Hammer Driver, this will deal with the defaults & will allow us to load & manipulate configs before running hammer flow
-            driver_opts = HammerDriver.get_default_driver_options()
-            # update values
-            driver_opts = driver_opts._replace(environment_configs = tool_env_conf_fpaths)
-            driver_opts = driver_opts._replace(project_configs = flow_conf_fpaths)
-            self.hammer_driver = HammerDriver(driver_opts)
+        if hammer_flow_enable:
+            if self.hammer_driver is None:
+                # Make sure we are in the correct mode to initialize our hammer stuff
+                # Initialize a Hammer Driver, this will deal with the defaults & will allow us to load & manipulate configs before running hammer flow
+                driver_opts = HammerDriver.get_default_driver_options()
+                # update values
+                driver_opts = driver_opts._replace(environment_configs = tool_env_conf_fpaths)
+                driver_opts = driver_opts._replace(project_configs = flow_conf_fpaths)
+                self.hammer_driver = HammerDriver(driver_opts)
 
-            # Instantiating a hammer driver class creates an obj_dir named "obj_dir" in the current directory, as a quick fix we will delete this directory after its created
-            # TODO this should be fixed somewhere
-            dummy_obj_dir_path = os.path.join(os.getcwd(),"obj_dir")
-            if os.path.isdir(dummy_obj_dir_path):
-                # Please be careful changing things here, always scary when you're calling "rm -rf"
-                shutil.rmtree(dummy_obj_dir_path)
-        if hammer_flow_enable and self.cli_driver_bpath is None:
-            # the hammer-vlsi exec should point to default cli driver in hammer repo if everything installed correctly
-            self.cli_driver_bpath = "hammer-vlsi"
+                # Instantiating a hammer driver class creates an obj_dir named "obj_dir" in the current directory, as a quick fix we will delete this directory after its created
+                # TODO this should be fixed somewhere
+                dummy_obj_dir_path = os.path.join(os.getcwd(),"obj_dir")
+                if os.path.isdir(dummy_obj_dir_path):
+                    # Please be careful changing things here, always scary when you're calling "rm -rf"
+                    shutil.rmtree(dummy_obj_dir_path)
+            if self.cli_driver_bpath is None:
+                # the hammer-vlsi exec should point to default cli driver in hammer repo if everything installed correctly
+                self.cli_driver_bpath = "hammer-vlsi"
 
 
 

@@ -1,0 +1,1 @@
+LOGGER_NAME = "rad_gen_root"
