@@ -16,18 +16,6 @@ import pytest
 import pandas as pd
 import copy
 
-#   ___ ___    _   __  __   ___ _____ ___ _____ ___ _  _ ___ ___    __  __   _   ___ ___  ___     ___ ___ _  _ 
-#  / __| _ \  /_\ |  \/  | / __|_   _|_ _|_   _/ __| || | __|   \  |  \/  | /_\ / __| _ \/ _ \   / __| __| \| |
-#  \__ \   / / _ \| |\/| | \__ \ | |  | |  | || (__| __ | _|| |) | | |\/| |/ _ \ (__|   / (_) | | (_ | _|| .` |
-#  |___/_|_\/_/ \_\_|  |_| |___/ |_| |___| |_| \___|_||_|___|___/  |_|  |_/_/ \_\___|_|_\\___/   \___|___|_|\_|
-
-
-#   ___ ___    _   __  __   ___ ___ _  _  ___ _    ___   __  __   _   ___ ___  ___  
-#  / __| _ \  /_\ |  \/  | / __|_ _| \| |/ __| |  | __| |  \/  | /_\ / __| _ \/ _ \ 
-#  \__ \   / / _ \| |\/| | \__ \| || .` | (_ | |__| _|  | |\/| |/ _ \ (__|   / (_) |
-#  |___/_|_\/_/ \_\_|  |_| |___/___|_|\_|\___|____|___| |_|  |_/_/ \_\___|_|_\\___/ 
-
-
 
 @pytest.fixture
 def sram_gen() -> rg_ds.RadGenArgs:
@@ -55,20 +43,10 @@ def sram_gen() -> rg_ds.RadGenArgs:
 
 @pytest.fixture
 def sram_gen_output(sram_gen: rg_ds.RadGenArgs) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree]:
-    """
-        Runs the SRAM configs + RTL generation
-        Returns:
-            The list of drivers for running flows based on generated configs
-            RAD-Gen project tree
-    """
-    rg_home: str = os.environ.get("RAD_GEN_HOME")
+    return tests_common.run_sweep(sram_gen)
 
-    sw_pt_args_list: List[rg_ds.RadGenArgs]
-    proj_tree: rg_ds.Tree
-
-    sw_pt_args_list, proj_tree = driver.run_rad_gen(sram_gen, rg_home)
-    return sw_pt_args_list, proj_tree
-
+@pytest.mark.sram
+@pytest.mark.asic_sweep
 def test_sram_gen(sram_gen_output):
     proj_tree: rg_ds.Tree
     _, proj_tree = sram_gen_output
@@ -98,16 +76,19 @@ def test_sram_gen(sram_gen_output):
     assert os.path.exists(rtl_gen_fpath), f"SRAM RTL file {rtl_gen_fpath} does not exist"
 
 
+#   ___ ___    _   __  __   ___ ___ _  _  ___ _    ___   __  __   _   ___ ___  ___  
+#  / __| _ \  /_\ |  \/  | / __|_ _| \| |/ __| |  | __| |  \/  | /_\ / __| _ \/ _ \ 
+#  \__ \   / / _ \| |\/| | \__ \| || .` | (_ | |__| _|  | |\/| |/ _ \ (__|   / (_) |
+#  |___/_|_\/_/ \_\_|  |_| |___/___|_|\_|\___|____|___| |_|  |_/_/ \_\___|_|_\\___/ 
+
+@pytest.mark.sram
+@pytest.mark.asic_flow
 def test_single_macro_asic_flow(sram_gen_output):
     rg_home: str = os.environ.get("RAD_GEN_HOME")
     proj_tree: rg_ds.Tree
     sw_pt_args_list, proj_tree = sram_gen_output
     # Get general flow inputs (CAD tools / PDK)
-    tests_tree = tests_common.init_tests_tree()
-    test_grp_name: str = os.path.splitext( os.path.basename(__file__).replace('test_',''))[0]
-    test_name: str = tests_common.get_current_function_name().replace('test_', '')
-    test_out_dpath: str = tests_tree.search_subtrees(f"tests.data.{test_grp_name}.outputs", is_hier_tag=True)[0].path 
-    assert os.path.exists(test_out_dpath), f"Output path {test_out_dpath} does not exist"
+    tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = tests_common.get_test_info()
 
     asic_dse_inputs_dpath: str = tests_tree.search_subtrees(f"tests.data.asic_dse", is_hier_tag = True)[0].path
     tool_env_conf_fpath = os.path.join(asic_dse_inputs_dpath, "env.yml")
@@ -137,12 +118,16 @@ def test_single_macro_asic_flow(sram_gen_output):
         subtools = ["asic_dse"],
         subtool_args = asic_dse_args,
     )
-    driver.run_rad_gen(rg_sram_macro_args, rg_home)
+    tests_common.run_rad_gen(rg_sram_macro_args, rg_home)
 
     golden_results_dpath = tests_tree.search_subtrees(f"tests.data.{test_grp_name}.golden_results.{test_name}", is_hier_tag=True)[0].path
     for stage in ["syn", "par", "timing", "power", "final"]:
         tests_common.verify_flow_stage(macro_obj_dir, golden_results_dpath, stage)
 
+#   ___ ___    _   __  __   ___ _____ ___ _____ ___ _  _ ___ ___    __  __   _   ___ ___  ___  
+#  / __| _ \  /_\ |  \/  | / __|_   _|_ _|_   _/ __| || | __|   \  |  \/  | /_\ / __| _ \/ _ \ 
+#  \__ \   / / _ \| |\/| | \__ \ | |  | |  | || (__| __ | _|| |) | | |\/| |/ _ \ (__|   / (_) |
+#  |___/_|_\/_/ \_\_|  |_| |___/ |_| |___| |_| \___|_||_|___|___/  |_|  |_/_/ \_\___|_|_\\___/ 
 
 def test_stitched_macro_asic_flow(hammer_flow_template):
     tests_tree: rg_ds.Tree
@@ -167,7 +152,7 @@ def test_stitched_macro_asic_flow(hammer_flow_template):
     rg_stitched_macro_flow_args.project_name = "sram"
     rg_stitched_macro_flow_args.subtool_args = subtool_args
 
-    driver.run_rad_gen(rg_stitched_macro_flow_args, rg_home)
+    tests_common.run_rad_gen(rg_stitched_macro_flow_args, rg_home)
     golden_results_dpath = tests_tree.search_subtrees(f"tests.data.{test_grp_name}.golden_results.{test_name}", is_hier_tag=True)[0].path
     for stage in ["syn", "par", "timing", "power", "final"]:
         tests_common.verify_flow_stage(manual_obj_dpath, golden_results_dpath, stage)
