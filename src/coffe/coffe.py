@@ -22,7 +22,6 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     is_size_transistors = not coffe_info.no_sizing
     size_hb_interfaces = coffe_info.size_hb_interfaces
 
-
     # Path to output telemetry file
     telemetry_file_path = os.path.join(arch_folder, "telemetry.csv")
     # Print the options to both terminal and report file
@@ -49,11 +48,6 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
 
     # Create an FPGA instance
     fpga_inst = fpga.FPGA(coffe_info, args, spice_interface, telemetry_file_path)   
-    #     coffe_info = coffe_info,
-    #     run_options = args,
-    #     spice_interface = spice_interface
-    # )
-        #coffe_info, args, spice_interface) #, telemetry_file_path)                 
     
     ###############################################################
     ## GENERATE FILES
@@ -70,7 +64,7 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
 
     # Extract initial transistor sizes from file and overwrite the 
     # default initial sizes if this option was used.
-    if coffe_info.initial_sizes != None: #"default" :
+    if coffe_info.initial_sizes != None:
         utils.use_initial_tran_size(args.initial_sizes, fpga_inst, tran_sizing, coffe_info.fpga_arch_conf["fpga_arch_params"]['use_tgate'])
 
     # Print FPGA implementation details

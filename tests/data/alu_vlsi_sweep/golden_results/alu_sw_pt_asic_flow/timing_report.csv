@@ -1,2 +1,2 @@
 Target Freq,Slack,Delay,Timing SRC,Top Level Inst,Total Area,Area SRC,Total Power,Power SRC,GDS Area
-0 ns,-508.0,509.0,pt,router_wrap_bk,146951.937,par,2.0784,pt,22831.9920045
+0.0 ns,-158.569,154.969,par,alu_ver,1455.201,par,0.0890056,par,340.833654

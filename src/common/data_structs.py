@@ -633,7 +633,7 @@ class RadGenCLI(ParentCLI):
                    If using the asic_dse tool, then the below parameter will be overrided by the stdcell_lib name in the asic_dse config",
                    default_val = "custom_pdk"),
         GeneralCLI(key = "just_config_init", datatype = bool, action = "store_true", help_msg = "Flag to return initialized data structures for whatever subtool is used, without running anything")
-        
+        # TODO implement compile results flag here to apply to all tools
     ])
 
     subtool_args: Any = None # Options would be the cli classes for each subtool

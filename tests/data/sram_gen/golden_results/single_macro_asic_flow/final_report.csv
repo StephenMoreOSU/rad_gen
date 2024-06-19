@@ -1,0 +1,2 @@
+Target Freq,Slack,Delay,Timing SRC,Top Level Inst,Total Area,Area SRC,Total Power,Power SRC,GDS Area,SRAM Macros,SRAM LEF Areas
+0.0 ns,-130.05,131.05,pt,SRAM2RW128x32_wrapper,4621.625,par,0.0786,pt,2192.790046,SRAM2RW128x32,3715.3320959999996

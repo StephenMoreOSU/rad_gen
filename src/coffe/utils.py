@@ -1045,8 +1045,8 @@ def load_run_params(filename):
     run_flow_stages = ["synth","pnr","sta"]
     per_flow_blocks = ["param_filters"]
     param_block_begin_str = "begin"
-    begin_res = [re.compile(".*"+flow_stage+"\s+"+param_block_begin_str+".*") for flow_stage in run_flow_stages]
-    sub_begin_res = [re.compile(".*"+per_flow_block+"\s+"+param_block_begin_str+".*") for per_flow_block in per_flow_blocks]
+    begin_res = [re.compile(".*"+flow_stage+r"\s+"+param_block_begin_str+".*") for flow_stage in run_flow_stages]
+    sub_begin_res = [re.compile(".*"+per_flow_block+r"\s+"+param_block_begin_str+".*") for per_flow_block in per_flow_blocks]
     end_re = re.compile(".*end.*")
     # end_res = [re.compile(".*"+flow_stage+"\s+"+param_block_end_str+".*") for flow_stage in run_flow_stages]
     fd = open(filename,"r")
@@ -1135,7 +1135,7 @@ def parse_ptn_param_line(line):
     #if there are any lists in the parsed_line we can make them into a sublist for convenience
     updated_parsed_line = []
     #all characters matching below regex are removed from the line
-    list_clean_re = re.compile("\[|\]|\s")
+    list_clean_re = re.compile(r"\[|\]|\s")
     gen_clean_re = re.compile("\"")
     for subline in parsed_line:
         #remove the hard brackets, quotes and spaces from the line
@@ -1166,9 +1166,9 @@ def load_ptn_params(filename):
         "mod_name": "",
         "fp_coords": []
     }
-    top_settings_re = re.compile(".*top_settings\s+begin.*")
-    ptn_begin_re = re.compile(".*ptn\s+begin.*")
-    ptn_end_re = re.compile(".*end.*")
+    top_settings_re = re.compile(r".*top_settings\s+begin.*")
+    ptn_begin_re = re.compile(r".*ptn\s+begin.*")
+    ptn_end_re = re.compile(r".*end.*")
     fd = open(os.path.expanduser(filename),"r")
     ptn_params_text = fd.read()
     ptn_params_list = ptn_params_text.split("\n")

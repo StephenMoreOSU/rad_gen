@@ -148,6 +148,9 @@ def run_verif_hammer_asic_flow(
 ):
     tests_tree: rg_ds.Tree
     tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = get_test_info(stack_lvl = 3)
+    # Unique case for parse tests, we want to make sure we still parse the golden results correctly and compare with asic flow
+    if "parse" in test_name:
+        test_name = test_name.replace("parse", "asic_flow")
     dummy_hammer_flow_args, template_proj_tree = hammer_flow_template
     if proj_tree is None:
         proj_tree = template_proj_tree

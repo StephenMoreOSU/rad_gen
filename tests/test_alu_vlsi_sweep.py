@@ -144,7 +144,6 @@ def test_alu_sw_pt_parse(hammer_flow_template):
         top_lvl_module = top_lvl_module,
         design_conf_fpath = alu_conf_fpath,
         subtool_fields = st_fields,
-        verif_flag = False,
     )
     
 
