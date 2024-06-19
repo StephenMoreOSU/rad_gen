@@ -56,7 +56,7 @@ def hammer_flow_template() -> Tuple[rg_ds.RadGenArgs, rg_ds.Tree]:
         manual_obj_dir = manual_obj_dpath,
         just_config_init = True,
     )
-    _, proj_tree = driver.run_rad_gen(dummy_asic_flow_args, rg_home)
+    _, proj_tree = tests_common.run_rad_gen(dummy_asic_flow_args, rg_home)
     # Removing unneeded arguments from the dummy run 
 
     # Get the dummy flow paths and remove the flow conf with 'dummy' in the name (still keeping cad_tools & pdk)
@@ -75,4 +75,3 @@ def hammer_flow_template() -> Tuple[rg_ds.RadGenArgs, rg_ds.Tree]:
     dummy_asic_flow_args.subtool_args.common_asic_flow__flow_stages__pt__run = True
 
     return dummy_asic_flow_args, proj_tree
-

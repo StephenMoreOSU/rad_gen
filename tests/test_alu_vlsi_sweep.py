@@ -113,7 +113,7 @@ def test_alu_sw_pt_asic_flow(hammer_flow_template):
     ][0]
 
     tests_common.run_verif_hammer_asic_flow(
-        hammer_flow_template,
+        hammer_flow_template = hammer_flow_template,
         proj_name = proj_name,
         top_lvl_module = top_lvl_module,
         design_conf_fpath = alu_conf_fpath,
@@ -139,7 +139,7 @@ def test_alu_sw_pt_parse(hammer_flow_template):
         "compile_results": True,
     }
     tests_common.run_verif_hammer_asic_flow(
-        hammer_flow_template,
+        hammer_flow_template = hammer_flow_template,
         proj_name = proj_name,
         top_lvl_module = top_lvl_module,
         design_conf_fpath = alu_conf_fpath,
