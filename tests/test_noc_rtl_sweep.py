@@ -11,6 +11,9 @@ import src.common.utils as rg_utils
 import tests.common.driver as driver
 import tests.common.common as tests_common
 
+import tests.conftest as conftest
+from tests.conftest import skip_if_fixtures_only
+
 import pytest
 
 import pandas as pd
@@ -19,7 +22,7 @@ import copy
 from collections import OrderedDict
 
 
-@pytest.fixture
+@pytest.fixture()
 def noc_rtl_sweep() -> rg_ds.RadGenArgs:
     """
         Returns:
@@ -44,9 +47,23 @@ def noc_rtl_sweep() -> rg_ds.RadGenArgs:
         subtools = ["asic_dse"],
         subtool_args = asic_dse_args,
     )
+    tests_common.write_fixture_json(noc_sweep_args)
     return noc_sweep_args
 
-@pytest.fixture
+noc_rtl_sweep_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'noc_rtl_sweep',
+    fixture_type = 'conf_init',
+)
+
+@pytest.mark.noc
+@pytest.mark.asic_sweep
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_noc_rtl_sweep_conf_init(noc_rtl_sweep_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(noc_rtl_sweep_conf_init_tb)
+
+
+@pytest.fixture()
 def noc_rtl_sweep_output(noc_rtl_sweep) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree]:
     """
         Runs the NoC configs + RTL generation
@@ -56,10 +73,11 @@ def noc_rtl_sweep_output(noc_rtl_sweep) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.T
     """
     return tests_common.run_sweep(noc_rtl_sweep)
 
-@pytest.fixture
+
+@pytest.fixture()
 def get_sw_info(noc_rtl_sweep_output) -> Tuple[List[str], List[str]]:
     proj_tree: rg_ds.Tree
-    _, proj_tree = noc_rtl_sweep_output
+    _, proj_tree, _ = noc_rtl_sweep_output
 
     param_hdr_dname: str = "param_sweep_headers"
     conf_gen_dpath: str = proj_tree.search_subtrees("projects.NoC.configs.gen", is_hier_tag = True)[0].path
@@ -103,18 +121,18 @@ def get_sw_info(noc_rtl_sweep_output) -> Tuple[List[str], List[str]]:
 
 @pytest.mark.noc
 @pytest.mark.asic_sweep
-def test_noc_rtl_sweep(get_sw_info):
+@skip_if_fixtures_only
+def test_noc_rtl_sweep(get_sw_info, request):
     conf_fpaths, rtl_param_fpaths = get_sw_info
     for conf_fpath, rtl_param_fpath in zip(conf_fpaths, rtl_param_fpaths):
         assert os.path.exists(conf_fpath), f"Configuration file {conf_fpath} does not exist"
         assert os.path.exists(rtl_param_fpath), f"RTL parameter file {rtl_param_fpath} does not exist"
 
-@pytest.mark.noc
-@pytest.mark.asic_flow
-def test_noc_sw_pt_asic_flow(
-    hammer_flow_template, 
-    get_sw_info
-):
+@pytest.fixture()
+def noc_sw_pt_asic_flow_tb(
+    hammer_flow_template,
+    get_sw_info,
+) -> rg_ds.RadGenArgs:
     conf_fpaths, _ = get_sw_info
     # We create a project tree by scanning the dir structure of the projects dir
     # We do this rather than getting it from the hammer_flow_template because project trees from specific flows 
@@ -133,52 +151,60 @@ def test_noc_sw_pt_asic_flow(
         "common_asic_flow__hdl_path": noc_rtl_src_dpath,
         "common_asic_flow__top_lvl_module": top_lvl_module,
     } 
-    tests_common.run_verif_hammer_asic_flow(
+    rg_args = tests_common.gen_hammer_flow_rg_args(
         hammer_flow_template = hammer_flow_template,
         proj_name = "NoC",
         top_lvl_module = top_lvl_module,
         design_conf_fpath = noc_conf_fpath,
         subtool_fields = subtool_fields,
-        proj_tree = proj_tree,
+        # proj_tree = proj_tree,
     )
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+noc_sw_pt_asic_flow_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'noc_sw_pt_asic_flow_tb',
+    fixture_type = 'conf_init',
+)
+
+@pytest.mark.noc
+@pytest.mark.asic_flow
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_noc_sw_pt_asic_flow_conf_init(noc_sw_pt_asic_flow_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(noc_sw_pt_asic_flow_conf_init_tb)
+
+
+@pytest.mark.noc
+@pytest.mark.asic_flow
+@skip_if_fixtures_only
+def test_noc_sw_pt_asic_flow(noc_sw_pt_asic_flow_tb, request):
+    tests_common.run_verif_hammer_asic_flow(rg_args = noc_sw_pt_asic_flow_tb)
+
+
+@pytest.fixture()
+def noc_sw_pt_parse_tb(noc_sw_pt_asic_flow_tb) -> rg_ds.RadGenArgs:
+    rg_args = copy.deepcopy(noc_sw_pt_asic_flow_tb)
+    rg_args.subtool_args.compile_results = True
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+noc_sw_pt_parse_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'noc_sw_pt_parse_tb',
+    fixture_type = 'conf_init',
+)
+
+@pytest.mark.noc
+@pytest.mark.asic_flow
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_noc_sw_pt_parse_conf_init(noc_sw_pt_parse_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(noc_sw_pt_parse_conf_init_tb)
 
 
 @pytest.mark.noc
 @pytest.mark.parse
-def test_noc_sw_pt_parse(
-    hammer_flow_template, 
-    get_sw_info
-):
-    conf_fpaths, _ = get_sw_info
-    # We create a project tree by scanning the dir structure of the projects dir
-    # We do this rather than getting it from the hammer_flow_template because project trees from specific flows 
-    # are subsets of the total directories that exist in rad_gen
-    proj_tree: rg_ds.Tree
-    proj_tree = tests_common.init_scan_proj_tree() 
-    min_rt_idx: int = 0 # We assume minimum runtime index is 0 
-    # Inputs
-    top_lvl_module: str = "router_wrap_bk"
-    noc_conf_fpath = conf_fpaths[min_rt_idx]
-    noc_rtl_src_dpath = proj_tree.search_subtrees(
-        "projects.NoC.rtl.src",
-        is_hier_tag = True,
-    )[0].path
-    subtool_fields: dict = {
-        "common_asic_flow__hdl_path": noc_rtl_src_dpath,
-        "common_asic_flow__top_lvl_module": top_lvl_module,
-        "compile_results": True,
-    } 
-    tests_common.run_verif_hammer_asic_flow(
-        hammer_flow_template = hammer_flow_template,
-        proj_name = "NoC",
-        top_lvl_module = top_lvl_module,
-        design_conf_fpath = noc_conf_fpath,
-        subtool_fields = subtool_fields,
-        proj_tree = proj_tree,
-    )
-
-
-
-
-
+@skip_if_fixtures_only
+def test_noc_sw_pt_parse(noc_sw_pt_parse_tb, request):
+    tests_common.run_verif_hammer_asic_flow(rg_args = noc_sw_pt_parse_tb)
 

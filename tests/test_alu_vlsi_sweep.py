@@ -11,10 +11,16 @@ import src.common.utils as rg_utils
 import tests.common.driver as driver
 import tests.common.common as tests_common
 
+import tests.conftest as conftest
+from tests.conftest import skip_if_fixtures_only
+
 import pytest
 import pandas as pd
 from collections import OrderedDict
 import copy
+
+import json
+import re
 
 """
 Notes on testing infrastructure:
@@ -33,13 +39,12 @@ Notes on testing infrastructure:
 #   / _ \| |_| |_| |  \ V /| |__\__ \| |  \__ \\ \/\/ /| _|| _||  _/   | | | _|\__ \ | |  
 #  /_/ \_\____\___/    \_/ |____|___/___| |___/ \_/\_/ |___|___|_|     |_| |___|___/ |_| 
 
-@pytest.fixture
+@pytest.fixture()
 def alu_vlsi_sweep() -> rg_ds.RadGenArgs:
-    tests_tree = tests_common.init_tests_tree()
+    tests_tree, test_grp_name, fixture_name, fixture_out_fpath = tests_common.get_fixture_info()
     # Naming convension of directory for a particular test file is the name of the file without "test_" prefix
-    test_name: str = os.path.splitext( os.path.basename(__file__).replace('test_',''))[0]
     asic_dse_inputs_dpath: str = tests_tree.search_subtrees(f"tests.data.asic_dse", is_hier_tag = True)[0].path
-    cur_test_input_dpath: str = tests_tree.search_subtrees(f"tests.data.{test_name}.inputs", is_hier_tag = True)[0].path
+    cur_test_input_dpath: str = tests_tree.search_subtrees(f"tests.data.{test_grp_name}.inputs", is_hier_tag = True)[0].path
     # Inputs 
     tool_env_conf_fpath = os.path.join(asic_dse_inputs_dpath, "env.yml")
     alu_sweep_conf_fpath = os.path.join(cur_test_input_dpath, "alu_sweep.yml")
@@ -55,19 +60,38 @@ def alu_vlsi_sweep() -> rg_ds.RadGenArgs:
         subtools = ["asic_dse"],
         subtool_args = asic_dse_args,
     )
-    return alu_sweep_args #, test_data_dpath
+    # Dump the args to json named after this fixture
+    tests_common.dataclass_2_json(alu_sweep_args, fixture_out_fpath)
+    return alu_sweep_args 
 
 @pytest.fixture
-def alu_vlsi_sweep_output(alu_vlsi_sweep: rg_ds.RadGenArgs) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree]:
+def alu_vlsi_sweep_gen_tb(alu_vlsi_sweep: rg_ds.RadGenArgs) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree]:
     return tests_common.run_sweep(alu_vlsi_sweep)
+
+alu_vlsi_sweep_init_conf_tb = conftest.create_rg_fixture(
+    input_fixture = 'alu_vlsi_sweep',
+    fixture_type = 'conf_init',
+)
+
+# Naming of this test is important
+# notice how we are not reaching for the alu_vlsi_sweep_gen_tb but rather for the alu_vlsi_sweep testbench
+# This is because that testbench is the one that provides the sweep json
+@pytest.mark.alu
+@pytest.mark.asic_sweep
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_alu_vlsi_sweep_gen_conf_init(alu_vlsi_sweep_init_conf_tb, request):
+    tests_common.run_and_verif_conf_init(alu_vlsi_sweep_init_conf_tb)
+
 
 @pytest.mark.alu
 @pytest.mark.asic_sweep
-def test_alu_vlsi_sweep_gen(alu_vlsi_sweep_output):
+@skip_if_fixtures_only
+def test_alu_vlsi_sweep_gen(alu_vlsi_sweep_gen_tb, request):
     # BELOW ARE ASSUMPTIONS THAT WILL BE CHANGED IF THE SWEEP CONFIG FILE CHANGES
     # THEY AFFECT ASSERTIONS!
     proj_tree: rg_ds.Tree
-    _, proj_tree = alu_vlsi_sweep_output
+    _, proj_tree, _ = alu_vlsi_sweep_gen_tb
 
     # TODO find a way to get this information from the sweep generation itself?
     # Assumptions from input sweep config file
@@ -96,9 +120,8 @@ def test_alu_vlsi_sweep_gen(alu_vlsi_sweep_output):
     for gen_conf_fpath in gen_conf_fpaths:
         assert os.path.exists(gen_conf_fpath), f"Generated config file {gen_conf_fpath} does not exist"
 
-@pytest.mark.alu
-@pytest.mark.asic_flow
-def test_alu_sw_pt_asic_flow(hammer_flow_template):
+@pytest.fixture
+def alu_sw_pt_asic_flow_tb(hammer_flow_template) -> rg_ds.RadGenArgs:
     proj_tree: rg_ds.Tree = tests_common.init_scan_proj_tree()
     proj_name: str = "alu"
     top_lvl_module: str = "alu_ver"
@@ -111,41 +134,65 @@ def test_alu_sw_pt_asic_flow(hammer_flow_template):
         os.path.join(gen_conf_dpath, fname) 
             for fname in os.listdir(gen_conf_dpath) if "period_0.0" in fname
     ][0]
-
-    tests_common.run_verif_hammer_asic_flow(
+    rg_args: rg_ds.RadGenArgs = tests_common.gen_hammer_flow_rg_args(
         hammer_flow_template = hammer_flow_template,
         proj_name = proj_name,
         top_lvl_module = top_lvl_module,
         design_conf_fpath = alu_conf_fpath,
     )
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+
+alu_sw_pt_asic_flow_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'alu_sw_pt_asic_flow_tb',
+    fixture_type = 'conf_init',
+)
+
+@pytest.mark.alu
+@pytest.mark.asic_flow
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_alu_sw_pt_asic_flow_conf_init(alu_sw_pt_asic_flow_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(alu_sw_pt_asic_flow_conf_init_tb) 
+
+@pytest.mark.alu
+@pytest.mark.asic_flow
+@skip_if_fixtures_only
+def test_alu_sw_pt_asic_flow(alu_sw_pt_asic_flow_tb, request):
+    tests_common.run_verif_hammer_asic_flow(rg_args = alu_sw_pt_asic_flow_tb)
+
+# TODO get this to work, problem with writing out fixture json (due to stack lvl stuff)
+# alu_sw_pt_parse_tb = conftest.create_rg_fixture(
+#     input_fixture = 'alu_sw_pt_asic_flow_tb',
+#     fixture_type = 'parse',
+# )
+
+@pytest.fixture
+def alu_sw_pt_parse_tb(alu_sw_pt_asic_flow_tb) -> rg_ds.RadGenArgs:
+    rg_args = copy.deepcopy(alu_sw_pt_asic_flow_tb)
+    rg_args.subtool_args.compile_results = True
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+test_alu_sw_pt_parse_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'alu_sw_pt_parse_tb',
+    fixture_type = 'conf_init',
+)
 
 @pytest.mark.alu
 @pytest.mark.parse
-def test_alu_sw_pt_parse(hammer_flow_template):
-    proj_tree: rg_ds.Tree = tests_common.init_scan_proj_tree()
-    proj_name: str = "alu"
-    top_lvl_module: str = "alu_ver"
-    gen_conf_dpath: str = proj_tree.search_subtrees(
-        f"projects.{proj_name}.configs.gen", is_hier_tag = True
-    )[0].path
-    # Get the conf fpath for the sweep point we wish to evaluate
-    # TODO find a better way to select which sweep point we're evaluating rather than just below hardcoded str
-    alu_conf_fpath: str = [
-        os.path.join(gen_conf_dpath, fname) 
-            for fname in os.listdir(gen_conf_dpath) if "period_0.0" in fname
-    ][0]
-    # Additional ASIC-DSE arguments
-    st_fields: dict = {
-        "compile_results": True,
-    }
-    tests_common.run_verif_hammer_asic_flow(
-        hammer_flow_template = hammer_flow_template,
-        proj_name = proj_name,
-        top_lvl_module = top_lvl_module,
-        design_conf_fpath = alu_conf_fpath,
-        subtool_fields = st_fields,
-    )
-    
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_alu_sw_pt_parse_conf_init(test_alu_sw_pt_parse_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(test_alu_sw_pt_parse_conf_init_tb) 
+
+@pytest.mark.alu
+@pytest.mark.parse
+@skip_if_fixtures_only
+def test_alu_sw_pt_parse(alu_sw_pt_parse_tb, request):
+    tests_common.run_verif_hammer_asic_flow(rg_args = alu_sw_pt_parse_tb)
+
 
 
 

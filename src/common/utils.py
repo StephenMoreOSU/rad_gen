@@ -738,14 +738,14 @@ def sanitize_element(param: str, ele_val: Any, validate_paths: bool = True, *arg
     # Here are the key matches which makes sanitizer think its a path
     # TODO there may be a better way to do but this way you just have to list all path related keys below
     path_keys = ["path", "sram_parameters", "file", "dir", "home"]
+    # Even if path keys are in param if negative keys are in param then its not a path
+    #   E.g. negative keys override positive keys 
     inv_path_keys = [
         "meta", "use_latest_obj_dir", "manual_obj_dir", 
         # Custom flow params
         "read_saif_file",
         "generate_activity_file",
     ]
-    
-     # even if path keys are in param if negative keys are in param then its not a path
     
     # Special list for lists of dicts, we want to ignore any element with this key in the parent dict
     parent_inv_path_keys = ["placement_constraints"]
@@ -960,42 +960,6 @@ def init_dataclass(dataclass_type: Type, in_config: dict, add_arg_config: dict =
 
     # Return created dataclass instance
     return dataclass_type(**dataclass_inputs)
-
-
-
-# def init_dataclass(dataclass_type: Type, in_config: dict, add_arg_config: dict = {}, validate_paths: bool = True) -> Any:
-#     """
-#         Initializes dictionary values for fields defined in input data structure, basically acts as sanitation for keywords defined in data class fields
-        
-#         Priority order:
-#         1. in_config
-#         2. add_arg_config
-
-#         Returns a instantiation of the dataclass
-#     """
-#     dataclass_inputs = {}
-#     for field in dataclass_type.__dataclass_fields__:
-#         # if the field is read in from input config file
-#         if field in in_config.keys():
-#             dataclass_inputs[field] = in_config[field]
-#         # additional arg values for fields not defined in input config (defined in default_value_config[field])
-#         elif field in add_arg_config.keys():
-#             dataclass_inputs[field] = add_arg_config[field]
-#         # clean path and make sure it exists (if "path" keyword in field name)
-#         if "path" in field and field in dataclass_inputs:
-#             if isinstance(dataclass_inputs[field], list):
-#                 for idx, path in enumerate(dataclass_inputs[field]):
-#                     dataclass_inputs[field][idx] = clean_path(path, validate_paths) 
-#             elif isinstance(dataclass_inputs[field], str):
-#                 dataclass_inputs[field] = clean_path(dataclass_inputs[field], validate_paths) 
-#             else:
-#                 pass
-#     # return created dataclass instance
-#     # The constructor below will fail if
-#     # - key in in_config != field name in dataclass 
-#     return dataclass_type(**dataclass_inputs)
-
-
 
 def convert_namespace(in_namespace: argparse.Namespace) -> List[str]:
     """
@@ -1583,13 +1547,19 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
         rg_ds.StdCellLib, 
         strip_hier(asic_dse_conf, strip_tag="stdcell_lib")
     )
+    stdcell_lib.init(common.project_tree)
+
+    sram_compiler: rg_ds.SRAMCompilerSettings = init_dataclass(
+        rg_ds.SRAMCompilerSettings, 
+        strip_hier(asic_dse_conf, strip_tag="sram_compiler_settings")
+    )
+    sram_compiler.init(common.project_tree)
 
     scripts: rg_ds.ScriptInfo = init_dataclass(
         rg_ds.ScriptInfo, 
         strip_hier(asic_dse_conf, strip_tag="scripts")
     )
-
-    compile_results_flag: bool = asic_dse_conf["compile_results"]
+    compile_results_flag: bool = asic_dse_conf["compile_results"] # CTRL SIGNAL
 
     common_asic_flow: rg_ds.CommonAsicFlow = init_dataclass(
         rg_ds.CommonAsicFlow, 
@@ -1777,7 +1747,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
         # Append to project tree
         common.project_tree.append_tagged_subtree(f"{common.project_name}.outputs", design_out_tree_copy, is_hier_tag = True) # append our asic_dse outputs
 
-
     # Object dir init
     if asic_dse_mode.vlsi.enable:
         obj_dir_path: str = init_asic_obj_dir(common, top_lvl_module)
@@ -1806,6 +1775,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
         "custom_asic_flow_settings": custom_asic_flow_settings,
         "common_asic_flow": common_asic_flow, 
         "common": common,
+        "sram_compiler_settings": sram_compiler,
     }
     asic_dse = init_dataclass(rg_ds.AsicDSE, asic_dse_inputs)
 

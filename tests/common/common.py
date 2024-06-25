@@ -1,16 +1,25 @@
 from __future__ import annotations
 import os, sys
 
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, Callable
 
 import rad_gen as rg
 import src.common.data_structs as rg_ds
 import src.common.utils as rg_utils
 
+import pytest
 import inspect
 import argparse
 from collections import OrderedDict
 import copy
+import dataclasses
+
+import json
+from deepdiff import DeepDiff
+import re
+
+def get_rg_home() -> str:
+    return os.environ.get("RAD_GEN_HOME")
 
 def init_tests_tree() -> rg_ds.Tree:
     rad_gen_home: str = os.environ.get("RAD_GEN_HOME")
@@ -31,6 +40,7 @@ def init_scan_proj_tree() -> rg_ds.Tree:
     return proj_tree
 
 def get_test_info(stack_lvl: int = 2) -> Tuple[rg_ds.Tree, str, str, str, str]:
+    # TODO replace stack lvl bs with just passing in the name of function + file at the top level
     rg_home: str = os.environ.get("RAD_GEN_HOME")
     tests_tree: rg_ds.Tree = init_tests_tree()
     # Get the name of file that called this function (above the current file)
@@ -42,6 +52,18 @@ def get_test_info(stack_lvl: int = 2) -> Tuple[rg_ds.Tree, str, str, str, str]:
     assert os.path.exists(test_out_dpath), f"Test output path {test_out_dpath} does not exist"
     return tests_tree, test_grp_name, test_name, test_out_dpath, rg_home
 
+def get_fixture_info(stack_lvl = 3) -> Tuple[rg_ds.Tree, str, str, str]:
+    tests_tree, test_grp_name, fixture_name, _, _ = get_test_info(stack_lvl)
+    fixture_out_fpath: str = os.path.join(
+        tests_tree.search_subtrees(f"tests.data.{test_grp_name}.fixtures", is_hier_tag = True)[0].path,
+        f"{fixture_name}.json"
+    )
+    return tests_tree, test_grp_name, fixture_name, fixture_out_fpath
+
+def write_fixture_json(rad_gen_args: rg_ds.RadGenArgs, stack_lvl = 4):
+    _, _, _, fixture_out_fpath = get_fixture_info(stack_lvl = stack_lvl)
+    # Write the fixture object to json
+    dataclass_2_json(rad_gen_args, fixture_out_fpath)
 
 def verify_flow_stage(obj_dpath: str, golden_results_dpath: str, stage_name: str):
     summary_base_fname: str = "report"
@@ -87,13 +109,13 @@ def run_rad_gen(rg_args: rg_ds.RadGenArgs, rg_home: str, just_print: bool = Fals
         ret_val = rg.main(args_ns) 
     return ret_val
 
-def run_sweep(rg_args: rg_ds.RadGenArgs) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree]:
+def run_sweep(rg_args: rg_ds.RadGenArgs) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree, rg_ds.RadGenArgs]:
     rg_home: str = os.environ.get("RAD_GEN_HOME")
     sw_pt_args_list: List[rg_ds.RadGenArgs]
     proj_tree: rg_ds.Tree
     
     sw_pt_args_list, proj_tree = run_rad_gen(rg_args, rg_home)
-    return sw_pt_args_list, proj_tree
+    return sw_pt_args_list, proj_tree, rg_args
 
 
 def get_param_gen_fpaths(param_dict: OrderedDict, gen_dpath: str) -> Tuple[List[str], List[str]]:
@@ -135,8 +157,8 @@ def set_fields(obj: Any, field_dict: dict = {}, **kwargs):
     
     return obj
 
-def run_verif_hammer_asic_flow(
-    hammer_flow_template, 
+def gen_hammer_flow_rg_args(
+    hammer_flow_template,
     proj_name: str, 
     design_conf_fpath: str,
     top_lvl_module: str = None,
@@ -144,13 +166,9 @@ def run_verif_hammer_asic_flow(
     subtool_fields: dict = {},
     rg_fields: dict = {},
     proj_tree: rg_ds.Tree = None,
-    verif_flag: bool = True,
 ):
-    tests_tree: rg_ds.Tree
-    tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = get_test_info(stack_lvl = 3)
+    _, _, _, test_out_dpath, _ = get_test_info(stack_lvl = 3)
     # Unique case for parse tests, we want to make sure we still parse the golden results correctly and compare with asic flow
-    if "parse" in test_name:
-        test_name = test_name.replace("parse", "asic_flow")
     dummy_hammer_flow_args, template_proj_tree = hammer_flow_template
     if proj_tree is None:
         proj_tree = template_proj_tree
@@ -177,12 +195,155 @@ def run_verif_hammer_asic_flow(
         project_name = proj_name,
     )
     rg_args.subtool_args = subtool_args
+    return rg_args
 
-    run_rad_gen(rg_args, rg_home)
+def run_verif_hammer_asic_flow(
+    rg_args: rg_ds.RadGenArgs,
+    exec_flag: bool = True,
+    verif_flag: bool = True,
+) -> Any:
+    
+    tests_tree: rg_ds.Tree
+    tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = get_test_info(stack_lvl = 3)
+    # Unique case for parse tests, we want to make sure we still parse the golden results correctly and compare with asic flow
+    if "parse" in test_name:
+        test_name = test_name.replace("parse", "asic_flow")
+    manual_obj_dpath: str = rg_args.manual_obj_dir
+    ret_val: Any = None
+    if exec_flag:
+        ret_val = run_rad_gen(rg_args, rg_home)
     if verif_flag:
         golden_results_dpath = tests_tree.search_subtrees(
             f"tests.data.{test_grp_name}.golden_results.{test_name}", is_hier_tag = True
         )[0].path
         for stage in ["syn", "par", "timing", "power", "final"]:
             verify_flow_stage(manual_obj_dpath, golden_results_dpath, stage)
+    return ret_val
+
+def rec_convert_dataclass_to_dict(obj, key: str = None):
+    """
+        Converts a dict / dataclass of nested dicts / dataclasses into a dictionary object
+    """
+    # Checks if its a type we should skip
+    skip_tup = (rg_ds.HammerDriver,)
+    if isinstance(obj, skip_tup):
+        return None
+    elif dataclasses.is_dataclass(obj):
+        try:
+            # If there is a module that's not serializable we will convert manually instead
+            return {k: rec_convert_dataclass_to_dict(v, k) for k, v in dataclasses.asdict(obj).items()}
+        except: 
+            # manually traversing the dataclass fields
+            result = {}
+            for field in dataclasses.fields(obj):
+                field_val = getattr(obj, field.name)
+                result[field.name] = rec_convert_dataclass_to_dict(field_val, field.name)
+            return result
+
+    elif isinstance(obj, list):
+        return [rec_convert_dataclass_to_dict(i, key) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: rec_convert_dataclass_to_dict(v, k) for k, v in obj.items()}
+    # checks if instance is any primitive type, if its not then its a non dataclass class so we have to ignore for now
+    elif not isinstance(obj, (str, int, float, bool)) and obj is not None:
+        return None
+    # Case for exporting paths so tests can be non system specific
+    elif isinstance(obj, str) and key != None and 'path' in key:
+        return obj.replace(os.path.expanduser('~'), '~')
+    else:
+        return obj
     
+
+class EnhancedJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.asdict(obj)
+        return super().default(obj)
+    
+def run_fixtures(rg_home: str, test_args: List[str]):
+    prev_cwd = os.getcwd()
+    os.chdir(rg_home)
+    # Run the fixtures
+    pytest.main(["-vv", "-s", "--fixtures-only", *test_args])
+    os.chdir(prev_cwd)
+
+def dataclass_2_json(in_dataclass: Any, out_fpath: str):
+    json_text = json.dumps(rec_convert_dataclass_to_dict(in_dataclass), cls=EnhancedJSONEncoder, indent=4)
+    with open(out_fpath, "w") as f:
+        f.write(json_text)
+
+def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
+    tests_tree, test_grp_name, tests_name, _, _ = get_test_info(stack_lvl = 3)
+    rg_info, _ = run_rad_gen(
+        rg_args, 
+        get_rg_home()
+    )
+    subtool: str = rg_args.subtools[0]
+    init_struct = rg_info[subtool]
+    test_init: dict = rec_convert_dataclass_to_dict(init_struct)
+    
+    # Get golden ref to compare against
+    golden_results_dpath: str = tests_tree.search_subtrees(
+        f"tests.data.{test_grp_name}.golden_results", is_hier_tag = True
+    )[0].path
+    tests_name_substr: str = tests_name.replace("_conf_init","")
+    golden_init_struct_fpath: str = None
+    for dname in os.listdir(golden_results_dpath):
+        if tests_name_substr in dname:
+            # Look for files with "init_struct" in them
+            init_struct_fpaths = [
+                os.path.join(golden_results_dpath, dname, fname)
+                    for fname in os.listdir(os.path.join(golden_results_dpath, dname))
+                    if "init_struct" in fname
+            ]
+            for fpath in [ os.path.join(golden_results_dpath, dname, fname) for fname in os.listdir(os.path.join(golden_results_dpath, dname))]:
+                print(fpath)
+            assert len(init_struct_fpaths) == 1, f"Expected 1 init struct file in {os.path.join(golden_results_dpath, dname)}"
+            golden_init_struct_fpath: str = init_struct_fpaths[0]
+            break
+    assert golden_init_struct_fpath is not None, f"Could not find golden init struct file in {golden_results_dpath}"
+    golden_init: dict = json.load(open(golden_init_struct_fpath,"r"))
+    # Compare the two
+    ddiff = DeepDiff(test_init, golden_init, ignore_order=True, verbose_level = 2)
+    col_width = 50
+    # na_ele = f"{'N/A':<{col_width}}"
+    # If there are any differences iterate over them
+    if ddiff:
+        hier_key_re = re.compile(r"(?<=')\w+(?=')")
+        # Any values exist in golden but not in test?
+        items_added_dict: dict = ddiff.get("dictionary_item_added")
+        if items_added_dict:
+            golden_added_subhdr = rg_utils.create_bordered_str("GOLDEN Key : Value pairs not found in TEST")
+            print(golden_added_subhdr[1])
+            diff_cols = f"{'Key':<{col_width}}{'Value':<{col_width}}"
+            print(diff_cols)
+            for k, v in items_added_dict.items():
+                hier_key = '.'.join( hier_key_re.findall(k) )
+                row = f"{hier_key:<{col_width}}{v:<{col_width}}"
+                print(row)
+        # Any values exist in test but not in golden?
+        items_removed_dict: dict = ddiff.get("dictionary_item_removed")
+        if items_removed_dict:
+            items_removed_subhdr = rg_utils.create_bordered_str("TEST Key : Value pairs not found in GOLDEN")
+            print(items_removed_subhdr[1])
+            diff_cols = f"{'Key':<{col_width}}{'Value':<{col_width}}"
+            print(diff_cols)
+            for k, v in items_removed_dict.items():
+                hier_key = '.'.join( hier_key_re.findall(k) )
+                row = f"{hier_key:<{col_width}}{v:<{col_width}}"
+                print(row)
+        # Any values exist in both but are different?
+        items_changed_dict: dict = ddiff.get("values_changed")
+        if items_changed_dict:
+            items_changed_subhdr = rg_utils.create_bordered_str("Differences")
+            print(items_changed_subhdr[1])
+            diff_cols = f"{'Key':<{col_width}}{'Test Value':<{col_width}}{'Golden Value':<{col_width}}"
+            print(diff_cols)
+            for k, v in items_changed_dict.items():
+                hier_key = '.'.join( hier_key_re.findall(k) )
+                row = f"{hier_key:<{col_width}}{v['old_value']:<{col_width}}{v['new_value']:<{col_width}}"
+                print(row)
+        assert False, "Differences found between test and golden init struct"
+    else:
+        print("No differences found between test and golden init struct")
+

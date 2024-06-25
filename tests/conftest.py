@@ -11,7 +11,97 @@ import src.common.utils as rg_utils
 import tests.common.driver as driver
 import tests.common.common as tests_common
 
+import copy
+
 import pytest
+from functools import wraps
+
+def pytest_addoption(parser: pytest.Parser):
+    parser.addoption(
+        "--fixtures-only", action="store_true", help="Run all fixtures (current tests depend on) without running tests"
+    )
+
+def skip_if_fixtures_only(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        request = kwargs.get('request')
+        if request and request.config.getoption("--fixtures-only"):
+            pytest.skip("Skipping test as --fixtures-only option is set")
+        return func(*args, **kwargs)
+    return wrapper
+
+
+# Generic fixture that takes another fixture as an argument
+def create_rg_fixture(
+    input_fixture: str,
+    fixture_type: str
+):
+    @pytest.fixture
+    @skip_if_fixtures_only
+    def parse_fixture(request):
+        input_data = request.getfixturevalue(input_fixture)
+        rg_args = copy.deepcopy(input_data)
+        rg_args.subtool_args.compile_results = True
+        tests_common.write_fixture_json(rg_args, stack_lvl = 7)
+        return rg_args
+    
+    @pytest.fixture
+    @skip_if_fixtures_only
+    def conf_init_fixture(request):
+        input_data = request.getfixturevalue(input_fixture)
+        rg_args = copy.deepcopy(input_data)
+        rg_args.just_config_init = True
+        return rg_args
+    
+    if fixture_type == "conf_init":
+        return conf_init_fixture
+    elif fixture_type == "parse":
+        return parse_fixture
+
+# Dict which maps tests to the fixtures which they use as inputs
+test_fixture_mapping = {}
+
+def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config, items: List[pytest.Item]):
+    """
+    Pytest hook that runs during the collection phase of pytest.
+    """
+    item: pytest.Item
+    for item in items:
+        # Get the test name
+        test_name = item.name
+        # Get the fixture names used by the test
+        fixture_names = item.fixturenames
+        # print(f"Collected test {test_name} uses fixtures: {fixture_names}")
+        # Store the mapping
+        test_fixture_mapping[test_name] = fixture_names
+
+# def pytest_runtest_setup(item: pytest.Item):
+#     # Kinda a hacky way to get fixtures to run for specific tests yet it seems to work
+#     # Errors are thrown when running pytest with --fixtures-only 
+#     #   Yet we only want the fixtures to be run and thier object jsons to be outputted (which works as expected)
+#     if item.config.getoption("--fixtures-only"):
+#         # Ensure the fixture is executed
+#         for fixturedef in item._fixtureinfo.name2fixturedefs.values():
+#             # Assume fixtures in fixturedef are sorted in order of dependency
+#             for fixture in fixturedef:
+#                 # "Setup" the fixture
+#                 fixture.execute(request=item._request)
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: pytest.ExitCode):
+    # Mapping out fpath
+    mapping_fpath: str = os.path.join(
+        os.environ.get("RAD_GEN_HOME"),
+        "tests", "data", "meta",
+        "test_fixture_mapping.json"
+    )
+    os.makedirs(os.path.dirname(mapping_fpath), exist_ok=True)
+    with open( mapping_fpath, 'w') as f:
+        import json
+        json.dump(test_fixture_mapping, f, indent=4)
+
+# Make sure to include the necessary pytest hooks
+pytest.hookimpl(tryfirst=True)(pytest_collection_modifyitems)
+pytest.hookimpl(trylast=True)(pytest_sessionfinish)
 
 @pytest.fixture
 def hammer_flow_template() -> Tuple[rg_ds.RadGenArgs, rg_ds.Tree]:

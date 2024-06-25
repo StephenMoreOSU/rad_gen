@@ -11,6 +11,9 @@ import src.common.utils as rg_utils
 import tests.common.driver as driver
 import tests.common.common as tests_common
 
+import tests.conftest as conftest
+from tests.conftest import skip_if_fixtures_only
+
 import pytest
 
 import pandas as pd
@@ -41,6 +44,7 @@ def sram_gen() -> rg_ds.RadGenArgs:
         subtools = ["asic_dse"],
         subtool_args = asic_dse_args,
     )
+    tests_common.write_fixture_json(sram_gen_args)
     return sram_gen_args
 
 @pytest.fixture
@@ -160,7 +164,7 @@ def get_dut_single_macro(sram_gen_output) -> Tuple[
         "d": 128,
     }
     proj_tree: rg_ds.Tree
-    sw_pt_args_list, proj_tree = sram_gen_output
+    sw_pt_args_list, proj_tree, _ = sram_gen_output
     # We want to test the asic flow for a single sram macro
     sram_gen_conf_dpath: str = proj_tree.search_subtrees(
         "shared_resources.sram_lib.configs.gen",
@@ -188,7 +192,7 @@ def get_dut_stitched_sram(sram_gen_output) ->Tuple[
         "d": 512,
     }
     proj_tree: rg_ds.Tree
-    sw_pt_args_list, proj_tree = sram_gen_output
+    sw_pt_args_list, proj_tree, _ = sram_gen_output
     # We want to test the asic flow for a single sram macro
     sram_gen_conf_dpath: str = proj_tree.search_subtrees(
         "shared_resources.sram_lib.configs.gen",
@@ -205,11 +209,25 @@ def get_dut_stitched_sram(sram_gen_output) ->Tuple[
     )
     return proj_tree, sram_conf_fpath, sram_params
 
+
+sram_gen_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'sram_gen',
+    fixture_type = 'conf_init',
+)
+
 @pytest.mark.sram
 @pytest.mark.asic_sweep
-def test_sram_gen(sram_gen_output, get_stitched_srams):
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_sram_gen_conf_init(sram_gen_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(sram_gen_conf_init_tb)
+
+@pytest.mark.sram
+@pytest.mark.asic_sweep
+@skip_if_fixtures_only
+def test_sram_gen(sram_gen_output, get_stitched_srams, request):
     proj_tree: rg_ds.Tree
-    _, proj_tree = sram_gen_output
+    _, proj_tree, _ = sram_gen_output
     stitched_mems: List[Dict[str, int]] = get_stitched_srams
 
     conf_gen_dpath: str = proj_tree.search_subtrees("shared_resources.sram_lib.configs.gen", is_hier_tag = True)[0].path
@@ -236,92 +254,139 @@ def test_sram_gen(sram_gen_output, get_stitched_srams):
 #  / __| _ \  /_\ |  \/  | / __|_ _| \| |/ __| |  | __| |  \/  | /_\ / __| _ \/ _ \ 
 #  \__ \   / / _ \| |\/| | \__ \| || .` | (_ | |__| _|  | |\/| |/ _ \ (__|   / (_) |
 #  |___/_|_\/_/ \_\_|  |_| |___/___|_|\_|\___|____|___| |_|  |_/_/ \_\___|_|_\\___/ 
-@pytest.mark.sram
-@pytest.mark.asic_flow
-def test_single_macro_asic_flow(
+
+@pytest.fixture
+def single_macro_asic_flow_tb(
     hammer_flow_template, 
     get_dut_single_macro
-):
+) -> rg_ds.RadGenArgs:
     proj_tree: rg_ds.Tree
-    # We want to test the asic flow for a single sram macro
-    proj_tree, test_macro_conf_fpath, test_sram_macro_params = get_dut_single_macro
     subtool_fields: dict = {
         "common_asic_flow__flow_stages__sram__run": True,
     }
-    tests_common.run_verif_hammer_asic_flow(
+    # We want to test the asic flow for a single sram macro
+    proj_tree, test_macro_conf_fpath, test_sram_macro_params = get_dut_single_macro
+    rg_args: rg_ds.RadGenArgs = tests_common.gen_hammer_flow_rg_args(
         hammer_flow_template = hammer_flow_template,
         proj_name = "sram",
         top_lvl_module = "SRAM2RW128x32_wrapper",
         design_conf_fpath = test_macro_conf_fpath,
         subtool_fields = subtool_fields,
-        proj_tree = proj_tree,
     )
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+single_macro_asic_flow_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'single_macro_asic_flow_tb',
+    fixture_type = 'conf_init',
+)
+
+@pytest.mark.sram
+@pytest.mark.asic_flow
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_single_macro_asic_flow_conf_init(single_macro_asic_flow_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(single_macro_asic_flow_conf_init_tb)
+
+@pytest.mark.sram
+@pytest.mark.asic_flow
+@skip_if_fixtures_only
+def test_single_macro_asic_flow(single_macro_asic_flow_tb, request):
+    tests_common.run_verif_hammer_asic_flow(rg_args = single_macro_asic_flow_tb)
+
+
+@pytest.fixture
+def single_macro_parse_tb(single_macro_asic_flow_tb) -> rg_ds.RadGenArgs:
+    rg_args = copy.deepcopy(single_macro_asic_flow_tb)
+    rg_args.subtool_args.compile_results = True
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+single_macro_parse_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'single_macro_parse_tb',
+    fixture_type = 'conf_init',
+)
 
 @pytest.mark.sram
 @pytest.mark.parse
-def test_single_macro_parse(
-    hammer_flow_template,
-    get_dut_single_macro
-):
-    proj_tree: rg_ds.Tree
-    # We want to test the asic flow for a single sram macro
-    proj_tree, test_macro_conf_fpath, test_sram_macro_params = get_dut_single_macro
-    subtool_fields: dict = {
-        "common_asic_flow__flow_stages__sram__run": True,
-        "compile_results": True,
-    }
-    tests_common.run_verif_hammer_asic_flow(
-        hammer_flow_template = hammer_flow_template,
-        proj_name = "sram",
-        top_lvl_module = "SRAM2RW128x32_wrapper",
-        design_conf_fpath = test_macro_conf_fpath,
-        subtool_fields = subtool_fields,
-        proj_tree = proj_tree,
-    )
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_single_macro_parse_conf_init(single_macro_parse_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(single_macro_parse_conf_init_tb)
+
+@pytest.mark.sram
+@pytest.mark.parse
+@skip_if_fixtures_only
+def test_single_macro_parse(single_macro_parse_tb, request):
+    tests_common.run_verif_hammer_asic_flow(rg_args = single_macro_parse_tb)
 
 #   ___ ___    _   __  __   ___ _____ ___ _____ ___ _  _ ___ ___    __  __   _   ___ ___  ___  
 #  / __| _ \  /_\ |  \/  | / __|_   _|_ _|_   _/ __| || | __|   \  |  \/  | /_\ / __| _ \/ _ \ 
 #  \__ \   / / _ \| |\/| | \__ \ | |  | |  | || (__| __ | _|| |) | | |\/| |/ _ \ (__|   / (_) |
 #  |___/_|_\/_/ \_\_|  |_| |___/ |_| |___| |_| \___|_||_|___|___/  |_|  |_/_/ \_\___|_|_\\___/ 
 
-@pytest.mark.sram
-@pytest.mark.asic_flow
-def test_stitched_sram_asic_flow(
+@pytest.fixture
+def stitched_sram_asic_flow_tb(
     hammer_flow_template,
-    get_dut_stitched_sram,
-):
+    get_dut_stitched_sram
+) -> rg_ds.RadGenArgs:
     proj_tree: rg_ds.Tree
     proj_tree, test_stitched_conf_fpath, test_stitched_sram_params = get_dut_stitched_sram
     subtool_fields: dict = {
         "common_asic_flow__flow_stages__sram__run": True,
     }
-    tests_common.run_verif_hammer_asic_flow(
+    rg_args: rg_ds.RadGenArgs = tests_common.gen_hammer_flow_rg_args(
         hammer_flow_template = hammer_flow_template,
         proj_name = "sram",
         top_lvl_module = "sram_macro_map_2x256x512",
         design_conf_fpath = test_stitched_conf_fpath,
         subtool_fields = subtool_fields,
-        proj_tree = proj_tree,
+        # proj_tree = proj_tree,
     )
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+
+stitched_sram_asic_flow_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'stitched_sram_asic_flow_tb',
+    fixture_type = 'conf_init',
+)
+
+@pytest.mark.sram
+@pytest.mark.asic_flow
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_stitched_sram_asic_flow_conf_init(stitched_sram_asic_flow_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(stitched_sram_asic_flow_conf_init_tb)
+
+@pytest.mark.sram
+@pytest.mark.asic_flow
+@skip_if_fixtures_only
+def test_stitched_sram_asic_flow(stitched_sram_asic_flow_tb, request):
+    tests_common.run_verif_hammer_asic_flow(rg_args = stitched_sram_asic_flow_tb)
+
+@pytest.fixture
+def stitched_sram_parse(stitched_sram_asic_flow_tb) -> rg_ds.RadGenArgs:
+    rg_args = copy.deepcopy(stitched_sram_asic_flow_tb)
+    rg_args.subtool_args.compile_results = True
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+stitched_sram_parse_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'stitched_sram_parse',
+    fixture_type = 'conf_init',
+)
 
 @pytest.mark.sram
 @pytest.mark.parse
-def test_stitched_sram_parse(
-    hammer_flow_template,
-    get_dut_stitched_sram,
-):
-    proj_tree: rg_ds.Tree
-    proj_tree, test_stitched_conf_fpath, test_stitched_sram_params = get_dut_stitched_sram
-    subtool_fields: dict = {
-        "common_asic_flow__flow_stages__sram__run": True,
-        "compile_results": True,
-    }
-    tests_common.run_verif_hammer_asic_flow(
-        hammer_flow_template = hammer_flow_template,
-        proj_name = "sram",
-        top_lvl_module = "sram_macro_map_2x256x512",
-        design_conf_fpath = test_stitched_conf_fpath,
-        subtool_fields = subtool_fields,
-        proj_tree = proj_tree,
-    )
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_stitched_sram_parse_conf_init(stitched_sram_parse_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(stitched_sram_parse_conf_init_tb)
+
+@pytest.mark.sram
+@pytest.mark.parse
+@skip_if_fixtures_only
+def test_stitched_sram_parse(stitched_sram_parse, request):
+    tests_common.run_verif_hammer_asic_flow(rg_args = stitched_sram_parse)
 

@@ -421,20 +421,6 @@ class Tree:
       
 
 
-# Accessing the directory structure like a dictionary
-def get_dir(directory: Tree, *keys):
-    if not keys:
-        return directory
-
-    key_to_find = keys[0]
-    if directory.subtrees:
-        for subdir in directory.subtrees:
-            if subdir.basename == key_to_find:
-                return get_dir(subdir, *keys[1:])
-
-    return None
-
-
 def add_arg(parser: argparse.ArgumentParser, cli_opt: GeneralCLI):    
     # Create list to deal with optional shortcut
     key_keys = ["key", "shortcut"]
@@ -716,68 +702,89 @@ RadGenArgs = get_dyn_class(
 @dataclass
 class AsicDseCLI(ParentCLI):
     """ 
-        Command line interface settings for asic-dse subtool
+        Definitions:
+            primitive field: dataclass leafs if viewing dataclasses as trees
+        
+        Command line interface settings for asic-dse subtool 
+        CLI definition corresponds to the 'AsicDSE' dataclass
+        
+        Arguments are grouped according to corresponding dataclass fields
+        
+        Certain args may not correspond to a single field but rather multiple, or they may act as 'control signals'
+        meaning they may be used in an initialization function to set other dataclass fields. 
+
+        The valid modes of operation for the AsicDSE subtool can be derived from the legal combinations of control signals + dataclass fields
+
+        Ideally there should be at cli arg for each primitive field in 'AsicDSE' dataclass, 
+        however, if the 'AsicDSE' dataclass has certain class objects that are difficult to map to a cli arg or group of args
+        
+        Such class objects can be missing in this class definition but for completeness and clarity,
+        they should have a comment in this class definition explaining that they are missing.
+
+        Todo:
+            * Add functionality to merge user inputs coming from either `top_lvl_config`, parameter defined `config_fpath`, or `cli_args`
+        
     """
     cli_args: List[GeneralCLI] = field(default_factory = lambda: [
+        # BRANCHING / CONTROL SIGNAL
+        #   Args that are mapped to multiple data struct entires or are used as control signals
         GeneralCLI(key = "tool_env_conf_fpaths", shortcut = "-e", datatype = str, nargs = "*", help_msg = "Path to hammer environment configuration file (used to specify industry tool paths + licenses)"),
         GeneralCLI(key = "sweep_conf_fpath", shortcut = "-s", datatype = str, help_msg = "Path to config file describing sweep tasks and containing design parameters to sweep"),
-        # GeneralCLI(key = "design_sweep_config", shortcut = "-s", datatype = str, help_msg = "Path to config file describing sweep tasks and containing design parameters to sweep"),
-        # RUN MODE
-        # GeneralCLI(key = "run_mode", shortcut = "-r", datatype = str, choices = ["serial", "parallel", "gen_scripts"], default_val = "serial", help_msg = "Specify if flow is run in serial or parallel for sweeps"),
-        GeneralCLI(key = "mode.vlsi.run", shortcut = "-r", datatype = str, choices = ["serial", "parallel", "gen_scripts"], default_val = "serial", help_msg = "Specify if flow is run in serial or parallel for sweeps"),
+        GeneralCLI(key = "flow_conf_fpaths", shortcut = "-p", datatype = str, nargs = "*", help_msg = "Paths to flow config files, these can be either custom or hammer format"),
+        GeneralCLI(key = "compile_results", shortcut = "-c", datatype = bool, action = "store_true", help_msg = "Flag to compile results related a specific asic flow or sweep depending on additional provided configs"),
         
+        # AsicDSE TOP LEVEL FIELDS
+        # TODO rename with fpath convension
+        GeneralCLI(key = "result_search_path", datatype = str, help_msg = "Path to config file describing sweep tasks and containing design parameters to sweep"),
+
+        # RUN MODE
+        GeneralCLI(key = "mode.vlsi.run", shortcut = "-r", datatype = str, choices = ["serial", "parallel", "gen_scripts"], default_val = "serial", help_msg = "Specify if flow is run in serial or parallel for sweeps"),
         # FLOW MODE
         GeneralCLI(key = "mode.vlsi.flow", shortcut = "-m", datatype = str, choices = ["hammer", "custom"], default_val = "hammer", help_msg = "Mode in which asic flow is run hammer or custom modes"),
-        # GeneralCLI(key = "flow_mode", shortcut = "-m", datatype = str, choices = ["hammer", "custom"], default_val = "hammer", help_msg = "Mode in which asic flow is run hammer or custom modes"),
-        
-        # GeneralCLI(key = "top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
-        # GeneralCLI(key = "hdl_path", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
-        GeneralCLI(key = "flow_conf_fpaths", shortcut = "-p", datatype = str, nargs = "*", help_msg = "Paths to flow config files, these can be either custom or hammer format"),
-        # GeneralCLI(key = "use_latest_obj_dir", shortcut = "-l", action = "store_true", help_msg = "Uses latest obj / work dir found in the respective output_design_files/<top_module> dir"),
-        # GeneralCLI(key = "use_manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj / work dir"),
-        GeneralCLI(key = "compile_results", shortcut = "-c", datatype = bool, action = "store_true", help_msg = "Flag to compile results related a specific asic flow or sweep depending on additional provided configs"),
-        # GeneralCLI(key = "synthesis", shortcut = "-syn", datatype = bool, action = "store_true", help_msg = "Flag to run synthesis"),
-        # GeneralCLI(key = "place_n_route", shortcut = "-par", datatype = bool, action = "store_true", help_msg = "Flag to run place & route"),
-        # GeneralCLI(key = "primetime", shortcut = "-pt", datatype = bool, action = "store_true", help_msg = "Flag to run primetime (timing & power)"),
-        # GeneralCLI(key = "sram_compiler", shortcut = "-sram", datatype = bool, action = "store_true", help_msg = "Flag that must be provided if sram macros exist in design (ASIC-DSE)"),
-        # GeneralCLI(key = "make_build", shortcut = "-make", datatype = bool, action = "store_true", help_msg = "<TAG> <UNDER DEV> Generates a makefile to manage flow dependencies and execution"),
+
         # Below are definitions for params nested in the hierarchy of AsicDSE dataclass
+        # STANDARD CELL LIB
         GeneralCLI(key = "stdcell_lib.cds_lib", datatype = str, help_msg = "Name of cds lib for use with Cadence Virtuoso", default_val = "asap7_TechLib"),
         GeneralCLI(key = "stdcell_lib.pdk_rundir_path", datatype = str, help_msg = "Path to rundir of pdk being used for Cadence Virtuoso"),
         GeneralCLI(key = "stdcell_lib.sram_lib_path", datatype = str, help_msg = "Path to sram lib containing macro .lefs for running through ASIC CAD flow"),
         GeneralCLI(key = "stdcell_lib.pdk_name", datatype = str, help_msg = "Name of technology lib, this is what is searched for in either hammer or whatever other tool to find stuff like sram macros", default_val = "asap7"),
-        GeneralCLI(key = "scripts.virtuoso_setup_path", datatype = str, help_msg = "Path to env setup script for virtuoso environment"),
+        # SCRIPTS
         # TODO move below cli arg to different structure which deals with arbitrarily defined filenames either created or ingested
+        GeneralCLI(key = "scripts.virtuoso_setup_path", datatype = str, help_msg = "Path to env setup script for virtuoso environment"),
         GeneralCLI(key = "scripts.gds_to_area_fname", datatype = str, help_msg = "Filename for converting GDS to area and of output .csv file"),
-        # TODO rename with fpath convension
-        # GeneralCLI(key = "result_search_path", datatype = str, help_msg = "Path to config file describing sweep tasks and containing design parameters to sweep"),
         
-        # args for CommonAsicFlow data structure
+        # COMMON ASIC FLOW
         GeneralCLI(key = "common_asic_flow.top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
         GeneralCLI(key = "common_asic_flow.hdl_path", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
-        
         GeneralCLI(key = "common_asic_flow.db_libs", datatype = str, nargs = "*", help_msg = "db libs used in synopsys tool interactions, directory names not paths"),
+        
+        # FLOW STAGES
         GeneralCLI(key = "common_asic_flow.flow_stages.build.run", shortcut = "-build", datatype = bool, action = "store_true", help_msg = "<UNDER DEV> Generates a makefile to manage flow dependencies and execution"),
         GeneralCLI(key = "common_asic_flow.flow_stages.build.tool", datatype = str, default_val= "hammer", help_msg = "<UNDER DEV>"),
         GeneralCLI(key = "common_asic_flow.flow_stages.build.tag", datatype = str, default_val= "build", help_msg = "<UNDER DEV>"),
-        
         GeneralCLI(key = "common_asic_flow.flow_stages.sram.run", shortcut = "-sram", datatype = bool, action = "store_true", help_msg = "Flag that must be provided if sram macros exist in design (ASIC-DSE)"),
         GeneralCLI(key = "common_asic_flow.flow_stages.syn.run", shortcut = "-syn", datatype = bool, action = "store_true", help_msg = "Flag to run synthesis"),
         GeneralCLI(key = "common_asic_flow.flow_stages.par.run", shortcut = "-par", datatype = bool, action = "store_true", help_msg = "Flag to run place & route"),
         GeneralCLI(key = "common_asic_flow.flow_stages.pt.run", shortcut = "-pt", datatype = bool, action = "store_true", help_msg = "Flag to run primetime (timing & power)"),
         
-        
-        # args for HammerFlow data struct, this should really be changed to HammerFlowSettings as its hammer specific
+        # HAMMER FLOW
+        # TODO this should really be changed to HammerFlow as its hammer specific
         # TODO move this to the filename path or dir tree structure
         GeneralCLI(key = "hammer_flow.cli_driver_bpath", datatype = str, help_msg = "path to hammer driver executable"),
+        # hammer_flow.hammer_driver is a class unable to be defined in CLI
         
-        # asic_flow_settings.hammer_driver is a class unable to be defined in CLI
+        # DESIGN SWEEP(S) INFO
+        # TODO allow for CLI alternative to initializing this data struct with a config file ('sweep_conf_fpath')
+
+        # SRAM COMPILER
         # TODO remove or integrate below lines
         # Reason for not being integrated already is because they are set in factory default  
-        # SRAMCompilerSettings
         # GeneralCLI(key = "sram_compiler_settings.rtl_out_dpath", datatype = str, help_msg = "Path to output directory for RTL files generated by SRAM compiler"),
         # GeneralCLI(key = "sram_compiler_settings.config_out_dpath", datatype = str, help_msg = "Path to output directory for config files generated by SRAM compiler"),
         # GeneralCLI(key = "sram_compiler_settings.scripts_out_dpath", datatype = str, help_msg = "Path to output directory for scripts generated by SRAM compiler"),
+
+        # DESIGN OUT TREE
+        # TODO implement CLI alternative or put into another catagory for uniformity
 
     ] )
 
@@ -873,10 +880,14 @@ class SRAMCompilerSettings:
         Paths related to SRAM compiler outputs
         If not specified in the top level config file, will use default output structure (sent to rad gen input designs directory)
     """
-    rtl_out_dpath: str = None # os.path.expanduser("~/rad_gen/input_designs/sram/rtl/compiler_outputs")
-    config_out_dpath: str = None #os.path.expanduser("~/rad_gen/input_designs/sram/configs/compiler_outputs")
+    rtl_out_dpath: str = None 
+    config_out_dpath: str = None 
     scripts_out_dpath: str = None
     
+    def init(self, project_tree: Tree):
+        self.config_out_dpath = project_tree.search_subtrees(f"sram_lib.configs.gen", is_hier_tag=True)[0].path  
+        self.rtl_out_dpath = project_tree.search_subtrees(f"sram_lib.rtl.gen", is_hier_tag=True)[0].path         
+        self.scripts_out_dpath = project_tree.search_subtrees(f"sram_lib.scripts", is_hier_tag=True)[0].path
 
 
 @dataclass
@@ -889,6 +900,13 @@ class StdCellLib:
     sram_lib_path: str = None # path to PDK sram library containing sub dirs named lib, lef, gds with each SRAM.
     # Process settings in RADGen settings as we may need to perform post processing (ASAP7)
     pdk_rundir_path: str = None # path to PDK run directory which allows Cadence Virtuoso to run in it
+
+    def init(self, project_tree: Tree):
+        assert self.pdk_name != None
+        self.sram_lib_path = project_tree.search_subtrees(
+            f"hammer.technology.{self.pdk_name}.sram_compiler.memories",
+            is_hier_tag=True
+        )[0].path
 
 
 
@@ -1151,18 +1169,6 @@ class AsicDSE:
     sram_compiler_settings: SRAMCompilerSettings = None # paths related to SRAM compiler outputs
     # ASIC DSE dir structure collateral
     design_out_tree: Tree = None
-    # design_tree: Tree = None
-    
-    def __post_init__(self):
-        # Post inits required for structs that use other struct values as inputs and cannot be clearly defined, tradeoff is that these definitions cannot be changed via user input easily (as those intialized with init_dataclass() can)
-        self.stdcell_lib.sram_lib_path = self.common.project_tree.search_subtrees(f"hammer.technology.{self.stdcell_lib.pdk_name}.sram_compiler.memories", is_hier_tag=True)[0].path #os.path.join(self.env_settings.hammer_tech_path, self.tech_info.name, "sram_compiler", "memories")
-        # TODO add user defined paths for sram compiler outputs in CLI (in case users want to send them somewhere else)
-        if self.sram_compiler_settings is None:
-            self.sram_compiler_settings = SRAMCompilerSettings()
-            self.sram_compiler_settings.config_out_dpath = self.common.project_tree.search_subtrees(f"sram_lib.configs.gen", is_hier_tag=True)[0].path #os.path.join(self.env_settings.design_input_path, "sram", "configs", "compiler_outputs")
-            self.sram_compiler_settings.rtl_out_dpath = self.common.project_tree.search_subtrees(f"sram_lib.rtl.gen", is_hier_tag=True)[0].path #os.path.join(self.env_settings.design_input_path, "sram", "rtl", "compiler_outputs")
-            self.sram_compiler_settings.scripts_out_dpath = self.common.project_tree.search_subtrees(f"sram_lib.scripts", is_hier_tag=True)[0].path #os.path.join(self.env_settings.design_input_path, "sram", "scripts", "compiler_outputs")
-
 
 #  ██████╗ ██████╗ ███████╗███████╗███████╗
 # ██╔════╝██╔═══██╗██╔════╝██╔════╝██╔════╝
