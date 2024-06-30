@@ -11,12 +11,12 @@ import src.common.spice_parser as sp_parser
 import src.common.utils as rg_utils
 import src.coffe.utils as utils
 import src.coffe.mux as mux
-import src.coffe.new_carry_chain as cc_lib
-# import src.coffe.new_fpga as fpga
+import src.coffe.carry_chain as cc_lib
+# import src.coffe.fpga as fpga
 
-import src.coffe.new_lut as lut_lib
-import src.coffe.new_gen_routing_loads as gen_r_load_lib
-import src.coffe.new_logic_block as lb_lib
+import src.coffe.lut as lut_lib
+import src.coffe.gen_routing_loads as gen_r_load_lib
+import src.coffe.logic_block as lb_lib
 
 import src.coffe.constants as consts
 

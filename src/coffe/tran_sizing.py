@@ -22,19 +22,19 @@ from typing import List, Dict, Tuple, Set, Union, Any, Type, Callable, NamedTupl
 import src.common.utils as rg_utils
 
 import src.coffe.data_structs as c_ds
-import src.coffe.new_sb_mux as sb_mux_lib
-import src.coffe.new_gen_routing_loads as gen_r_load_lib
-import src.coffe.new_cb_mux as cb_mux_lib
-import src.coffe.new_lut as lut_lib
-import src.coffe.new_ble as ble_lib
-import src.coffe.new_logic_block as lb_lib
-import src.coffe.new_carry_chain as cc_lib
+import src.coffe.sb_mux as sb_mux_lib
+import src.coffe.gen_routing_loads as gen_r_load_lib
+import src.coffe.cb_mux as cb_mux_lib
+import src.coffe.lut as lut_lib
+import src.coffe.ble as ble_lib
+import src.coffe.logic_block as lb_lib
+import src.coffe.carry_chain as cc_lib
 import src.coffe.ram as ram_lib
 import src.coffe.hardblock as hb_lib
 import src.coffe.constants as constants
 
 import src.coffe.spice as spice
-import src.coffe.new_fpga as fpga
+import src.coffe.fpga as fpga
 import src.coffe.cost as cost_lib
 import src.coffe.constants as consts
 

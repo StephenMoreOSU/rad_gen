@@ -12,12 +12,12 @@ import src.common.data_structs as rg_ds
 import src.coffe.utils as utils
 import src.coffe.mux as mux
 
-import src.coffe.new_sb_mux as sb_mux_lib
-import src.coffe.new_gen_routing_loads as gen_r_load_lib
-import src.coffe.new_ble as ble_lib
-import src.coffe.new_lut as lut_lib
+import src.coffe.sb_mux as sb_mux_lib
+import src.coffe.gen_routing_loads as gen_r_load_lib
+import src.coffe.ble as ble_lib
+import src.coffe.lut as lut_lib
 
-import src.coffe.new_carry_chain as cc_lib
+import src.coffe.carry_chain as cc_lib
 import src.coffe.constants as consts
 
 @dataclass

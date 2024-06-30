@@ -16,11 +16,11 @@ import src.coffe.lut_subcircuits as lut_subcircuits
 import src.coffe.mux as mux
 import src.coffe.constants as consts
 
-import src.coffe.new_lut as lut_lib
-import src.coffe.new_ble as ble_lib
-import src.coffe.new_gen_routing_loads as gen_r_loads_lib
-# import src.coffe.new_logic_block as lb_lib
-# import src.coffe.new_fpga as fpga
+import src.coffe.lut as lut_lib
+import src.coffe.ble as ble_lib
+import src.coffe.gen_routing_loads as gen_r_loads_lib
+# import src.coffe.logic_block as lb_lib
+# import src.coffe.fpga as fpga
 
 @dataclass
 class CarryChainMux(mux.Mux2to1):

@@ -166,7 +166,7 @@ class SpiceInterface(object):
         while (not hspice_success) :
             # last I checked the license is available during the night, so we can try to run hspice uncomment below if this is untrue
             #utils.check_for_time()
-            subprocess.call(["hspice", sp_filename], stdout=output_file, stderr=output_file)
+            subprocess.call(["hspice", '-mt', '8', '-i', sp_filename], stdout=output_file, stderr=output_file)
 
             # how come this file is closed here, it should be closed only if there is a success
             # since else the call process will write in a closed file

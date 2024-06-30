@@ -11,7 +11,7 @@ import src.common.utils as rg_utils
 import src.common.spice_parser as sp_parser
 import src.coffe.utils as utils
 import src.coffe.mux as mux
-import src.coffe.new_gen_routing_loads as gen_r_load_lib
+import src.coffe.gen_routing_loads as gen_r_load_lib
 import src.coffe.constants as consts
 
 # @dataclass

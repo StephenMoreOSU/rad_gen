@@ -12,9 +12,9 @@ import src.coffe.utils as utils
 import src.common.spice_parser as sp_parser
 import src.coffe.lut_subcircuits as lut_subcircuits
 
-import src.coffe.new_cb_mux as cb_mux_lib
-import src.coffe.new_ble as ble_lib
-import src.coffe.new_logic_block as lb_lib
+import src.coffe.cb_mux as cb_mux_lib
+import src.coffe.ble as ble_lib
+import src.coffe.logic_block as lb_lib
 
 import src.coffe.constants as consts
 

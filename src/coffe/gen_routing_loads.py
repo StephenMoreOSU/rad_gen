@@ -7,11 +7,11 @@ import math, os
 import src.coffe.data_structs as c_ds
 import src.common.utils as rg_utils
 # from src.coffe.new_sb_mux import SwitchBlockModel
-import src.coffe.new_sb_mux as sb_mux_lib
-import src.coffe.new_cb_mux as cb_mux_lib
+import src.coffe.sb_mux as sb_mux_lib
+import src.coffe.cb_mux as cb_mux_lib
 
 import src.coffe.constants as consts
-import src.coffe.new_fpga as fpga
+import src.coffe.fpga as fpga
 
 from collections import defaultdict
 

@@ -11,7 +11,7 @@ import src.coffe.top_level as top_level
 import src.common.data_structs as rg_ds
 import src.asic_dse.asic_dse as asic_dse
 
-import src.coffe.new_fpga as fpga
+import src.coffe.fpga as fpga
 
 from typing import List, Dict, Tuple
 

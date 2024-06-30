@@ -2,10 +2,9 @@ import os
 import sys
 import argparse
 import time
-# import src.coffe.fpga as fpga
-import src.coffe.new_fpga as fpga
+import src.coffe.fpga as fpga
 import src.coffe.spice as spice
-import src.coffe.new_tran_sizing as tran_sizing
+import src.coffe.tran_sizing as tran_sizing
 import src.coffe.utils as utils
 import src.coffe.vpr as coffe_vpr
 import datetime

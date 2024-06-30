@@ -14,7 +14,7 @@ import src.common.utils as rg_utils
 import src.ic_3d.buffer_dse as buff_dse
 import src.coffe.data_structs as c_ds
 import src.common.spice_parser as sp_parser
-# import src.coffe.new_tran_sizing as tx_sizing
+# import src.coffe.tran_sizing as tx_sizing
 
 from typing import List, Dict, Any, Tuple, Type, NamedTuple, Set, Optional, Union
 
