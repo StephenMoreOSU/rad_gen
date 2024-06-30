@@ -1,994 +1,1269 @@
+from __future__ import annotations
+from dataclasses import dataclass, field, InitVar
 
-from src.coffe.circuit_baseclasses import _SizableCircuit
-import src.coffe.fpga as fpga
+import math, os, sys
+import re
+from typing import List, Dict, Any, Tuple, Union, Type
 
-import src.coffe.mux_subcircuits as mux_subcircuits
-import src.coffe.lut_subcircuits as lut_subcircuits
-
+import src.common.data_structs as rg_ds
+import src.common.utils as rg_utils
+import src.coffe.data_structs as c_ds
+import src.common.spice_parser as sp_parser
 import src.coffe.utils as utils
 
-import src.coffe.gen_routing_loads as gen_r_loads
+import src.coffe.lut_subcircuits as lut_subcircuits
 
-from typing import Dict, List, Tuple, Union, Any
-import math, os
+import src.coffe.mux as mux
+import src.coffe.constants as consts
 
+import src.coffe.new_lut as lut_lib
+import src.coffe.new_ble as ble_lib
+import src.coffe.new_gen_routing_loads as gen_r_loads_lib
+# import src.coffe.new_logic_block as lb_lib
+# import src.coffe.new_fpga as fpga
 
-
-
-class _CarryChainMux(_SizableCircuit):
+@dataclass
+class CarryChainMux(mux.Mux2to1):
     """ Carry Chain Multiplexer class.    """
-    def __init__(self, use_finfet, use_fluts, use_tgate, gen_ble_out_load: gen_r_loads._GeneralBLEOutputLoad):
-        self.name = "carry_chain_mux"
-        self.use_finfet = use_finfet
-        self.use_fluts = use_fluts
-        self.use_tgate = use_tgate      
-        self.gen_ble_out_load: gen_r_loads._GeneralBLEOutputLoad = gen_ble_out_load
-        # handled in the check_arch_params function in the utils.py file
-        # assert use_fluts
+    name: str = "carry_chain_mux"
+    use_finfet: bool = False
+    use_fluts: bool = False
+    use_tgate: bool = False
+    
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    # assert use_fluts
+    def generate(self, subckt_lib_fpath: str) -> Dict[str, int | float]:
+        # Call Parent Mux generate, does correct generation but has incorrect initial tx sizes
+        self.initial_transistor_sizes = super().generate(subckt_lib_fpath)
+        # Set initial transistor sizes to values appropriate for an SB mux
+        for tx_name in self.initial_transistor_sizes:
+            # Set size of transistors making up switches
+            # nmos
+            if f"{self.sp_name}_nmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 2
+            # pmos
+            elif f"{self.sp_name}_pmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 2
+            # Set 1st stage inverter pmos
+            elif "inv" in tx_name and "_1_pmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 1
+            # Set 1st stage inverter nmos
+            elif "inv" in tx_name and "_1_nmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 1
+            # Set 2nd stage inverter pmos
+            elif "inv" in tx_name and "_2_pmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 5
+            # Set 2nd stage inverter nmos
+            elif "inv" in tx_name and "_2_nmos" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 5
+            # Set level restorer if this is a pass transistor mux
+            elif "rest" in tx_name:
+                self.initial_transistor_sizes[tx_name] = 1
+            
+        # Assert that all transistors in this mux have been updated with initial_transistor_sizes
+        assert set(list(self.initial_transistor_sizes.keys())) == set(self.transistor_names)
         
-
-    def generate(self, subcircuit_filename, min_tran_width, use_finfet):
-        """ Generate the SPICE netlists."""  
-
-        if not self.use_tgate :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2_to_1_mux(subcircuit_filename, self.name)
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["ptran_" + self.name + "_nmos"] = 2
-            self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
-        else :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2_to_1_mux(subcircuit_filename, self.name)      
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["tgate_" + self.name + "_nmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_pmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
-       
+        # Will be dict of ints if FinFET or discrete Tx, can be floats if bulk
         return self.initial_transistor_sizes
 
 
-    def generate_cc_mux_top(self):
-        """ Creating the SPICE netlist for calculating the delay of the carry chain mux"""
-        
-        # p_str = f"_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
-        # subckt_gen_ble_out_load_str = f"general_ble_output_load{p_str}"
+    def update_wires(self, width_dict: Dict[str, int], wire_lengths: Dict[str, float], wire_layers: Dict[str, int]):
+        """ Update the wires of the mux. """
+        # Update the wires of the mux
+        super().update_wires(width_dict, wire_lengths, wire_layers)
+        # TODO update for multi ckt support
+        wire_layers["wire_lut_to_flut_mux"] = consts.LOCAL_WIRE_LAYER
 
-        # Create directories
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name)  
-        
-        filename = self.name + ".sp"
-        top_file = open(filename, 'w')
-        top_file.write(".TITLE Carry chain mux\n\n") 
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Include libraries, parameters and other\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Setup and input\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-        top_file.write(".OPTIONS BRIEF=1\n\n")
-        top_file.write("* Input signal\n")
-        top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        top_file.write("* Power rail for the circuit under test.\n")
-        top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-        top_file.write("V_FLUT vdd_test gnd supply_v\n\n")
+@dataclass
+class CarryChainMuxTB(c_ds.SimTB):
+    FA_carry_chain: CarryChain = None
+    carry_chain_periph: CarryChainPer = None
+    carry_chain_mux: CarryChainMux = None
+    lut_output_load: ble_lib.LUTOutputLoad = None
+    gen_ble_output_load: gen_r_loads_lib.GeneralBLEOutputLoad = None
+    
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    # Initialized in __post_init__
+    dut_ckt: CarryChainMux = None
 
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Measurement\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write("* inv_"+ self.name +"_1 delay\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+ self.name +"_1_tfall TRIG V(n_1_4) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(Xthemux.n_2_1) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+ self.name +"_1_trise TRIG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(Xthemux.n_2_1) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write("* inv_"+ self.name +"_2 delays\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+ self.name +"_2_tfall TRIG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+ self.name +"_2_trise TRIG V(n_1_4) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write("* Total delays\n")
-        top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-        #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_4) VAL='supply_v/2' RISE=1\n")
-        #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write("+    TARG V(n_local_out) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_general_out) AT=3n\n\n")
+    def __hash__(self) -> int:
+        return super().__hash__()
+    
+    def __post_init__(self, subckt_lib):
+        super().__post_init__()
+        self.meas_points = []
+        pwr_v_node: str = "vdd_cc_mux"
+        self.local_out_node: str = "n_local_out"
+        self.general_out_node: str = "n_general_out"
+        self.dut_ckt = self.carry_chain_mux
+        # STIM PULSE Voltage SRC
+        self.stim_vsrc = c_ds.SpVoltageSrc(
+            name = "IN",
+            out_node = "n_in",
+            type = "PULSE",
+            init_volt = c_ds.Value(name = self.supply_v_param),
+            peak_volt = c_ds.Value(0), # V
+            pulse_width = c_ds.Value(2), # ns
+            period = c_ds.Value(4), # ns
+        )
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc = c_ds.SpVoltageSrc(
+            name = "_CC",
+            out_node = pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        # Top insts
+        self.top_insts = [
+            # Wave Shaping Circuitry
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_1",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_in",
+                    "n_cout":"n_1_1",
+                    "n_sum_out": "n_hang",
+                    "n_p": "n_p_1",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_2",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_1_1",
+                    "n_cout":"n_1_2",
+                    "n_sum_out": "n_hang_2",
+                    "n_p": "n_p_2",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_3",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_1_2",
+                    "n_cout":"n_hang_3",
+                    "n_sum_out": "n_1_3",
+                    "n_p": "n_p_3",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # Carry Chain Per (inverter) 
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_periph.sp_name}",  
+                subckt = subckt_lib[self.carry_chain_periph.sp_name], 
+                conns = {
+                    "n_in": "n_1_3",
+                    "n_out": "n_1_4",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # Carry Chain MUX DUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_mux.sp_name}_dut", 
+                subckt = subckt_lib[self.carry_chain_mux.sp_name], 
+                conns = {
+                    "n_in": "n_1_4",
+                    "n_out": "n_1_5",
+                    "n_gate": self.vdd_node,
+                    "n_gate_n": self.gnd_node,
+                    "n_vdd": pwr_v_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # LUT Output Load
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut_output_load.sp_name}", 
+                subckt = subckt_lib[self.lut_output_load.sp_name], 
+                conns = {
+                    "n_in": "n_1_5",
+                    "n_local_out": self.local_out_node,
+                    "n_general_out": self.general_out_node,
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                    "n_vdd_local_output_on": pwr_v_node,
+                    "n_vdd_general_output_on": self.vdd_node,
+                }
+            ),
+            # GENERAL BLE OUTPUT LOAD
+            rg_ds.SpSubCktInst(
+                name = f"X{self.gen_ble_output_load.sp_name}",
+                subckt = subckt_lib[self.gen_ble_output_load.sp_name],
+                conns = {
+                    "n_1_1": self.general_out_node,
+                    "n_out": "n_hang_1",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ), 
+        ]
+    def generate_top(self):
+        # dut_sp_name: str = self.dut_ckt.sp_name # TODO update to sp_name
+        trig_node: str = "n_1_4"
+        delay_names: List[str] = [
+            f"inv_{self.dut_ckt.sp_name}_1",
+            f"inv_{self.dut_ckt.sp_name}_2",
+            f"total",
+        ]
+        # Instance path from our TB to the ON Local Mux inst
+        cc_dut_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts, 
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+                for re_str in [
+                    r"carry_chain_mux(?:.*_dut)",
+                ]
+            ],
+            []
+        )
+        targ_nodes: List[str] = [
+            ".".join([inst.name for inst in cc_dut_path] + ["n_2_1"]),
+            self.local_out_node,
+            self.local_out_node,
+        ]
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = self.general_out_node, # TODO figure out why tf we are measuring the low value of gnd...
+        )
 
-        top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-        top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_FLUT) FROM=0ns TO=4ns\n")
-        top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/4n)*supply_v'\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Circuit\n")
-        top_file.write("********************************************************************************\n\n")
-        # lut, wire from lut to the mux, the mux, and the load same output load as before
-        
-        top_file.write("Xcarrychain_shape1 vdd gnd n_in n_1_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
-        top_file.write("Xcarrychain_shape2 vdd gnd n_1_1 n_1_2 n_hang_2 n_p_2 vdd gnd FA_carry_chain\n")
-        top_file.write("Xcarrychain_shape3 vdd gnd n_1_2 n_hang_3 n_1_3 n_p_3 vdd gnd FA_carry_chain\n")
-        top_file.write("Xinv_shape n_1_3 n_1_4 vdd gnd carry_chain_perf\n")
-        top_file.write("Xthemux n_1_4 n_1_5 vdd gnd vdd_test gnd carry_chain_mux\n")       
-        top_file.write("Xlut_output_load n_1_5 n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
 
 
-        top_file.write(f"Xgeneral_ble_output_load n_general_out n_hang1 vsram vsram_n vdd gnd {self.gen_ble_out_load.name}\n")
-        top_file.write(".END")
-        top_file.close()
 
-        # Come out of top-level directory
-        os.chdir("../")
-        
-        return (self.name + "/" + self.name + ".sp")
-
-    def generate_top(self, gen_r_wire):       
-
-        print("Generating top-level " + self.name)
-        self.top_spice_path = self.generate_cc_mux_top()
-
-    def update_area(self, area_dict, width_dict):
-
-        if not self.use_tgate :
-            area = (2*area_dict["ptran_" + self.name] +
-                    area_dict["rest_" + self.name] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
-        else :
-            area = (2*area_dict["tgate_" + self.name] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
-
-        area = area + area_dict["sram"]
-        width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
-
-        return area
-                
-
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
-        """ Update wire of member objects. """
-        # Update wire lengths
-        if not self.use_tgate :
-            wire_lengths["wire_" + self.name] = width_dict["ptran_" + self.name]
-        else :
-            wire_lengths["wire_" + self.name] = width_dict["tgate_" + self.name]
-
-        wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_1"])/4
-        
-        # Update wire layers
-        wire_layers["wire_" + self.name] = 0
-        wire_layers["wire_lut_to_flut_mux"] = 0
-        wire_layers["wire_" + self.name + "_driver"] = 0
-
-class _CarryChainPer(_SizableCircuit):
+@dataclass
+class CarryChainPer(c_ds.SizeableCircuit):
     """ Carry Chain Peripherals class. Used to measure the delay from the Cin to Sout.  """
-    def __init__(self, use_finfet, carry_chain_type, N, FAs_per_flut, use_tgate):
-        self.name = "carry_chain_perf"
-        self.use_finfet = use_finfet
-        self.carry_chain_type = carry_chain_type
-        # handled in the check_arch_params funciton in utils.py
-        # assert FAs_per_flut <= 2
-        self.FAs_per_flut = FAs_per_flut
-        # how many Fluts do we have in a cluster?
-        self.N = N        
-        self.use_tgate = use_tgate
+    name: str = "carry_chain_per"
+    
+    # Transistor Params
+    use_finfet: bool = None
+    use_tgate: bool = None
 
+    def __hash__(self) -> int:
+        return super().__hash__()
 
-
-    def generate(self, subcircuit_filename, min_tran_width, use_finfet):
+    def generate(self, subcircuit_filename: str) -> Dict[str, int | float]:
         """ Generate the SPICE netlists."""  
-
 
         # if type is skip, we need to generate two levels of nand + not for the and tree
         # if type is ripple, we need to add the delay of one inverter for the final sum.
-        self.transistor_names, self.wire_names = lut_subcircuits.generate_carry_chain_perf_ripple(subcircuit_filename, self.name, use_finfet)
-        self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-        self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
+        self.transistor_names, self.wire_names = lut_subcircuits.generate_carry_chain_perf_ripple(subcircuit_filename, self.sp_name, self.use_finfet)
+        self.initial_transistor_sizes["inv_" + self.sp_name + "_1_nmos"] = 1
+        self.initial_transistor_sizes["inv_" + self.sp_name + "_1_pmos"] = 1
 
         return self.initial_transistor_sizes
 
-        
-    def generate_carry_chain_ripple_top(self):
 
-        # Create directories
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name)  
-        
-        filename = self.name + ".sp"
-        top_file = open(filename, 'w')
-        top_file.write(".TITLE Carry Chain\n\n") 
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Include libraries, parameters and other\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Setup and input\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
-        top_file.write(".OPTIONS BRIEF=1\n\n")
-        top_file.write("* Input signals\n")
-
-
-        top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        top_file.write("* Power rail for the circuit under test.\n")
-        top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-        top_file.write("V_test vdd_test gnd supply_v\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Measurement\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write("* inv_carry_chain_1 delay\n")
-        top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-
-
-        top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-
-        top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
-
-        top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-        top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
-        top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Circuit\n")
-        top_file.write("********************************************************************************\n\n")
-
-        # Generate Cin as part of wave-shaping circuitry:
-        top_file.write("Xcarrychain_shape1 vdd gnd n_in n_1_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
-        top_file.write("Xcarrychain_shape2 vdd gnd n_1_1 n_1_2 n_hang_s n_p_2 vdd gnd FA_carry_chain\n")
-        
-        
-        # Generate the uni under test:
-        top_file.write("Xcarrychain_main vdd gnd n_1_2 n_hang_2 n_1_3 n_p_3 vdd gnd FA_carry_chain\n")
-        top_file.write("Xinv n_1_3 n_out vdd_test gnd carry_chain_perf\n")
-        
-        # generate typical load
-        top_file.write("Xthemux n_out n_out2 vdd gnd vdd gnd carry_chain_mux\n")  
-
-        top_file.write(".END")
-        top_file.close()
-
-        # Come out of top-level directory
-        os.chdir("../")
-        
-        return (self.name + "/" + self.name + ".sp")
-        
-
-
-    def generate_carry_chain_skip_top(self):
-
-        # Create directories
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name)  
-        
-        filename = self.name + ".sp"
-        top_file = open(filename, 'w')
-        top_file.write(".TITLE Carry Chain\n\n") 
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Include libraries, parameters and other\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Setup and input\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
-        top_file.write(".OPTIONS BRIEF=1\n\n")
-        top_file.write("* Input signals\n")
-
-
-        top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        top_file.write("* Power rail for the circuit under test.\n")
-        top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-        top_file.write("V_test vdd_test gnd supply_v\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Measurement\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write("* inv_carry_chain_1 delay\n")
-        top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_carry_chain_perf_1_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-
-
-        top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-
-        top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
-
-        top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-        top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
-        top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Circuit\n")
-        top_file.write("********************************************************************************\n\n")
-
-        # Generate Cin as part of wave-shaping circuitry:
-        top_file.write("Xcarrychain_shape1 vdd gnd n_in n_1_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
-        top_file.write("Xcarrychain_shape2 vdd gnd n_1_1 n_1_2 n_hang_s n_p_2 vdd gnd FA_carry_chain\n")
-        
-        
-        # Generate the uni under test:
-        top_file.write("Xcarrychain_main vdd gnd n_1_2 n_hang_2 n_1_3 n_p_3 vdd gnd FA_carry_chain\n")
-        top_file.write("Xinv n_1_3 n_out vdd_test gnd carry_chain_perf\n")
-
-        # generate typical load
-        top_file.write("Xthemux n_out n_out2 vdd gnd vdd gnd carry_chain_mux\n")  
-
-        top_file.write(".END")
-        top_file.close()
-
-        # Come out of top-level directory
-        os.chdir("../")
-        
-        return (self.name + "/" + self.name + ".sp")
-
-    def generate_top(self):
-        """ Generate Top-level Evaluation Path for the Carry chain """
-
-        if self.carry_chain_type == "ripple":
-            self.top_spice_path = self.generate_carry_chain_ripple_top()
-        else:
-            self.top_spice_path = self.generate_carry_chain_skip_top()
-
-
-    def update_area(self, area_dict, width_dict):
+    def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]) -> float:
         """ Calculate Carry Chain area and update dictionaries. """
 
-        area = area_dict["inv_carry_chain_perf_1"]    
-        area_with_sram = area
-        width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+        # Find the name of inv carry chain peripheral 
+        # TODO have this be less hard coded (corresponds to generate ) 
+        area: float = area_dict[f"inv_{self.sp_name}_1"]
+        area_with_sram: float = area
+        width: float = math.sqrt(area)
+        area_dict[self.sp_name] = area
+        width_dict[self.sp_name] = width
 
 
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]) -> List[str]:
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         pass
 
+@dataclass
+class CarryChainPerTB(c_ds.SimTB):
+    FA_carry_chain: CarryChain = None
+    carry_chain_periph: CarryChainPer = None
+    carry_chain_mux: CarryChainMux = None
+    
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    # Initialized in __post_init__
+    dut_ckt: CarryChain = None
 
-class _CarryChain(_SizableCircuit):
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    def __post_init__(self, subckt_lib):
+        super().__post_init__()
+        self.meas_points = []
+        pwr_v_node: str = "vdd_cc_mux"
+        self.local_out_node: str = "n_local_out"
+        self.general_out_node: str = "n_general_out"
+
+        self.dut_ckt = self.carry_chain_periph
+        # STIM PULSE Voltage SRC
+        self.stim_vsrc = c_ds.SpVoltageSrc(
+            name = "IN",
+            out_node = "n_in",
+            type = "PULSE",
+            init_volt = c_ds.Value(0),
+            peak_volt = c_ds.Value(name = self.supply_v_param), # V
+            pulse_width = c_ds.Value(2), # ns
+            period = c_ds.Value(4), # ns
+        )
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc = c_ds.SpVoltageSrc(
+            name = "_CC",
+            out_node = pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        # Top insts
+        self.top_insts = [
+            # Wave Shaping Circuitry
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_1",  
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], 
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_in",
+                    "n_cout":"n_1_1",
+                    "n_sum_out": "n_hang",
+                    "n_p": "n_p_1",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_2",  
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], 
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_1_1",
+                    "n_cout":"n_1_2",
+                    "n_sum_out": "n_hang_2",
+                    "n_p": "n_p_2",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_3",  
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], 
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_1_2",
+                    "n_cout":"n_hang_3",
+                    "n_sum_out": "n_1_3",
+                    "n_p": "n_p_3",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # Carry Chain Per (inverter) DUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_periph.sp_name}_dut",  
+                subckt = subckt_lib[self.carry_chain_periph.sp_name], 
+                conns = {
+                    "n_in": "n_1_3",
+                    "n_out": "n_out",
+                    "n_vdd": pwr_v_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # Carry Chain MUX DUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_mux.sp_name}", 
+                subckt = subckt_lib[self.carry_chain_mux.sp_name], 
+                conns = {
+                    "n_in": "n_out",
+                    "n_out": "n_out_2",
+                    "n_gate": self.vdd_node,
+                    "n_gate_n": self.gnd_node,
+                    "n_vdd": pwr_v_node,
+                    "n_gnd": self.gnd_node,
+                }
+            )
+        ]
+    def generate_top(self) -> str:
+        dut_sp_name: str = self.dut_ckt.sp_name
+        trig_node: str = "n_1_2"
+        delay_names: List[str] = [
+            f"inv_{dut_sp_name}_1",
+            f"total",
+        ]
+        targ_nodes: List[str] = [
+            "n_out",
+            "n_out",
+        ]
+        meas_inv_list: List[bool] = [False] * len(delay_names)
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = self.gnd_node, # TODO figure out why tf we are measuring the low value of gnd...
+            meas_inv_list = meas_inv_list,
+        )
+
+
+
+
+
+@dataclass
+class CarryChain(c_ds.SizeableCircuit):
     """ Carry Chain class.    """
-    def __init__(self, use_finfet, carry_chain_type, N, FAs_per_flut):
-        # Carry chain name
-        self.name = "carry_chain"
-        self.use_finfet = use_finfet
-        # ripple or skip?
-        self.carry_chain_type = carry_chain_type
-        # added to the check_arch_params function
-        # assert FAs_per_flut <= 2      
-        self.FAs_per_flut = FAs_per_flut
-        # how many Fluts do we have in a cluster?
-        self.N = N
+    name: str = "fa_carry_chain"
+    
+    cluster_size: int = None
+    FAs_per_flut: bool = None
 
+    use_finfet: bool = None 
 
-    def generate(self, subcircuit_filename, min_tran_width, use_finfet):
+    # Circuit Dependancies
+    carry_chain_periph: CarryChainPer = None
+
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    def generate(self, subcircuit_filename: str) -> Dict[str, int | float]:
         """ Generate Carry chain SPICE netlists."""  
 
-        self.transistor_names, self.wire_names = lut_subcircuits.generate_full_adder_simplified(subcircuit_filename, self.name, use_finfet)
+        self.transistor_names, self.wire_names = lut_subcircuits.generate_full_adder_simplified(subcircuit_filename, self.sp_name, self.use_finfet)
 
         # if type is skip, we need to generate two levels of nand + not for the and tree
         # if type is ripple, we need to add the delay of one inverter for the final sum.
 
-        self.initial_transistor_sizes["inv_carry_chain_1_nmos"] = 1
-        self.initial_transistor_sizes["inv_carry_chain_1_pmos"] = 1
-        self.initial_transistor_sizes["inv_carry_chain_2_nmos"] = 1
-        self.initial_transistor_sizes["inv_carry_chain_2_pmos"] = 1
-        self.initial_transistor_sizes["tgate_carry_chain_1_nmos"] = 1
-        self.initial_transistor_sizes["tgate_carry_chain_1_pmos"] = 1
-        self.initial_transistor_sizes["tgate_carry_chain_2_nmos"] = 1
-        self.initial_transistor_sizes["tgate_carry_chain_2_pmos"] = 1
+        # self.initial_transistor_sizes["inv_carry_chain_1_nmos"] = 1
+        # self.initial_transistor_sizes["inv_carry_chain_1_pmos"] = 1
+        # self.initial_transistor_sizes["inv_carry_chain_2_nmos"] = 1
+        # self.initial_transistor_sizes["inv_carry_chain_2_pmos"] = 1
+        # self.initial_transistor_sizes["tgate_carry_chain_1_nmos"] = 1
+        # self.initial_transistor_sizes["tgate_carry_chain_1_pmos"] = 1
+        # self.initial_transistor_sizes["tgate_carry_chain_2_nmos"] = 1
+        # self.initial_transistor_sizes["tgate_carry_chain_2_pmos"] = 1
+        for tx_name in self.transistor_names:
+            self.initial_transistor_sizes[tx_name] = 1
 
         return self.initial_transistor_sizes
 
-    def generate_carrychain_top(self):
-        """ """
-        
-        # Create directories
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name)  
-        
-        filename = self.name + ".sp"
-        top_file = open(filename, 'w')
-        top_file.write(".TITLE Carry Chain\n\n") 
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Include libraries, parameters and other\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Setup and input\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
-        top_file.write(".OPTIONS BRIEF=1\n\n")
-        top_file.write("* Input signals\n")
-
-        #top_file.write("VIN n_a gnd PWL (0 0 1.999n 0 2n 'supply_v' 3.999n 'supply_v' 4n 0 13.999n 0 14n 'supply_v' 23.999n 'supply_v' 24n 0)\n\n")
-        #top_file.write("VIN2 n_b gnd PWL (0 0 5.999n 0 6n supply_v 7.999n supply_v 8n 0 17.999n 0 18n supply_v 19.999n supply_v 20n 0 21.999n 0 22n supply_v)\n\n")
-        #top_file.write("VIN3 n_cin gnd PWL (0 0 9.999n 0 10n supply_v 11.999n supply_v 12n 0 13.999n 0 14n supply_v 15.999n supply_v 16n 0 )\n\n")
-        #top_file.write("VIN n_a gnd PWL (0 0 1.999n 0 2n 'supply_v' 3.999n 'supply_v' 4n 0 13.999n 0 14n 'supply_v' 23.999n 'supply_v' 24n 0)\n\n")
-        #top_file.write("VIN2 n_b gnd PWL (0 0 5.999n 0 6n supply_v 7.999n supply_v 8n 0 17.999n 0 18n supply_v 19.999n supply_v 20n 0 21.999n 0 22n supply_v)\n\n")
-        #top_file.write("VIN3 n_cin gnd PWL (0 0 9.999n 0 10n supply_v 11.999n supply_v 12n 0 13.999n 0 14n supply_v 15.999n supply_v 16n 0 )\n\n")
-        
-        top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        top_file.write("* Power rail for the circuit under test.\n")
-        top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-        top_file.write("V_test vdd_test gnd supply_v\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Measurement\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write("* inv_carry_chain_1 delay\n")
-        top_file.write(".MEASURE TRAN meas_inv_carry_chain_1_tfall TRIG V(n_1_1) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(Xcarrychain.n_cin_in_bar) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_carry_chain_1_trise TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(Xcarrychain.n_cin_in_bar) VAL='supply_v/2' RISE=1\n\n")
-
-        top_file.write("* inv_carry_chain_2 delays\n")
-        top_file.write(".MEASURE TRAN meas_inv_carry_chain_2_tfall TRIG V(n_1_1) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_sum_out) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_carry_chain_2_trise TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_sum_out) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write("* Total delays\n")
-
-
-        top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_1) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_1) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_1_2) VAL='supply_v/2' RISE=1\n\n")
-
-        top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
-
-        top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-        top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
-        top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Circuit\n")
-        top_file.write("********************************************************************************\n\n")
-
-        # Generate Cin as part of wave-shaping circuitry:
-        top_file.write("Xcarrychain_shape vdd gnd n_in n_0_1 n_hang n_p_1 vdd gnd FA_carry_chain\n")
-        top_file.write("Xcarrychain_shape1 vdd gnd n_0_1 n_0_2 n_hangz n_p_0 vdd gnd FA_carry_chain\n")
-        top_file.write("Xcarrychain_shape2 vdd gnd n_0_2 n_1_1 n_hangzz n_p_z vdd gnd FA_carry_chain\n")
-        
-        # Generate the adder under test:
-        top_file.write("Xcarrychain vdd gnd n_1_1 n_1_2 n_sum_out n_p_2 vdd_test gnd FA_carry_chain\n")
-        
-        # cout typical load
-        top_file.write("Xcarrychain_load vdd gnd n_1_2 n_1_3 n_sum_out2 n_p_3 vdd gnd FA_carry_chain\n")      
-
-        top_file.write(".END")
-        top_file.close()
-
-        # Come out of top-level directory
-        os.chdir("../")
-        
-        return (self.name + "/" + self.name + ".sp")
-
-
-    def generate_top(self):
-        """ Generate Top-level Evaluation Path for Carry chain """
-
-        self.top_spice_path = self.generate_carrychain_top()
-
-    def update_area(self, area_dict, width_dict):
+    def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]) -> float:
         """ Calculate Carry Chain area and update dictionaries. """
-        area = area_dict["inv_carry_chain_1"] * 2 + area_dict["inv_carry_chain_2"] + area_dict["tgate_carry_chain_1"] * 4 + area_dict["tgate_carry_chain_2"] * 4
-        area = area + area_dict["carry_chain_perf"]
+        area = (
+            area_dict[f"inv_{self.sp_name}_1"] * 2
+                + area_dict[f"inv_{self.sp_name}_2"] 
+                + area_dict[f"tgate_{self.sp_name}_1"] * 4 
+                + area_dict[f"tgate_{self.sp_name}_2"] * 4
+        )
+        area = area + area_dict[f"{self.carry_chain_periph.sp_name}"]
         area_with_sram = area
         width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+        area_dict[self.sp_name] = area
+        width_dict[self.sp_name] = width
 
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]) -> List[str]:
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
-        if self.FAs_per_flut ==2:
-            wire_lengths["wire_" + self.name + "_1"] = width_dict["lut_and_drivers"] # Wire for input A
+        if self.FAs_per_flut == 2:
+            wire_lengths["wire_" + self.sp_name + "_1"] = width_dict["lut_and_drivers"] # Wire for input A
         else:
-            wire_lengths["wire_" + self.name + "_1"] = width_dict[self.name] # Wire for input A
-        wire_layers["wire_" + self.name + "_1"] = 0
-        wire_lengths["wire_" + self.name + "_2"] = width_dict[self.name] # Wire for input B
-        wire_layers["wire_" + self.name + "_2"] = 0
-        if self.FAs_per_flut ==1:
-            wire_lengths["wire_" + self.name + "_3"] = width_dict["logic_cluster"]/(2 * self.N) # Wire for input Cin
+            wire_lengths["wire_" + self.sp_name + "_1"] = width_dict[self.sp_name] # Wire for input A
+        wire_layers["wire_" + self.sp_name + "_1"] = consts.LOCAL_WIRE_LAYER
+        wire_lengths["wire_" + self.sp_name + "_2"] = width_dict[self.sp_name] # Wire for input B
+        wire_layers["wire_" + self.sp_name + "_2"] = consts.LOCAL_WIRE_LAYER
+        # TODO update below "local_cluster" call to the width dict for multi ckt support
+        if self.FAs_per_flut == 1:
+            wire_lengths["wire_" + self.sp_name + "_3"] = width_dict["logic_cluster"]/(2 * self.cluster_size) # Wire for input Cin
         else:
-            wire_lengths["wire_" + self.name + "_3"] = width_dict["logic_cluster"]/(4 * self.N) # Wire for input Cin
-        wire_layers["wire_" + self.name + "_3"] = 0
-        if self.FAs_per_flut ==1:
-            wire_lengths["wire_" + self.name + "_4"] = width_dict["logic_cluster"]/(2 * self.N) # Wire for output Cout
+            wire_lengths["wire_" + self.sp_name + "_3"] = width_dict["logic_cluster"]/(4 * self.cluster_size) # Wire for input Cin
+        wire_layers["wire_" + self.sp_name + "_3"] = consts.LOCAL_WIRE_LAYER
+        if self.FAs_per_flut == 1:
+            wire_lengths["wire_" + self.sp_name + "_4"] = width_dict["logic_cluster"]/(2 * self.cluster_size) # Wire for output Cout
         else:
-            wire_lengths["wire_" + self.name + "_4"] = width_dict["logic_cluster"]/(4 * self.N) # Wire for output Cout
-        wire_layers["wire_" + self.name + "_4"] = 0
-        wire_lengths["wire_" + self.name + "_5"] = width_dict[self.name] # Wire for output Sum
-        wire_layers["wire_" + self.name + "_5"] = 0
+            wire_lengths["wire_" + self.sp_name + "_4"] = width_dict["logic_cluster"]/(4 * self.cluster_size) # Wire for output Cout
+        wire_layers["wire_" + self.sp_name + "_4"] = consts.LOCAL_WIRE_LAYER
+        wire_lengths["wire_" + self.sp_name + "_5"] = width_dict[self.sp_name] # Wire for output Sum
+        wire_layers["wire_" + self.sp_name + "_5"] = consts.LOCAL_WIRE_LAYER
 
     def print_details(self):
         print(" Carry Chain DETAILS:")
 
-          
-class _CarryChainSkipAnd(_SizableCircuit):
-    """ Part of peripherals used in carry chain class.    """
-    def __init__(self, use_finfet, use_tgate, carry_chain_type, N, FAs_per_flut, skip_size):
-        # Carry chain name
-        self.name = "xcarry_chain_and"
-        self.use_finfet = use_finfet
-        self.use_tgate = use_tgate
-        # ripple or skip?
-        self.carry_chain_type = carry_chain_type
-        assert self.carry_chain_type == "skip"
-        # size of the skip
-        self.skip_size = skip_size
-        # 1 FA per FA or 2?
-        self.FAs_per_flut = FAs_per_flut
-        # how many Fluts do we have in a cluster?
-        self.N = N
+@dataclass
+class CarryChainTB(c_ds.SimTB):
+    """  """
+    FA_carry_chain: CarryChain = None
 
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    # Initialized in __post_init__
+    dut_ckt: CarryChain = None
+
+    def __hash__(self) -> int:
+        return super().__hash__()
+    
+    def __post_init__(self, subckt_lib):
+        super().__post_init__()
+        self.meas_points = []
+        pwr_v_node: str = "vdd_carry_chain"
+        # STIM PULSE Voltage SRC
+        self.stim_vsrc: c_ds.SpVoltageSrc = c_ds.SpVoltageSrc(
+            name = "IN",
+            out_node = "n_in",
+            type = "PULSE",
+            init_volt = c_ds.Value(0),
+            peak_volt = c_ds.Value(name = self.supply_v_param), # TODO get this from defined location
+            pulse_width = c_ds.Value(2), # ns
+            period = c_ds.Value(4), # ns
+        )
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc: c_ds.SpVoltageSrc = c_ds.SpVoltageSrc(
+            name = "_CC",
+            out_node = pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        # Initialize the DUT 
+        self.dut_ckt = self.FA_carry_chain
+        # Top Instances
+        self.top_insts = [
+            # Wave Shaping Circuitry
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_1",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_in",
+                    "n_cout":"n_0_1",
+                    "n_sum_out": "n_hang",
+                    "n_p": "n_p_1",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_2",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_0_1",
+                    "n_cout":"n_0_2",
+                    "n_sum_out": "n_hangz",
+                    "n_p": "n_p_0",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_3",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_0_2",
+                    "n_cout":"n_1_1",
+                    "n_sum_out": "n_hangz",
+                    "n_p": "n_p_2",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # DUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_dut",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_1_1",
+                    "n_cout":"n_1_2",
+                    "n_sum_out": "n_sum_out",
+                    "n_p": "n_p_2",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # DUT load
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_load",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_1_2",
+                    "n_cout":"n_1_3",
+                    "n_sum_out": "n_sum_out2",
+                    "n_p": "n_p_3",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            )
+        ]
+    def generate_top(self):
+        dut_sp_name: str = self.dut_ckt.sp_name # TODO update to sp_name
+        trig_node: str = "n_1_1"
+        delay_names: List[str] = [
+            f"inv_{dut_sp_name}_1",
+            f"inv_{dut_sp_name}_2",
+            f"total",
+        ] 
+        # Instance path from our TB to the ON Local Mux inst
+        cc_dut_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts, 
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+                for re_str in [
+                    r"carry_chain_(?:.*)dut",
+                ]
+            ],
+            []
+        )
+        targ_nodes: List[str] = [
+            ".".join([inst.name for inst in cc_dut_path] + ["n_cin_in_bar"]),
+            "n_sum_out",
+            "n_1_2",
+        ]
+        meas_inv_list: List[bool] = [True] + [False] * (len(delay_names)-1)
+        low_v_node: str = "gnd"
+        cust_pwr_meas_lines: List[str] = [
+            f".MEASURE TRAN meas_logic_low_voltage FIND V({low_v_node}) AT=25n",
+            f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.",
+            f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
+            f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",
+        ]
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = "gnd", # TODO figure out why tf we are measuring the low value of gnd...
+            pwr_meas_lines = cust_pwr_meas_lines,
+            meas_inv_list = meas_inv_list,
+        )
+
+@dataclass
+class CarryChainSkipAnd(c_ds.SizeableCircuit):
+    """ Part of peripherals used in carry chain class.    """
+    name: str = "xcarry_chain_and"
+
+    use_finfet: bool = None
+    use_tgate: bool = None
+    
+    carry_chain_type: str = None
+    skip_size: int = None
+
+    FAs_per_flut: int = None
+    cluster_size: int = None
+    nand1_size: int = None
+    nand2_size: int = None
+
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    def __post_init__(self):
+        super().__post_init__()
+        
         self.nand1_size = 2
         self.nand2_size = 2
 
+        assert self.carry_chain_type == "skip"
         # this size is currently a limit due to how the and tree is being generated
-        assert skip_size >= 4 and skip_size <=9
+        assert self.skip_size >= 4 and self.skip_size <= 9
 
-        if skip_size == 6:
+        if self.skip_size == 6:
             self.nand2_size = 3
-        elif skip_size == 5:
+        elif self.skip_size == 5:
             self.nand1_size = 3
-        elif skip_size > 6:
+        elif self.skip_size > 6:
             self.nand1_size = 3
             self.nand2_size = 3
 
 
-    def generate(self, subcircuit_filename, min_tran_width, use_finfet):
+    def generate(self, subcircuit_filename: str) -> Dict[str, int | float]:
         """ Generate Carry chain SPICE netlists."""  
 
-        self.transistor_names, self.wire_names = lut_subcircuits.generate_skip_and_tree(subcircuit_filename, self.name, use_finfet, self.nand1_size, self.nand2_size)
+        self.transistor_names, self.wire_names = lut_subcircuits.generate_skip_and_tree(subcircuit_filename, self.sp_name, self.use_finfet, self.nand1_size, self.nand2_size)
 
-        self.initial_transistor_sizes["inv_nand"+str(self.nand1_size)+"_xcarry_chain_and_1_nmos"] = 1
-        self.initial_transistor_sizes["inv_nand"+str(self.nand1_size)+"_xcarry_chain_and_1_pmos"] = 1
-        self.initial_transistor_sizes["inv_xcarry_chain_and_2_nmos"] = 1
-        self.initial_transistor_sizes["inv_xcarry_chain_and_2_pmos"] = 1
-        self.initial_transistor_sizes["inv_nand"+str(self.nand2_size)+"_xcarry_chain_and_3_nmos"] = 1
-        self.initial_transistor_sizes["inv_nand"+str(self.nand2_size)+"_xcarry_chain_and_3_pmos"] = 1
-        self.initial_transistor_sizes["inv_xcarry_chain_and_4_nmos"] = 1
-        self.initial_transistor_sizes["inv_xcarry_chain_and_4_pmos"] = 1
+
+        self.initial_transistor_sizes["inv_nand"+str(self.nand1_size)+f"_{self.sp_name}_1_nmos"] = 1
+        self.initial_transistor_sizes["inv_nand"+str(self.nand1_size)+f"_{self.sp_name}_1_pmos"] = 1
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_2_nmos"] = 1
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_2_pmos"] = 1
+        self.initial_transistor_sizes["inv_nand"+str(self.nand2_size)+f"_{self.sp_name}_3_nmos"] = 1
+        self.initial_transistor_sizes["inv_nand"+str(self.nand2_size)+f"_{self.sp_name}_3_pmos"] = 1
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_4_nmos"] = 1
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_4_pmos"] = 1
 
         return self.initial_transistor_sizes
 
-    def generate_carrychainand_top(self):
-        # Create directories
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name)  
-        
-        filename = self.name + ".sp"
-        top_file = open(filename, 'w')
-        top_file.write(".TITLE Carry Chain\n\n") 
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Include libraries, parameters and other\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Setup and input\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
-        top_file.write(".OPTIONS BRIEF=1\n\n")
-        top_file.write("* Input signals\n")
-
-        top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        top_file.write("* Power rail for the circuit under test.\n")
-        top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-        top_file.write("V_test vdd_test gnd supply_v\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Measurement\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write("* inv_nand"+self.name+"_1 delay\n")
-        top_file.write(".MEASURE TRAN meas_inv_nand"+str(self.nand1_size)+"_"+self.name+"_1_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(Xandtree.n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_nand"+str(self.nand1_size)+"_"+self.name+"_1_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(Xandtree.n_1_2) VAL='supply_v/2' RISE=1\n\n")
-
-        top_file.write("* inv_"+self.name+"_2 delays\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+self.name+"_2_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(Xandtree.n_1_3) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+self.name+"_2_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(Xandtree.n_1_3) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write("* Total delays\n")
-
-
-        top_file.write("* inv_nand"+self.name+"_3 delay\n")
-        top_file.write(".MEASURE TRAN meas_inv_nand"+str(self.nand2_size)+"_"+self.name+"_3_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(Xandtree.n_1_5) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_nand"+str(self.nand2_size)+"_"+self.name+"_3_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(Xandtree.n_1_5) VAL='supply_v/2' RISE=1\n\n")
-
-        top_file.write("* inv_"+self.name+"_4 delays\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+self.name+"_4_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+self.name+"_4_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write("* Total delays\n")
-
-        top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-
-        top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
-
-        top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-        top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
-        top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Circuit\n")
-        top_file.write("********************************************************************************\n\n")
-
-        # Generate Cin as part of wave-shaping circuitry:
-        if not self.use_tgate:
-            top_file.write("Xlut n_in n_1_1 vdd vdd vdd vdd vdd vdd vdd gnd lut\n")
-        else :
-            top_file.write("Xlut n_in n_1_1 vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
-        
-        top_file.write("Xcarrychain n_1_1 vdd gnd n_hang n_sum_out n_1_2 vdd gnd FA_carry_chain\n")
-        # Generate the unit under test:
-        top_file.write("Xandtree n_1_2 n_1_3 vdd_test gnd xcarry_chain_and\n")
-        # typical load
-        top_file.write("Xcarrychainskip_mux n_1_3 n_1_4 vdd gnd vdd gnd xcarry_chain_mux\n")   
-        top_file.write("Xcarrychain_mux n_1_4 n_1_5 vdd gnd vdd gnd carry_chain_mux\n")     
-
-        top_file.write(".END")
-        top_file.close()
-
-        # Come out of top-level directory
-        os.chdir("../")
-        
-        return (self.name + "/" + self.name + ".sp")
-
-
-    def generate_top(self):
-        """ Generate Top-level Evaluation Path for Carry chain """
-
-        self.top_spice_path = self.generate_carrychainand_top()
-
     def update_area(self, area_dict, width_dict):
         """ Calculate Carry Chain area and update dictionaries. """
-        area_1 = (area_dict["inv_nand"+str(self.nand1_size)+"_xcarry_chain_and_1"] + area_dict["inv_xcarry_chain_and_2"])* int(math.ceil(float(int(self.skip_size/self.nand1_size))))
-        area_2 = area_dict["inv_nand"+str(self.nand2_size)+"_xcarry_chain_and_3"] + area_dict["inv_xcarry_chain_and_4"]
+        area_1 = (area_dict["inv_nand"+str(self.nand1_size)+f"_{self.sp_name}_1"] + area_dict[f"inv_{self.sp_name}_2"])* int(math.ceil(float(int(self.skip_size/self.nand1_size))))
+        area_2 = area_dict["inv_nand"+str(self.nand2_size)+f"_{self.sp_name}_3"] + area_dict[f"inv_{self.sp_name}_4"]
         area = area_1 + area_2
         area_with_sram = area
         width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+        area_dict[self.sp_name] = area
+        width_dict[self.sp_name] = width
 
     def update_wires(self, width_dict, wire_lengths, wire_layers):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
-        if self.FAs_per_flut ==2:
-            wire_lengths["wire_" + self.name + "_1"] = (width_dict["ble"]*self.skip_size)/4.0
+        if self.FAs_per_flut == 2:
+            wire_lengths["wire_" + self.sp_name + "_1"] = (width_dict["ble"]*self.skip_size)/4.0
         else:
-            wire_lengths["wire_" + self.name + "_1"] = (width_dict["ble"]*self.skip_size)/2.0
-        wire_layers["wire_" + self.name + "_1"] = 0
-        wire_lengths["wire_" + self.name + "_2"] = width_dict[self.name]/2.0
-        wire_layers["wire_" + self.name + "_2"] = 0
+            wire_lengths["wire_" + self.sp_name + "_1"] = (width_dict["ble"]*self.skip_size)/2.0
+        wire_layers["wire_" + self.sp_name + "_1"] = consts.LOCAL_WIRE_LAYER
+        wire_lengths["wire_" + self.sp_name + "_2"] = width_dict[self.sp_name]/2.0
+        wire_layers["wire_" + self.sp_name + "_2"] = consts.LOCAL_WIRE_LAYER
 
     def print_details(self):
         print(" Carry Chain DETAILS:")
 
-class _CarryChainInterCluster(_SizableCircuit):
-    """ Wire dirvers of carry chain path between clusters"""
-    def __init__(self, use_finfet, carry_chain_type, inter_wire_length):
-        # Carry chain name
-        self.name = "carry_chain_inter"
-        self.use_finfet = use_finfet
-        # Ripple or Skip?
-        self.carry_chain_type = carry_chain_type
-        # length of the wire between cout of a cluster to cin of the other
-        self.inter_wire_length = inter_wire_length
 
-    def generate(self, subcircuit_filename, min_tran_width, use_finfet):
+@dataclass
+class CarryChainSkipAndTB(c_ds.SimTB):
+    lut: lut_lib.LUT = None
+    FA_carry_chain: CarryChain = None
+    carry_chain_and: CarryChainSkipAnd = None
+    carry_chain_skip_mux: CarryChainSkipMux = None
+    carry_chain_mux: CarryChainMux = None
+    
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    
+    # Initialized in __post_init__
+    dut_ckt: CarryChainSkipAnd = None
+    
+    def __hash__(self) -> int:
+        return super().__hash__()
+    
+    def __post_init__(self, subckt_lib):
+        super().__post_init__()
+        self.meas_points = []
+        self.pwr_v_node: str = "vdd_cc_and"
+
+        # Specify lut connections
+        if self.lut.use_tgate:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_1_1",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_c": self.vdd_node,
+                "n_c_n": self.gnd_node,
+                "n_d": self.vdd_node,
+                "n_d_n": self.gnd_node,
+                "n_e": self.vdd_node,
+                "n_e_n": self.gnd_node,
+                "n_f": self.vdd_node,
+                "n_f_n": self.gnd_node,
+                "n_vdd": self.vdd_node,
+                "n_gnd": self.gnd_node,
+            }
+        else:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_1_1",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_vdd": self.vdd_node,
+                "n_gnd": self.gnd_node,
+            }
+        # STIM PULSE Voltage SRC
+        self.stim_vsrc = c_ds.SpVoltageSrc(
+            name = "IN",
+            out_node = "n_in",
+            type = "PULSE",
+            init_volt = c_ds.Value(0), #V
+            peak_volt = c_ds.Value(name = self.supply_v_param), # TODO get this from defined location
+            pulse_width = c_ds.Value(2), # ns
+            period = c_ds.Value(4), # ns
+        )
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc = c_ds.SpVoltageSrc(
+            name = "_CC_AND",
+            out_node = self.pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        # Init DUT
+        self.dut_ckt = self.carry_chain_and
+
+        self.top_insts = [
+            # LUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut.name}", # TODO update to sp_name
+                subckt = subckt_lib[self.lut.name], # TODO update to sp_name
+                conns = lut_conns,
+            ),
+            # FA Carry Chain
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}", # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": "n_1_1",
+                    "n_b": self.vdd_node,
+                    "n_cin": self.gnd_node,
+                    "n_cout": "n_hang",
+                    "n_sum_out": "n_sum_out",
+                    "n_p": "n_1_2",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # DUT And Tree
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_and.sp_name}", # TODO update to sp_name
+                subckt = subckt_lib[self.carry_chain_and.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_in": "n_1_2",
+                    "n_out": "n_1_3",
+                    "n_vdd": self.pwr_v_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # Carry Chain Skip Mux
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_skip_mux.sp_name}", 
+                subckt = subckt_lib[self.carry_chain_skip_mux.sp_name], 
+                conns = {
+                    "n_in": "n_1_3",
+                    "n_out": "n_1_4",
+                    "n_gate": self.vdd_node,
+                    "n_gate_n": self.gnd_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # Carry Chain Mux
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_mux.sp_name}", 
+                subckt = subckt_lib[self.carry_chain_mux.sp_name], 
+                conns = {
+                    "n_in": "n_1_4",
+                    "n_out": "n_1_5",
+                    "n_gate": self.vdd_node,
+                    "n_gate_n": self.gnd_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+        ]
+    def generate_top(self):
+        # dut_sp_name: str = self.dut_ckt.sp_name # TODO update to sp_name
+        trig_node: str = "n_1_2"
+        delay_names: List[str] = [
+            f"inv_nand{self.carry_chain_and.nand1_size}_{self.carry_chain_and.sp_name}_1",
+            f"inv_{self.carry_chain_and.sp_name}_2",
+            f"inv_nand{self.carry_chain_and.nand2_size}_{self.carry_chain_and.sp_name}_3",
+            f"inv_{self.carry_chain_and.sp_name}_4",
+            f"total",
+        ] 
+        # Instance path from our TB to the ON Local Mux inst
+        cc_and_dut_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts, 
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+                for re_str in [
+                    f"{self.carry_chain_and.sp_name}",
+                ]
+            ],
+            []
+        )
+        targ_nodes: List[str] = [
+            ".".join([inst.name for inst in cc_and_dut_path] + ["n_1_2"]),
+            ".".join([inst.name for inst in cc_and_dut_path] + ["n_1_3"]),
+            ".".join([inst.name for inst in cc_and_dut_path] + ["n_1_5"]),
+            "n_1_3",
+            "n_1_3",
+        ]
+        low_v_node: str = "gnd"
+        cust_pwr_meas_lines: List[str] = [
+            f".MEASURE TRAN meas_logic_low_voltage FIND V({low_v_node}) AT=25n",
+            f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.",
+            f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
+            f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",
+        ]
+        tb_fname: str = f"{self.dut_ckt.sp_name}_tb_{self.id}"
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = "gnd", # TODO figure out why tf we are measuring the low value of gnd...
+            pwr_meas_lines = cust_pwr_meas_lines,
+            tb_fname = tb_fname,
+        )
+
+
+@dataclass
+class CarryChainInterCluster(c_ds.SizeableCircuit):
+    """ Wire dirvers of carry chain path between clusters"""
+
+    name: str = "carry_chain_inter"
+
+    use_finfet: bool = None
+    carry_chain_type: str = None # Ripple or skip?
+    inter_wire_length: float = None # Length of wire between Cout of a cluster and Cin of the next cluster
+
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    def generate(self, subcircuit_filename: str) -> Dict[str, int | float]:
         """ Generate Carry chain SPICE netlists."""  
 
-        self.transistor_names, self.wire_names = lut_subcircuits.generate_carry_inter(subcircuit_filename, self.name, use_finfet)
+        self.transistor_names, self.wire_names = lut_subcircuits.generate_carry_inter(subcircuit_filename, self.sp_name, self.use_finfet)
 
-        self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-        self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-        self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 2
-        self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 2
+        self.initial_transistor_sizes["inv_" + self.sp_name + "_1_nmos"] = 1
+        self.initial_transistor_sizes["inv_" + self.sp_name + "_1_pmos"] = 1
+        self.initial_transistor_sizes["inv_" + self.sp_name + "_2_nmos"] = 2
+        self.initial_transistor_sizes["inv_" + self.sp_name + "_2_pmos"] = 2
 
         return self.initial_transistor_sizes
 
-    def generate_carry_inter_top(self):
-
-        # Create directories
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name)  
-        
-        filename = self.name + ".sp"
-        top_file = open(filename, 'w')
-        top_file.write(".TITLE Carry Chain\n\n") 
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Include libraries, parameters and other\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Setup and input\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".TRAN 1p 26n SWEEP DATA=sweep_data\n")
-        top_file.write(".OPTIONS BRIEF=1\n\n")
-        top_file.write("* Input signals\n")
-
-        top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        top_file.write("* Power rail for the circuit under test.\n")
-        top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-        top_file.write("V_test vdd_test gnd supply_v\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Measurement\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write("* inv_nand"+self.name+"_1 delay\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+self.name+"_1_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(Xdrivers.n_1_1) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+self.name+"_1_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(Xdrivers.n_1_1) VAL='supply_v/2' RISE=1\n\n")
-
-        top_file.write("* inv_"+self.name+"_2 delays\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+self.name+"_2_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+self.name+"_2_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write("* Total delays\n")
-
-        top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-
-        top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(gnd) AT=3n\n\n")
-
-        top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-        top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_test) FROM=0ns TO=26ns\n")
-        top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Circuit\n")
-        top_file.write("********************************************************************************\n\n")
-
-        # Generate Cin as part of wave-shaping circuitry:
-        top_file.write("Xcarrychain_0 vdd gnd n_in n_1_1 n_sum_out n_1p vdd gnd FA_carry_chain\n")   
-        top_file.write("Xcarrychain vdd gnd n_1_1 n_1_2 n_sum_out2 n_2p vdd gnd FA_carry_chain\n")
-
-        # Generate the unit under test:
-        top_file.write("Xdrivers n_1_2 n_1_3 vdd_test gnd carry_chain_inter\n")
-        # typical load (next carry chain)
-        top_file.write("Xcarrychain_l n_1_3 vdd gnd n_hangl n_sum_out3 n_3p vdd gnd FA_carry_chain\n")   
-        
-
-        top_file.write(".END")
-        top_file.close()
-
-        # Come out of top-level directory
-        os.chdir("../")
-        
-        return (self.name + "/" + self.name + ".sp")
-
-
-    def generate_top(self):
-        """ Generate Top-level Evaluation Path for Carry chain """
-
-        self.top_spice_path = self.generate_carry_inter_top()
-
     def update_area(self, area_dict, width_dict):
         """ Calculate Carry Chain area and update dictionaries. """
-        area = area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"]
+        area = area_dict["inv_" + self.sp_name + "_1"] + area_dict["inv_" + self.sp_name + "_2"]
         area_with_sram = area
         width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+        area_dict[self.sp_name] = area
+        width_dict[self.sp_name] = width
 
     def update_wires(self, width_dict, wire_lengths, wire_layers):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
 
-        wire_lengths["wire_" + self.name + "_1"] = width_dict["tile"] * self.inter_wire_length
-        wire_layers["wire_" + self.name + "_1"] = 0
+        wire_lengths["wire_" + self.sp_name + "_1"] = width_dict["tile"] * self.inter_wire_length
+        wire_layers["wire_" + self.sp_name + "_1"] = consts.LOCAL_WIRE_LAYER
 
+    def print_details(self):
+        pass
 
+@dataclass
+class CarryChainInterClusterTB(c_ds.SimTB):
+    FA_carry_chain: CarryChain = None
+    carry_chain_inter: CarryChainInterCluster = None
 
-class _CarryChainSkipMux(_SizableCircuit):
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    
+    # Initialized in __post_init__
+    dut_ckt: CarryChainSkipAnd = None
+    
+    def __hash__(self) -> int:
+        return super().__hash__() 
+    
+    def __post_init__(self, subckt_lib):
+        super().__post_init__()
+        self.meas_points = []
+        self.pwr_v_node: str = "vdd_cc_inter_cluster"
+        self.dut_ckt = self.carry_chain_inter
+        # STIM PULSE Voltage SRC
+        self.stim_vsrc = c_ds.SpVoltageSrc(
+            name = "IN",
+            out_node = "n_in",
+            type = "PULSE",
+            init_volt = c_ds.Value(0), #V
+            peak_volt = c_ds.Value(name = self.supply_v_param), # TODO get this from defined location
+            pulse_width = c_ds.Value(2), # ns
+            period = c_ds.Value(4), # ns
+        )
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc = c_ds.SpVoltageSrc(
+            name = "_CC_INTER",
+            out_node = self.pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        self.top_insts = [
+            # FA Carry Chain Shape Circuitry
+            # Wave Shaping Circuitry
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_1",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_in",
+                    "n_cout":"n_1_1",
+                    "n_sum_out": "n_sum_out",
+                    "n_p": "n_p_0",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_shape_2",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": self.vdd_node,
+                    "n_b": self.gnd_node,
+                    "n_cin": "n_1_1",
+                    "n_cout":"n_1_2",
+                    "n_sum_out": "n_sum_out_2",
+                    "n_p": "n_p_1",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # DUT Carry Chain Inter
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_inter.sp_name}_dut", # TODO update to sp_name
+                subckt = subckt_lib[self.carry_chain_inter.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_in": "n_1_2",
+                    "n_out": "n_1_3",
+                    "n_vdd": self.pwr_v_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # Load (FA Carry Chain)
+            # DUT load
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}_load",  # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": "n_1_3", 
+                    "n_b": self.vdd_node,
+                    "n_cin": self.gnd_node,
+                    "n_cout": "n_hang_l",
+                    "n_sum_out": "n_sum_out_3",
+                    "n_p": "n_p_2",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            )
+        ]
+    def generate_top(self):
+        dut_sp_name: str = self.dut_ckt.name
+        trig_node: str = "n_1_2"
+        # Instance path from our TB to the ON Local Mux inst
+        cc_inter_dut_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts, 
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+                for re_str in [
+                    r"carry_chain_inter(?:.*)_dut",
+                ]
+            ],
+            []
+        )
+        delay_nodes: List[str] = [
+            f"inv_{self.carry_chain_inter.sp_name}_1",
+            f"inv_{self.carry_chain_inter.sp_name}_2",
+            f"total",
+        ]
+        targ_nodes: List[str] = [
+            ".".join([inst.name for inst in cc_inter_dut_path] + ["n_1_1"]),
+            "n_1_3",
+            "n_1_3",
+        ]
+        low_v_node: str = "gnd"
+        cust_pwr_meas_lines: List[str] = [
+            f".MEASURE TRAN meas_logic_low_voltage FIND V({low_v_node}) AT=25n",
+            f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.",
+            f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
+            f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",
+        ]
+        tb_fname: str = f"{dut_sp_name}_tb_{self.id}"
+        # Base class generate top does all common functionality
+        return super().generate_top(
+            delay_names = delay_nodes,
+            trig_node = trig_node,
+            targ_nodes = targ_nodes,
+            low_v_node = "gnd", # TODO figure out why tf we are measuring the low value of gnd...
+            pwr_meas_lines = cust_pwr_meas_lines,
+            tb_fname = tb_fname,
+        )
+
+@dataclass
+class CarryChainSkipMux(mux.Mux2to1):
     """ Part of peripherals used in carry chain class.    """
-    def __init__(self, use_finfet, carry_chain_type, use_tgate):
-        # Carry chain name
-        self.name = "xcarry_chain_mux"
-        self.use_finfet = use_finfet
-        # ripple or skip?
-        self.carry_chain_type = carry_chain_type
-        assert self.carry_chain_type == "skip"
-        self.use_tgate = use_tgate
+    name: str = "xcarry_chain_mux"
+    use_finfet: bool = None
+    use_tgate: bool = None
 
+    carry_chain_type: str = None # Ripple or skip?
 
+    def __hash__(self) -> int:
+        return super().__hash__()
 
-    def generate(self, subcircuit_filename, min_tran_width, use_finfet):
-        """ Generate the SPICE netlists."""  
+    def update_wires(self, width_dict: Dict[str, int], wire_lengths: Dict[str, float], wire_layers: Dict[str, int]):
+        """ Update the wires of the mux. """
+        # Update the wires of the mux
+        super().update_wires(width_dict, wire_lengths, wire_layers)
+        wire_layers["wire_lut_to_flut_mux"] = consts.LOCAL_WIRE_LAYER
 
-        if not self.use_tgate :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_ptran_2_to_1_mux(subcircuit_filename, self.name)
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["ptran_" + self.name + "_nmos"] = 2
-            self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
-        else :
-            self.transistor_names, self.wire_names = mux_subcircuits.generate_tgate_2_to_1_mux(subcircuit_filename, self.name)      
-            # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-            self.initial_transistor_sizes["tgate_" + self.name + "_nmos"] = 2
-            self.initial_transistor_sizes["tgate_" + self.name + "_pmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 5
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 5
-       
-        return self.initial_transistor_sizes
+@dataclass
+class CarryChainSkipMuxTB(c_ds.SimTB):
+    lut: lut_lib.LUT = None
+    FA_carry_chain: CarryChain = None
+    carry_chain_and: CarryChainSkipAnd = None
+    carry_chain_skip_mux: CarryChainSkipMux = None
+    carry_chain_mux: CarryChainMux = None
+    
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    
+    # Initialized in __post_init__
+    dut_ckt: CarryChainSkipAnd = None
+    
+    def __hash__(self) -> int:
+        return super().__hash__()
+      
+    def __post_init__(self, subckt_lib):
+        super().__post_init__()
+        self.meas_points = []
+        self.pwr_v_node: str = "vdd_skip_mux"
 
+        # Specify lut connections
+        if self.lut.use_tgate:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_1_1",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_c": self.vdd_node,
+                "n_c_n": self.gnd_node,
+                "n_d": self.vdd_node,
+                "n_d_n": self.gnd_node,
+                "n_e": self.vdd_node,
+                "n_e_n": self.gnd_node,
+                "n_f": self.vdd_node,
+                "n_f_n": self.gnd_node,
+                "n_vdd": self.vdd_node,
+                "n_gnd": self.gnd_node,
+            }
+        else:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_1_1",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_vdd": self.vdd_node,
+                "n_gnd": self.gnd_node,
+            }
+        # STIM PULSE Voltage SRC
+        self.stim_vsrc = c_ds.SpVoltageSrc(
+            name = "IN",
+            out_node = "n_in",
+            type = "PULSE",
+            init_volt = c_ds.Value(0), #V
+            peak_volt = c_ds.Value(name = self.supply_v_param), # TODO get this from defined location
+            pulse_width = c_ds.Value(2), # ns
+            period = c_ds.Value(4), # ns
+        )
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc = c_ds.SpVoltageSrc(
+            name = "_CC_SKIP_MUX",
+            out_node = self.pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        # Init DUT
+        self.dut_ckt = self.carry_chain_skip_mux
 
-    def generate_skip_mux_top(self):
-        # Create directories
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name)  
-        
-        filename = self.name + ".sp"
-        top_file = open(filename, 'w')
-        top_file.write(".TITLE Carry Chain\n\n")
+        self.top_insts = [
+            # LUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut.name}", # TODO update to sp_name
+                subckt = subckt_lib[self.lut.name], # TODO update to sp_name
+                conns = lut_conns,
+            ),
+            # FA Carry Chain
+            rg_ds.SpSubCktInst(
+                name = f"X{self.FA_carry_chain.sp_name}", # TODO update to sp_name
+                subckt = subckt_lib[self.FA_carry_chain.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_a": "n_1_1",
+                    "n_b": self.vdd_node,
+                    "n_cin": self.gnd_node,
+                    "n_cout": "n_hang",
+                    "n_sum_out": "n_sum_out",
+                    "n_p": "n_1_2",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # And Tree
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_and.sp_name}", # TODO update to sp_name
+                subckt = subckt_lib[self.carry_chain_and.sp_name], # TODO update to sp_name
+                conns = {
+                    "n_in": "n_1_2",
+                    "n_out": "n_1_3",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # DUT Carry Chain Skip Mux
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_skip_mux.sp_name}_dut", 
+                subckt = subckt_lib[self.carry_chain_skip_mux.sp_name], 
+                conns = {
+                    "n_in": "n_1_3",
+                    "n_out": "n_1_4",
+                    "n_gate": self.vdd_node,
+                    "n_gate_n": self.gnd_node,
+                    "n_vdd": self.pwr_v_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # Carry Chain Mux
+            rg_ds.SpSubCktInst(
+                name = f"X{self.carry_chain_mux.sp_name}", 
+                subckt = subckt_lib[self.carry_chain_mux.sp_name], 
+                conns = {
+                    "n_in": "n_1_4",
+                    "n_out": "n_1_5",
+                    "n_gate": self.vdd_node,
+                    "n_gate_n": self.gnd_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+        ]
 
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Include libraries, parameters and other\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Setup and input\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-        top_file.write(".OPTIONS BRIEF=1\n\n")
-        top_file.write("* Input signal\n")
-        top_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        top_file.write("* Power rail for the circuit under test.\n")
-        top_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-        top_file.write("V_FLUT vdd_test gnd supply_v\n\n")
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Measurement\n")
-        top_file.write("********************************************************************************\n\n")
-        top_file.write("* inv_"+ self.name +"_1 delay\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+ self.name +"_1_tfall TRIG V(n_1_3) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(Xcarrychainskip_mux.n_2_1) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+ self.name +"_1_trise TRIG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(Xcarrychainskip_mux.n_2_1) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write("* inv_"+ self.name +"_2 delays\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+ self.name +"_2_tfall TRIG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_inv_"+ self.name +"_2_trise TRIG V(n_1_3) VAL='supply_v/2' RISE=1\n")
-        top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write("* Total delays\n")
-        top_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-        #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' FALL=1\n")
-        top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-        top_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_3) VAL='supply_v/2' RISE=1\n")
-        #top_file.write("+    TARG V(n_1_3) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write("+    TARG V(n_1_4) VAL='supply_v/2' RISE=1\n\n")
-        top_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_general_out) AT=3n\n\n")
-
-        top_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-        top_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_FLUT) FROM=0ns TO=4ns\n")
-        top_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/4n)*supply_v'\n\n")
-
-
-        top_file.write("********************************************************************************\n")
-        top_file.write("** Circuit\n")
-        top_file.write("********************************************************************************\n\n")
-
-        # Generate Cin as part of wave-shaping circuitry:
-        if not self.use_tgate:
-            top_file.write("Xlut n_in n_1_1 vdd vdd vdd vdd vdd vdd vdd gnd lut\n")
-        else :
-            top_file.write("Xlut n_in n_1_1 vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
-        
-        top_file.write("Xcarrychain n_1_1 vdd gnd n_hang n_sum_out n_1_2 vdd gnd FA_carry_chain\n")
-        
-        top_file.write("Xandtree n_1_2 n_1_3 vdd gnd xcarry_chain_and\n")
-        # Generate the unit under test:
-        top_file.write("Xcarrychainskip_mux n_1_3 n_1_4 vdd gnd vdd_test gnd xcarry_chain_mux\n")   
-        # typical load
-        top_file.write("Xcarrychain_mux n_1_4 n_1_5 vdd gnd vdd gnd carry_chain_mux\n")     
-
-        top_file.write(".END")
-        top_file.close()
-
-        # Come out of top-level directory
-        os.chdir("../")
-        return (self.name + "/" + self.name + ".sp")
-
-
-    def generate_top(self):       
-
-        print("Generating top-level " + self.name)
-        self.top_spice_path = self.generate_skip_mux_top()
-
-    def update_area(self, area_dict, width_dict):
-
-        if not self.use_tgate :
-            area = (2*area_dict["ptran_" + self.name] +
-                    area_dict["rest_" + self.name] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
-        else :
-            area = (2*area_dict["tgate_" + self.name] +
-                    area_dict["inv_" + self.name + "_1"] +
-                    area_dict["inv_" + self.name + "_2"])
-
-        area = area + area_dict["sram"]
-        width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
-
-        return area
-                
-
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
-        """ Update wire of member objects. """
-        # Update wire lengths
-        if not self.use_tgate :
-            wire_lengths["wire_" + self.name] = width_dict["ptran_" + self.name]
-        else :
-            wire_lengths["wire_" + self.name] = width_dict["tgate_" + self.name]
-
-        wire_lengths["wire_" + self.name + "_driver"] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_1"])/4
-        
-        # Update wire layers
-        wire_layers["wire_" + self.name] = 0
-        wire_layers["wire_lut_to_flut_mux"] = 0
-        wire_layers["wire_" + self.name + "_driver"] = 0    
+    def generate_top(self):
+        # dut_sp_name: str = self.dut_ckt.sp_name
+        trig_node: str = "n_1_3"
+        delay_names: List[str] = [
+            f"inv_{self.dut_ckt.sp_name}_1",
+            f"inv_{self.dut_ckt.sp_name}_2",
+            f"total",
+        ] 
+        # Instance path from our TB to the ON Local Mux inst
+        cc_skip_mux_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts, 
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+                for re_str in [
+                    r"carry_chain_mux_(?:.*)_dut",
+                ]
+            ],
+            []
+        )
+        targ_nodes: List[str] = [
+            ".".join([inst.name for inst in cc_skip_mux_path] + ["n_2_1"]),
+            "n_1_4",
+            "n_1_4",
+        ]
+        # cust_pwr_meas_lines: List[str] = [
+        #     f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.",
+        #     f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO=26ns",
+        #     f".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/26n)*supply_v'",
+        # ]
+        tb_fname: str = f"{self.dut_ckt.sp_name}_tb_{self.id}"
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = self.gnd_node, # TODO figure out why tf we measure voltage of a floating node...
+            # pwr_meas_lines = cust_pwr_meas_lines,
+            tb_fname = tb_fname,
+        )

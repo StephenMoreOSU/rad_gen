@@ -1,256 +1,83 @@
+from __future__ import annotations
+from dataclasses import dataclass, field, InitVar
 
-from src.coffe.circuit_baseclasses import _SizableCircuit, _CompoundCircuit
-import src.coffe.fpga as fpga
+import math, os, sys
+import re
+from typing import List, Dict, Any, Tuple, Union, Type
 
-import src.coffe.lut_subcircuits as lut_subcircuits
+import src.common.data_structs as rg_ds
+import src.coffe.data_structs as c_ds
 import src.coffe.utils as utils
 
-from typing import Dict, List, Tuple, Union, Any
-import math, os
+import src.common.spice_parser as sp_parser
+import src.coffe.lut_subcircuits as lut_subcircuits
 
+import src.coffe.new_cb_mux as cb_mux_lib
+import src.coffe.new_ble as ble_lib
+import src.coffe.new_logic_block as lb_lib
 
+import src.coffe.constants as consts
 
-class _LUTInputDriver(_SizableCircuit):
+@dataclass
+class LUTInputDriver(c_ds.SizeableCircuit):
     """ LUT input driver class. LUT input drivers can optionally support register feedback.
         They can also be connected to FF register input select. 
         Thus, there are 4  types of LUT input drivers: "default", "default_rsel", "reg_fb" and "reg_fb_rsel".
         When a LUT input driver is created in the '__init__' function, it is given one of these types.
         All subsequent processes (netlist generation, area calculations, etc.) will use this type attribute.
         """
+    name: str = None
+    lut_input_key: str = None # 'a' 'b' 'c', etc -> which input of the LUT this driver is connected to
+    type: str = None # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
+    delay_weight: float = None         # Delay weight in a representative critical path
+    use_tgate: bool = None
+    
+    # Update wire dependancies -> basically circuits that would be required to estimate the layout of wires within the self circuit
+    local_mux: lb_lib.LocalMux = None
 
-    def __init__(self, name, type, delay_weight, use_tgate, use_fluts):
-        self.name = "lut_" + name + "_driver"
-        # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
-        self.type = type
-        # Delay weight in a representative critical path
-        self.delay_weight = delay_weight
-        # use pass transistor or transmission gate
-        self.use_tgate = use_tgate
-        self.use_fluts = use_fluts
-        
-    def generate(self, subcircuit_filename, min_tran_width):
+    def __hash__(self) -> int:
+        return super().__hash__()
+    
+    def __post_init__(self):
+        self.name = f"lut_{self.lut_input_key}_driver"
+        super().__post_init__()
+
+    def generate(self, subcircuit_filename: str) -> Dict[str, float | int]:
         """ Generate SPICE netlist based on type of LUT input driver. """
         if not self.use_tgate :
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut_driver(subcircuit_filename, self.name, self.type)
+            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut_driver(subcircuit_filename, self.sp_name, self.type)
         else :
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut_driver(subcircuit_filename, self.name, self.type)
+            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut_driver(subcircuit_filename, self.sp_name, self.type)
         
         # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
         if not self.use_tgate :
             if self.type != "default":
-                self.initial_transistor_sizes["inv_" + self.name + "_0_nmos"] = 2
-                self.initial_transistor_sizes["inv_" + self.name + "_0_pmos"] = 2
+                self.initial_transistor_sizes["inv_" + self.sp_name + "_0_nmos"] = 2
+                self.initial_transistor_sizes["inv_" + self.sp_name + "_0_pmos"] = 2
             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                self.initial_transistor_sizes["ptran_" + self.name + "_0_nmos"] = 2
-                self.initial_transistor_sizes["rest_" + self.name + "_pmos"] = 1
+                self.initial_transistor_sizes["ptran_" + self.sp_name + "_0_nmos"] = 2
+                self.initial_transistor_sizes["rest_" + self.sp_name + "_pmos"] = 1
             if self.type != "default":
-                self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-                self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 2
+                self.initial_transistor_sizes["inv_" + self.sp_name + "_1_nmos"] = 1
+                self.initial_transistor_sizes["inv_" + self.sp_name + "_1_pmos"] = 1
+            self.initial_transistor_sizes["inv_" + self.sp_name + "_2_nmos"] = 2
+            self.initial_transistor_sizes["inv_" + self.sp_name + "_2_pmos"] = 2
         else :
             if self.type != "default":
-                self.initial_transistor_sizes["inv_" + self.name + "_0_nmos"] = 2
-                self.initial_transistor_sizes["inv_" + self.name + "_0_pmos"] = 2
+                self.initial_transistor_sizes["inv_" + self.sp_name + "_0_nmos"] = 2
+                self.initial_transistor_sizes["inv_" + self.sp_name + "_0_pmos"] = 2
             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                self.initial_transistor_sizes["tgate_" + self.name + "_0_nmos"] = 2
-                self.initial_transistor_sizes["tgate_" + self.name + "_0_pmos"] = 2
+                self.initial_transistor_sizes["tgate_" + self.sp_name + "_0_nmos"] = 2
+                self.initial_transistor_sizes["tgate_" + self.sp_name + "_0_pmos"] = 2
             if self.type != "default":
-                self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-                self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-            self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 2
-            self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 2
+                self.initial_transistor_sizes["inv_" + self.sp_name + "_1_nmos"] = 1
+                self.initial_transistor_sizes["inv_" + self.sp_name + "_1_pmos"] = 1
+            self.initial_transistor_sizes["inv_" + self.sp_name + "_2_nmos"] = 2
+            self.initial_transistor_sizes["inv_" + self.sp_name + "_2_pmos"] = 2
                
         return self.initial_transistor_sizes
-
-
-
-    def generate_lut_driver_top(self):
-        """ Generate the top level lut input driver SPICE file """
-        
-        # Create directories
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name) 
-    
-        lut_driver_filename = self.name + ".sp"
-        input_driver_file = open(lut_driver_filename, 'w')
-        input_driver_file.write(".TITLE " + self.name + " \n\n") 
-    
-        input_driver_file.write("********************************************************************************\n")
-        input_driver_file.write("** Include libraries, parameters and other\n")
-        input_driver_file.write("********************************************************************************\n\n")
-        input_driver_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        input_driver_file.write("********************************************************************************\n")
-        input_driver_file.write("** Setup and input\n")
-        input_driver_file.write("********************************************************************************\n\n")
-        input_driver_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-        input_driver_file.write(".OPTIONS BRIEF=1\n\n")
-        input_driver_file.write("* Input signal\n")
-        input_driver_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        input_driver_file.write("* Power rail for the circuit under test.\n")
-        input_driver_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-        input_driver_file.write("V_LUT_DRIVER vdd_lut_driver gnd supply_v\n\n")
-
-        input_driver_file.write("********************************************************************************\n")
-        input_driver_file.write("** Measurement\n")
-        input_driver_file.write("********************************************************************************\n\n")
-        # We measure different things based on the input driver type
-        if self.type != "default":
-            input_driver_file.write("* inv_" + self.name + "_0 delays\n")
-            input_driver_file.write(".MEASURE TRAN meas_inv_" + self.name + "_0_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-            input_driver_file.write("+    TARG V(X" + self.name + "_1.n_1_1) VAL='supply_v/2' FALL=1\n")
-            input_driver_file.write(".MEASURE TRAN meas_inv_" + self.name + "_0_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-            input_driver_file.write("+    TARG V(X" + self.name + "_1.n_1_1) VAL='supply_v/2' RISE=1\n\n")
-            input_driver_file.write("* inv_" + self.name + "_1 delays\n")
-            input_driver_file.write(".MEASURE TRAN meas_inv_" + self.name + "_1_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-            input_driver_file.write("+    TARG V(X" + self.name + "_1.n_3_1) VAL='supply_v/2' FALL=1\n")
-            input_driver_file.write(".MEASURE TRAN meas_inv_" + self.name + "_1_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-            input_driver_file.write("+    TARG V(X" + self.name + "_1.n_3_1) VAL='supply_v/2' RISE=1\n\n")
-        input_driver_file.write("* inv_" + self.name + "_2 delays\n")
-        input_driver_file.write(".MEASURE TRAN meas_inv_" + self.name + "_2_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        input_driver_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        input_driver_file.write(".MEASURE TRAN meas_inv_" + self.name + "_2_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        input_driver_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-        input_driver_file.write("* Total delays\n")
-        input_driver_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        input_driver_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        input_driver_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        input_driver_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-
-        input_driver_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_out) AT=3n\n\n")
-
-        input_driver_file.write("* Measure the power required to propagate a rise and a fall transition through the lut driver at 250MHz.\n")
-        input_driver_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_LUT_DRIVER) FROM=0ns TO=4ns\n")
-        input_driver_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/4n)*supply_v'\n\n")
-
-        input_driver_file.write("********************************************************************************\n")
-        input_driver_file.write("** Circuit\n")
-        input_driver_file.write("********************************************************************************\n\n")
-        input_driver_file.write("Xcb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd cb_mux_on\n")
-        input_driver_file.write("Xlocal_routing_wire_load_1 n_1_1 n_1_2 vsram vsram_n vdd gnd vdd local_routing_wire_load\n")
-        input_driver_file.write("X" + self.name + "_1 n_1_2 n_out vsram vsram_n n_rsel n_2_1 vdd_lut_driver gnd " + self.name + "\n")
-        if self.type == "default_rsel" or self.type == "reg_fb_rsel":
-            # Connect a load to n_rsel node
-            input_driver_file.write("Xff n_rsel n_ff_out vsram vsram_n gnd vdd gnd vdd gnd vdd vdd gnd ff\n")
-        input_driver_file.write("X" + self.name + "_not_1 n_2_1 n_out_n vdd gnd " + self.name + "_not\n")
-        input_driver_file.write("X" + self.name + "_load_1 n_out vdd gnd " + self.name + "_load\n")
-        input_driver_file.write("X" + self.name + "_load_2 n_out_n vdd gnd " + self.name + "_load\n\n")
-        input_driver_file.write(".END")
-        input_driver_file.close()
-
-        # Come out of lut_driver directory
-        os.chdir("../")
-        
-        return (self.name + "/" + self.name + ".sp")
-
-    def generate_lut_and_driver_top(self):
-        """ Generate the top level lut with driver SPICE file. We use this to measure final delays of paths through the LUT. """
-        
-        # Create directories
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name)  
-        
-        lut_driver_filename = self.name + "_with_lut.sp"
-        spice_file = open(lut_driver_filename, 'w')
-        spice_file.write(".TITLE " + self.name + " \n\n") 
-        
-        spice_file.write("********************************************************************************\n")
-        spice_file.write("** Include libraries, parameters and other\n")
-        spice_file.write("********************************************************************************\n\n")
-        spice_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        # spice_file.write(".OPTIONS POST=2\n\n")
-        
-        spice_file.write("********************************************************************************\n")
-        spice_file.write("** Setup and input\n")
-        spice_file.write("********************************************************************************\n\n")
-        spice_file.write(".TRAN 1p 16n SWEEP DATA=sweep_data\n")
-        spice_file.write(".OPTIONS BRIEF=1\n\n")
-        spice_file.write("* Input signal\n")
-        spice_file.write("VIN_SRAM n_in_sram gnd PULSE (0 supply_v 4n 0 0 4n 8n)\n")
-        spice_file.write("VIN_GATE n_in_gate gnd PULSE (supply_v 0 3n 0 0 2n 4n)\n\n")
-        spice_file.write("* Power rail for the circuit under test.\n")
-        spice_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-        spice_file.write("V_LUT vdd_lut gnd supply_v\n\n")
-
-        spice_file.write("********************************************************************************\n")
-        spice_file.write("** Measurement\n")
-        spice_file.write("********************************************************************************\n\n")
-        spice_file.write("* Total delays\n")
-        spice_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_3_1) VAL='supply_v/2' RISE=2\n")
-        spice_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        spice_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_3_1) VAL='supply_v/2' RISE=1\n")
-        spice_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-        
-        spice_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_out) AT=3n\n\n")
-
-        spice_file.write("* Measure the power required to propagate a rise and a fall transition through the lut at 250MHz.\n")
-        spice_file.write(".MEASURE TRAN meas_current1 INTEGRAL I(V_LUT) FROM=5ns TO=7ns\n")
-        spice_file.write(".MEASURE TRAN meas_current2 INTEGRAL I(V_LUT) FROM=9ns TO=11ns\n")
-        spice_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current1 + meas_current2)/4n)*supply_v'\n\n")
-
-        spice_file.write("********************************************************************************\n")
-        spice_file.write("** Circuit\n")
-        spice_file.write("********************************************************************************\n\n")    
-        spice_file.write("Xcb_mux_on_1 n_in_gate n_1_1 vsram vsram_n vdd gnd cb_mux_on\n")
-        spice_file.write("Xlocal_routing_wire_load_1 n_1_1 n_1_2 vsram vsram_n vdd gnd vdd local_routing_wire_load\n")
-        spice_file.write("X" + self.name + "_1 n_1_2 n_3_1 vsram vsram_n n_rsel n_2_1 vdd gnd " + self.name + "\n")
-
-        # Connect a load to n_rsel node
-        if self.type == "default_rsel" or self.type == "reg_fb_rsel":
-            spice_file.write("Xff n_rsel n_ff_out vsram vsram_n gnd vdd gnd vdd gnd vdd vdd gnd ff\n")
-        spice_file.write("X" + self.name + "_not_1 n_2_1 n_1_4 vdd gnd " + self.name + "_not\n")
-
-        # Connect the LUT driver to a different LUT input based on LUT driver name and connect the other inputs to vdd
-        # pass- transistor ----> "Xlut n_in_sram n_out a b c d e f vdd_lut gnd lut"
-        # transmission gate ---> "Xlut n_in_sram n_out a a_not b b_not c c_not d d_not e e_not f f_not vdd_lut gnd lut"
-        lut_letter = self.name.replace("_driver", "")
-        lut_letter = lut_letter.replace("lut_", "")
-        # string holding lut input connections depending on the driver letter
-        lut_input_nodes = ""
-        # loop over the letters a -> f
-        for letter in range(97,103):
-            # if this is the driver connect it to n_3_1 else connect it to vdd
-            if chr(letter) == lut_letter:
-                lut_input_nodes += "n_3_1 "
-                # if tgate connect the complement input to n_1_4
-                if self.use_tgate: lut_input_nodes += "n_1_4 "
-            else:
-                lut_input_nodes += "vdd "
-                # if tgate connect the complement to gnd
-                if self.use_tgate: lut_input_nodes += "gnd "
-
-        spice_file.write("Xlut n_in_sram n_out " + lut_input_nodes + "vdd_lut gnd lut\n")
-        
-        if self.use_fluts:
-            spice_file.write("Xwireflut n_out n_out2 wire Rw=wire_lut_to_flut_mux_res Cw=wire_lut_to_flut_mux_cap\n") 
-            spice_file.write("Xthemux n_out2 n_out3 vdd gnd vdd gnd flut_mux\n") 
-        else:
-            spice_file.write("Xlut_output_load n_out n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
-        
-        
-        spice_file.write(".END")
-        spice_file.close()
-
-        # Come out of lut_driver directory
-        os.chdir("../")  
-
-
-
-    def generate_top(self):
-        """ Generate top-level SPICE file based on type of LUT input driver. """
-        
-        # Generate top level files based on what type of driver this is.
-        self.top_spice_path = self.generate_lut_driver_top()
-        # And, generate the LUT driver + LUT path top level file. We use this file to measure total delay through the LUT.
-        self.generate_lut_and_driver_top()       
      
-     
-    def update_area(self, area_dict, width_dict):
+    def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]) -> float:
         """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
             the area of everything. It is expected that area_dict will have all the information we need to calculate area.
             We update area_dict and width_dict with calculations performed in this function. 
@@ -261,23 +88,23 @@ class _LUTInputDriver(_SizableCircuit):
         if not self.use_tgate :  
             # Calculate area based on input type
             if self.type != "default":
-                area += area_dict["inv_" + self.name + "_0"]
+                area += area_dict["inv_" + self.sp_name + "_0"]
             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                area += 2*area_dict["ptran_" + self.name + "_0"]
-                area += area_dict["rest_" + self.name]
+                area += 2*area_dict["ptran_" + self.sp_name + "_0"]
+                area += area_dict["rest_" + self.sp_name]
             if self.type != "default":
-                area += area_dict["inv_" + self.name + "_1"]
-            area += area_dict["inv_" + self.name + "_2"]
+                area += area_dict["inv_" + self.sp_name + "_1"]
+            area += area_dict["inv_" + self.sp_name + "_2"]
         
         else :
             # Calculate area based on input type
             if self.type != "default":
-                area += area_dict["inv_" + self.name + "_0"]
+                area += area_dict["inv_" + self.sp_name + "_0"]
             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                area += 2*area_dict["tgate_" + self.name + "_0"]
+                area += 2*area_dict["tgate_" + self.sp_name + "_0"]
             if self.type != "default":
-                area += area_dict["inv_" + self.name + "_1"]
-            area += area_dict["inv_" + self.name + "_2"]
+                area += area_dict["inv_" + self.sp_name + "_1"]
+            area += area_dict["inv_" + self.sp_name + "_2"]
 
         # Add SRAM cell if this is a register feedback input
         if self.type == "reg_fb" or self.type == "ref_fb_rsel":
@@ -287,255 +114,736 @@ class _LUTInputDriver(_SizableCircuit):
         width = math.sqrt(area)
         
         # Add to dictionaries
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+        area_dict[self.sp_name] = area
+        width_dict[self.sp_name] = width
         
         return area
         
-
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]) -> List[str]:
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict.
             Wires differ based on input type. """
         
         # getting name of min len wire local mux from global to just save myself the pain of changing all these variable names
         # global min_len_wire
-        min_len_wire = fpga.min_len_wire
+        # min_len_wire = consts.min_len_wire
         # local_mux_key = f"local_mux_L{min_len_wire['len']}_uid{min_len_wire['id']}"
-        local_mux_key = "local_mux"
+
+        # TODO assert that all wires being updated
 
         if not self.use_tgate :  
             # Update wire lengths and wire layers
             if self.type == "default_rsel" or self.type == "reg_fb_rsel":
-                wire_lengths["wire_" + self.name + "_0_rsel"] = width_dict[self.name]/4 + width_dict["lut"] + width_dict["ff"]/4 
-                wire_layers["wire_" + self.name + "_0_rsel"] = 0
+                wire_lengths["wire_" + self.sp_name + "_0_rsel"] = width_dict[self.sp_name]/4 + width_dict["lut"] + width_dict["ff"]/4 
+                wire_layers["wire_" + self.sp_name + "_0_rsel"] = consts.LOCAL_WIRE_LAYER
             if self.type == "default_rsel":
-                wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name + "_0_out"] = 0
+                wire_lengths["wire_" + self.sp_name + "_0_out"] = width_dict["inv_" + self.sp_name + "_0"]/4 + width_dict["inv_" + self.sp_name + "_2"]/4
+                wire_layers["wire_" + self.sp_name + "_0_out"] = consts.LOCAL_WIRE_LAYER
             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["ptran_" + self.name + "_0"]/4
-                wire_layers["wire_" + self.name + "_0_out"] = 0
-                wire_lengths["wire_" + self.name + "_0"] = width_dict["ptran_" + self.name + "_0"]
-                wire_layers["wire_" + self.name + "_0"] = 0
+                wire_lengths["wire_" + self.sp_name + "_0_out"] = width_dict["inv_" + self.sp_name + "_0"]/4 + width_dict["ptran_" + self.sp_name + "_0"]/4
+                wire_layers["wire_" + self.sp_name + "_0_out"] = consts.LOCAL_WIRE_LAYER
+                wire_lengths["wire_" + self.sp_name + "_0"] = width_dict["ptran_" + self.sp_name + "_0"]
+                wire_layers["wire_" + self.sp_name + "_0"] = consts.LOCAL_WIRE_LAYER
             if self.type == "default":
-                wire_lengths["wire_" + self.name] = width_dict[local_mux_key]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name] = 0
+                local_mux_key: str = self.local_mux.sp_name
+                wire_lengths["wire_" + self.sp_name] = width_dict[local_mux_key]/4 + width_dict["inv_" + self.sp_name + "_2"]/4
+                wire_layers["wire_" + self.sp_name] = consts.LOCAL_WIRE_LAYER
             else:
-                wire_lengths["wire_" + self.name] = width_dict["inv_" + self.name + "_1"]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name] = 0
+                wire_lengths["wire_" + self.sp_name] = width_dict["inv_" + self.sp_name + "_1"]/4 + width_dict["inv_" + self.sp_name + "_2"]/4
+                wire_layers["wire_" + self.sp_name] = consts.LOCAL_WIRE_LAYER
 
         else :
             # Update wire lengths and wire layers
             if self.type == "default_rsel" or self.type == "reg_fb_rsel":
-                wire_lengths["wire_" + self.name + "_0_rsel"] = width_dict[self.name]/4 + width_dict["lut"] + width_dict["ff"]/4 
-                wire_layers["wire_" + self.name + "_0_rsel"] = 0
+                wire_lengths["wire_" + self.sp_name + "_0_rsel"] = width_dict[self.sp_name]/4 + width_dict["lut"] + width_dict["ff"]/4 
+                wire_layers["wire_" + self.sp_name + "_0_rsel"] = consts.LOCAL_WIRE_LAYER
             if self.type == "default_rsel":
-                wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name + "_0_out"] = 0
+                wire_lengths["wire_" + self.sp_name + "_0_out"] = width_dict["inv_" + self.sp_name + "_0"]/4 + width_dict["inv_" + self.sp_name + "_2"]/4
+                wire_layers["wire_" + self.sp_name + "_0_out"] = consts.LOCAL_WIRE_LAYER
             if self.type == "reg_fb" or self.type == "reg_fb_rsel":
-                wire_lengths["wire_" + self.name + "_0_out"] = width_dict["inv_" + self.name + "_0"]/4 + width_dict["tgate_" + self.name + "_0"]/4
-                wire_layers["wire_" + self.name + "_0_out"] = 0
-                wire_lengths["wire_" + self.name + "_0"] = width_dict["tgate_" + self.name + "_0"]
-                wire_layers["wire_" + self.name + "_0"] = 0
+                wire_lengths["wire_" + self.sp_name + "_0_out"] = width_dict["inv_" + self.sp_name + "_0"]/4 + width_dict["tgate_" + self.sp_name + "_0"]/4
+                wire_layers["wire_" + self.sp_name + "_0_out"] = consts.LOCAL_WIRE_LAYER
+                wire_lengths["wire_" + self.sp_name + "_0"] = width_dict["tgate_" + self.sp_name + "_0"]
+                wire_layers["wire_" + self.sp_name + "_0"] = consts.LOCAL_WIRE_LAYER
             if self.type == "default":
-                wire_lengths["wire_" + self.name] = width_dict[local_mux_key]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name] = 0
+                local_mux_key: str = self.local_mux.sp_name
+                wire_lengths["wire_" + self.sp_name] = width_dict[local_mux_key]/4 + width_dict["inv_" + self.sp_name + "_2"]/4
+                wire_layers["wire_" + self.sp_name] = consts.LOCAL_WIRE_LAYER
             else:
-                wire_lengths["wire_" + self.name] = width_dict["inv_" + self.name + "_1"]/4 + width_dict["inv_" + self.name + "_2"]/4
-                wire_layers["wire_" + self.name] = 0
+                wire_lengths["wire_" + self.sp_name] = width_dict["inv_" + self.sp_name + "_1"]/4 + width_dict["inv_" + self.sp_name + "_2"]/4
+                wire_layers["wire_" + self.sp_name] = consts.LOCAL_WIRE_LAYER
             
+@dataclass
+class LUTInputDriverTB(c_ds.SimTB):
+    """ LUT input driver testbench. """
+    # lut_input_key: str = None # 'a' 'b' 'c', etc -> which input of the LUT this driver is connected to
+    # type: str = None # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
+    not_flag: bool = None # True if TB is for not_driver
 
-class _LUTInputNotDriver(_SizableCircuit):
-    """ LUT input not-driver. This is the complement driver. """
+    cb_mux: cb_mux_lib.ConnectionBlockMux = None
+    local_r_wire_load: lb_lib.LocalRoutingWireLoad = None
+    flip_flop: ble_lib.FlipFlop = None
+    lut_in_driver: LUTInputDriver = None
+    lut_in_not_driver: LUTInputNotDriver = None
+    lut_driver_load: LUTInputDriverLoad = None
 
-    def __init__(self, name, type, delay_weight, use_tgate):
-        self.name = "lut_" + name + "_driver_not"
-        # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
-        self.type = type
-        # Delay weight in a representative critical path
-        self.delay_weight = delay_weight
-        # use pass transistor or transmission gates
-        self.use_tgate = use_tgate
-   
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
     
-    def generate(self, subcircuit_filename, min_tran_width):
+    # Initialized in __post_init__
+    dut_ckt: LUTInputDriver | LUTInputNotDriver = None
+    
+    def __hash__(self) -> int:
+        return super().__hash__()
+    
+    def __post_init__(self, subckt_lib: Dict[str, rg_ds.SpSubCkt]):
+        super().__post_init__()
+        assert self.lut_in_driver.lut_input_key == self.lut_in_not_driver.lut_input_key
+
+        self.meas_points = []
+        pwr_v_node: str = "vdd_lut_driver"
+        # Define the standard voltage sources for the simulation
+        # STIM PULSE Voltage SRC
+        self.stim_vsrc: c_ds.SpVoltageSrc = c_ds.SpVoltageSrc(
+                name = "IN",
+                out_node = "n_in",
+                type = "PULSE",
+                init_volt = c_ds.Value(0),
+                peak_volt = c_ds.Value(name = self.supply_v_param), # TODO get this from defined location
+                pulse_width = c_ds.Value(2), # ns
+                period = c_ds.Value(4), # ns
+        )
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc: c_ds.SpVoltageSrc = c_ds.SpVoltageSrc(
+            name = "_LUT_DRIVER",
+            out_node = pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        # Check if this is a lut driver or lut not 
+        if self.not_flag:
+            self.dut_ckt: LUTInputNotDriver = self.lut_in_not_driver
+            not_drv_vdd_node: str = pwr_v_node
+            drv_vdd_node: str = self.vdd_node
+        else:
+            self.dut_ckt: LUTInputDriver = self.lut_in_driver
+            not_drv_vdd_node: str = self.vdd_node
+            drv_vdd_node: str = pwr_v_node
+        
+        cur_top_insts: List[rg_ds.SpSubCktInst] = [
+            # CB Mux
+            rg_ds.SpSubCktInst(
+                name = f"X{self.cb_mux.sp_name}",
+                subckt = subckt_lib[f"{self.cb_mux.sp_name}_on"],
+                conns = {
+                    "n_in": "n_in",
+                    "n_out": "n_1_1",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # Local Routing Wire Load
+            rg_ds.SpSubCktInst(
+                name = f"X{self.local_r_wire_load.sp_name}",
+                subckt = subckt_lib[self.local_r_wire_load.sp_name],
+                conns = {
+                    "n_in" : "n_1_1",
+                    "n_out" : "n_1_2",
+                    "n_gate" : self.sram_vdd_node,
+                    "n_gate_n" : self.sram_vss_node,
+                    "n_vdd" : self.vdd_node,
+                    "n_gnd" : self.gnd_node,
+                    "n_vdd_local_mux_on" : self.vdd_node
+                }
+            ),
+            # LUT input driver
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut_in_driver.name}", # TODO change to sp name
+                subckt = subckt_lib[self.lut_in_driver.sp_name], #TODO change to sp name
+                conns = {
+                    "n_in": "n_1_2",
+                    "n_out": "n_out",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_rsel": "n_rsel",
+                    "n_not_input": "n_2_1",
+                    "n_vdd": drv_vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            )
+        ]
+        # Connect node to rsel node if registered
+        if self.lut_in_driver.type == "default_rsel" or self.lut_in_driver.type == "reg_fb_rsel":
+            cur_top_insts += [
+                # Flip Flop
+                rg_ds.SpSubCktInst(
+                    name = f"X{self.flip_flop.name}",
+                    subckt = subckt_lib[self.flip_flop.name],
+                    conns = {
+                        "n_in": "n_rsel",
+                        "n_out": "n_ff_out",
+                        "n_gate": self.sram_vdd_node,
+                        "n_gate_n": self.sram_vss_node,
+                        "n_clk": self.gnd_node,
+                        "n_clk_n": self.vdd_node,
+                        "n_set": self.gnd_node,
+                        "n_set_n": self.vdd_node,
+                        "n_reset": self.gnd_node,
+                        "n_reset_n": self.vdd_node,
+                        "n_vdd": self.vdd_node,
+                        "n_gnd": self.gnd_node,
+                    }
+                )
+            ]
+        self.top_insts = cur_top_insts + [
+            # LUT not input driver        
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut_in_not_driver.sp_name}",
+                subckt = subckt_lib[self.lut_in_not_driver.sp_name],
+                conns = {
+                    "n_in": "n_2_1",
+                    "n_out": "n_out_n",
+                    "n_vdd": not_drv_vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # LUT driver load 1
+            rg_ds.SpSubCktInst(
+                name = f"Xlut_{self.lut_driver_load.name}_driver_load_1",
+                subckt = subckt_lib[f"lut_{self.lut_driver_load.name}_driver_load"], # TODO update this to use sp_name and be consistent
+                conns = {
+                    "n_1": "n_out",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # LUT driver load 2
+            rg_ds.SpSubCktInst(
+                name = f"Xlut_{self.lut_driver_load.name}_driver_load_2",
+                subckt = subckt_lib[f"lut_{self.lut_driver_load.name}_driver_load"],
+                conns = {
+                    "n_1": "n_out_n",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            )
+        ]
+
+    def generate_top(self) -> str:
+        dut_sp_name: str = self.dut_ckt.sp_name
+        # NOT Driver
+        if self.not_flag:
+            delay_names: List[str] = [
+                f"inv_{dut_sp_name}_1",
+                f"inv_{dut_sp_name}_2",
+                f"total"
+            ]
+            # Instance path from our TB to the ON Local Mux inst
+            lut_not_driver_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+                self.top_insts, 
+                [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+                    for re_str in [
+                        r"lut_\w_driver_not",
+                    ]
+                ],
+                []
+            )
+            targ_nodes: List[str] = [
+                ".".join([inst.name for inst in lut_not_driver_path] + ["n_1_1"]),
+                "n_out_n",
+                "n_out_n",
+            ]
+        # Driver
+        else:
+            delay_names: List[str] = [
+                f"inv_{dut_sp_name}_2",
+                f"total"
+            ]
+            # Instance path from our TB to the ON Local Mux inst
+            lut_driver_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+                self.top_insts, 
+                [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+                    for re_str in [
+                        r"lut_\w_driver(?!_not)",
+                    ]
+                ],
+                []
+            )
+            targ_nodes: List[str] = [
+                f"n_out",
+                f"n_out",
+            ]
+            if self.lut_in_driver.type != "default":
+                delay_names = [
+                    f"inv_{dut_sp_name}_0",
+                    f"inv_{dut_sp_name}_1",
+                ] + delay_names
+                targ_nodes = [
+                    ".".join([inst.name for inst in lut_driver_path] + ["n_1_1"]),
+                    ".".join([inst.name for inst in lut_driver_path] + ["n_3_1"]),
+                ] + targ_nodes
+        trig_node: str = "n_1_2"
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = "n_out",
+        )
+
+@dataclass
+class LUTInputTB(c_ds.SimTB):
+    cb_mux: cb_mux_lib.ConnectionBlockMux = None
+    local_r_wire_load: lb_lib.LocalRoutingWireLoad = None
+    lut_in_driver: LUTInputDriver = None
+    flip_flop: ble_lib.FlipFlop = None
+    lut_in_not_driver: LUTInputNotDriver = None
+    lut: LUT = None
+    # Either Flut Mux OR Lut Output Load
+    flut_mux: ble_lib.FlutMux = None
+    lut_output_load: ble_lib.LUTOutputLoad = None
+
+    subckt_lib: InitVar[Dict[str, rg_ds.SpSubCkt]] = None
+    
+    # Initialized in __post_init__
+    dut_ckt: LUTInputDriver | LUTInputNotDriver = None
+
+    def __hash__(self) -> int:
+        return super().__hash__()
+    
+    def __post_init__(self, subckt_lib: Dict[str, rg_ds.SpSubCkt]):
+        super().__post_init__()
+        assert self.lut_in_driver.lut_input_key == self.lut_in_not_driver.lut_input_key
+
+        self.meas_points = []
+        pwr_v_node: str = "vdd_lut"
+
+        # Specify lut connections
+        if self.lut.use_tgate:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in_sram",
+                "n_out": "n_out",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_c": self.vdd_node,
+                "n_c_n": self.gnd_node,
+                "n_d": self.vdd_node,
+                "n_d_n": self.gnd_node,
+                "n_e": self.vdd_node,
+                "n_e_n": self.gnd_node,
+                "n_f": self.vdd_node,
+                "n_f_n": self.gnd_node,
+                "n_vdd": pwr_v_node,
+                "n_gnd": self.gnd_node,
+            }
+        else:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in_sram",
+                "n_out": "n_out",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_vdd": pwr_v_node,
+                "n_gnd": self.gnd_node,
+            }
+        # Look for the driver input key ("a", "b", "c", "d" ...) in the lut ports and if we find a match this means we attach our driver + not driver to this port
+        for key in list(lut_conns.keys()):
+            if self.lut_in_driver.lut_input_key in key:
+                if self.lut.use_tgate:
+                    # if NOT driver
+                    # TODO fix this hardcoded bs
+                    if "_n" in key:
+                        # Not input
+                        lut_conns[key] = "n_1_4"
+                        # input
+                        lut_conns[key.replace("_n", "")] = "n_3_1"
+                        break
+                else:
+                    if not "_n" in key:
+                        lut_conns[key] = "n_3_1"
+                        break
+        # Define the standard voltage sources for the simulation
+        sram_stim_vsrc = c_ds.SpVoltageSrc(
+            name = "IN_SRAM",
+            out_node = "n_in_sram",
+            type = "PULSE",
+            init_volt = c_ds.Value(0),
+            peak_volt = c_ds.Value(name = self.supply_v_param), # TODO get this from defined location
+            delay_time = c_ds.Value(4), # ns
+            pulse_width = c_ds.Value(4), # ns
+            period = c_ds.Value(8), # ns
+        )
+        # STIM PULSE Voltage SRC
+        self.stim_vsrc = c_ds.SpVoltageSrc(
+            name = "IN_GATE",
+            out_node = "n_in_gate",
+            type = "PULSE",
+            init_volt = c_ds.Value(name = self.supply_v_param),
+            peak_volt = c_ds.Value(0), # TODO get this from defined location
+            delay_time = c_ds.Value(3), # ns
+            pulse_width = c_ds.Value(2), # ns
+            period = c_ds.Value(4), # ns
+        )
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc = c_ds.SpVoltageSrc(
+            name = "_LUT",
+            out_node = pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        self.voltage_srcs = [
+            sram_stim_vsrc, 
+            self.stim_vsrc, 
+            self.dut_dc_vsrc
+        ]
+
+        # Init DUT
+        self.dut_ckt = self.lut_in_driver
+
+        # # Check if this is a lut driver or lut not 
+        # if self.not_flag:
+        #     self.dut_ckt: LUTInputNotDriver = self.lut_in_not_driver
+        #     not_drv_vdd_node: str = pwr_v_node
+        #     drv_vdd_node: str = self.vdd_node
+        # else:
+        #     self.dut_ckt: LUTInputDriver = self.lut_in_driver
+        #     not_drv_vdd_node: str = self.vdd_node
+        #     drv_vdd_node: str = pwr_v_node
+        
+        self.top_insts = [
+            # CB Mux
+            rg_ds.SpSubCktInst(
+                name = f"X{self.cb_mux.sp_name}_on",
+                subckt = subckt_lib[f"{self.cb_mux.sp_name}_on"],
+                conns = {
+                    "n_in": "n_in_gate",
+                    "n_out": "n_1_1",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # Local Routing Wire Load
+            rg_ds.SpSubCktInst(
+                name = f"X{self.local_r_wire_load.sp_name}",
+                subckt = subckt_lib[self.local_r_wire_load.sp_name],
+                conns = {
+                    "n_in" : "n_1_1",
+                    "n_out" : "n_1_2",
+                    "n_gate" : self.sram_vdd_node,
+                    "n_gate_n" : self.sram_vss_node,
+                    "n_vdd" : self.vdd_node,
+                    "n_gnd" : self.gnd_node,
+                    "n_vdd_local_mux_on" : self.vdd_node
+                }
+            ),
+            # LUT input driver
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut_in_driver.sp_name}", # TODO change to sp name
+                subckt = subckt_lib[self.lut_in_driver.sp_name], #TODO change to sp name
+                conns = {
+                    "n_in": "n_1_2",
+                    "n_out": "n_3_1",
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_rsel": "n_rsel",
+                    "n_not_input": "n_2_1",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            )
+        ]
+        # Connect node to rsel node if registered
+        if self.lut_in_driver.type == "default_rsel" or self.lut_in_driver.type == "reg_fb_rsel":
+            self.top_insts += [
+                # Flip Flop
+                rg_ds.SpSubCktInst(
+                    name = f"X{self.flip_flop.name}",
+                    subckt = subckt_lib[self.flip_flop.name],
+                    conns = {
+                        "n_in": "n_rsel",
+                        "n_out": "n_ff_out",
+                        "n_gate": self.sram_vdd_node,
+                        "n_gate_n": self.sram_vss_node,
+                        "n_clk": self.gnd_node,
+                        "n_clk_n": self.vdd_node,
+                        "n_set": self.gnd_node,
+                        "n_set_n": self.vdd_node,
+                        "n_reset": self.gnd_node,
+                        "n_reset_n": self.vdd_node,
+                        "n_vdd": self.vdd_node,
+                        "n_gnd": self.gnd_node,
+                    }
+                )
+            ]
+        self.top_insts = self.top_insts + [
+            # LUT not input driver        
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut_in_not_driver.sp_name}",
+                subckt = subckt_lib[self.lut_in_not_driver.sp_name],
+                conns = {
+                    "n_in": "n_2_1",
+                    "n_out": "n_1_4",
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                }
+            ),
+            # LUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut.name}", # TODO update to sp_name
+                subckt = subckt_lib[self.lut.name], # TODO update to sp_name
+                conns = lut_conns,
+            ),
+        ]
+        if self.lut.use_fluts:
+            self.top_insts += [
+                # lut -> flut wire
+                rg_ds.SpSubCktInst(
+                    name = f"Xwire_{self.flut_mux.sp_name}",
+                    subckt = subckt_lib["wire"],
+                    conns = {
+                        "n_in": "n_out",
+                        "n_out": "n_out_2",
+                    },
+                    param_values = {
+                        "Rw": "wire_lut_to_flut_mux_res",
+                        "Cw": "wire_lut_to_flut_mux_cap",
+                    }
+                ),
+                # FLUT Mux
+                rg_ds.SpSubCktInst(
+                    name = f"X{self.flut_mux.sp_name}",
+                    subckt = subckt_lib[self.flut_mux.sp_name],
+                    conns = {
+                        "n_in": "n_out_2", 
+                        "n_out": "n_out_3",
+                        "n_gate": self.vdd_node,
+                        "n_gate_n": self.gnd_node,
+                        "n_vdd": self.vdd_node,
+                        "n_gnd": self.gnd_node, 
+                    }
+                )
+            ]
+        else:
+            self.top_insts += [
+                rg_ds.SpSubCktInst(
+                    name = f"X{self.lut_output_load.sp_name}",
+                    subckt = subckt_lib[self.lut_output_load.sp_name],
+                    conns = {
+                        "n_in": "n_out",
+                        "n_local_out": "n_local_out",
+                        "n_general_out": "n_general_out", 
+                        "n_gate": self.sram_vdd_node,
+                        "n_gate_n": self.sram_vss_node,
+                        "n_vdd": self.vdd_node,
+                        "n_gnd": self.gnd_node,
+                        "n_vdd_local_output_on": self.vdd_node,
+                        "n_vdd_general_output_on": self.vdd_node,
+                    }
+                ),
+            ]
+
+    def generate_top(self) -> str:
+        trig_node: str = "n_3_1"
+        delay_names: List[str] = [
+            "total"
+        ]
+        targ_nodes: List[str] = [
+            "n_out",
+        ]
+        cust_pwr_meas_lines: List[str] = [
+            ".MEASURE TRAN meas_current1 INTEGRAL I(V_LUT) FROM=5ns TO=7ns",
+            ".MEASURE TRAN meas_current2 INTEGRAL I(V_LUT) FROM=9ns TO=11ns",
+            ".MEASURE TRAN meas_avg_power PARAM = '-((meas_current1 + meas_current2)/4n)*supply_v'",
+        ]
+
+        for i, meas_name in enumerate(delay_names):
+            for trans_state in ["rise", "fall"]:
+                trig_trans: bool = trans_state == "rise"
+                delay_idx: int = i
+                targ_node: str = targ_nodes[delay_idx]
+                inv_idx: int = i + 1 
+
+                # Rise and fall combo, based on how many inverters in the chain
+                # If its even we set both to rise or both to fall
+                if inv_idx % 2 == 0:
+                    rise_fall_combo: Tuple[bool] = (trig_trans, trig_trans)
+                else:
+                    rise_fall_combo: Tuple[bool] = (not trig_trans, trig_trans)
+
+                delay_bounds: Dict[str, c_ds.SpDelayBound] = {
+                    del_str: c_ds.SpDelayBound(
+                        probe = c_ds.SpNodeProbe(
+                            node = node,
+                            type = "voltage",
+                        ),
+                        eval_cond = self.delay_eval_cond,
+                        rise = rise_fall_combo[i],
+                    ) for (i, node), del_str in zip(enumerate([trig_node, targ_node]), ["trig", "targ"])
+                }
+                # Hacky way to set the num_trans for the fist trise meaure TODO clean up
+                if i == 0 and trans_state == "fall":
+                    delay_bounds["trig"].num_trans = 2
+                if i == 0 and trans_state == "rise":
+                    delay_bounds["trig"].rise = True
+                    delay_bounds["targ"].rise = True
+                # Create measurement object
+                measurement = c_ds.SpMeasure(
+                    value = c_ds.Value(
+                        name = f"{self.meas_val_prefix}_{meas_name}_t{trans_state}",
+                    ),
+                    trig = delay_bounds["trig"],
+                    targ = delay_bounds["targ"],
+                )
+                self.meas_points.append(measurement)
+
+        # Base class generate top does all common functionality 
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node, 
+            targ_nodes = targ_nodes,
+            low_v_node = "n_out",
+            tb_fname = f"{self.lut_in_driver.sp_name}_with_lut_tb_{self.id}", # TODO reformat to a uniform naming convention
+            pwr_meas_lines = cust_pwr_meas_lines,
+        )
+
+
+
+
+
+@dataclass
+class LUTInputNotDriver(c_ds.SizeableCircuit):
+    """ LUT input not-driver. This is the complement driver. """
+    name: str = None
+    lut_input_key: str = None # 'a' 'b' 'c', etc -> which input of the LUT this driver is connected to
+    type: str = None # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
+    delay_weight: float = None         # Delay weight in a representative critical path
+    use_tgate: bool = None
+
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    def __post_init__(self):
+        self.name = f"lut_{self.lut_input_key}_driver_not"
+        super().__post_init__()
+
+    
+    def generate(self, subcircuit_filename: str) -> Dict[str, float | int]:
         """ Generate not-driver SPICE netlist """
         if not self.use_tgate :
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut_not_driver(subcircuit_filename, self.name)
+            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut_not_driver(subcircuit_filename, self.sp_name)
         else :
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut_not_driver(subcircuit_filename, self.name)
+            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut_not_driver(subcircuit_filename, self.sp_name)
         
         # Initialize transistor sizes (to something more reasonable than all min size, but not necessarily a good choice, depends on architecture params)
-        self.initial_transistor_sizes["inv_" + self.name + "_1_nmos"] = 1
-        self.initial_transistor_sizes["inv_" + self.name + "_1_pmos"] = 1
-        self.initial_transistor_sizes["inv_" + self.name + "_2_nmos"] = 2
-        self.initial_transistor_sizes["inv_" + self.name + "_2_pmos"] = 2
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_1_nmos"] = 1
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_1_pmos"] = 1
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_2_nmos"] = 2
+        self.initial_transistor_sizes[f"inv_{self.sp_name}_2_pmos"] = 2
        
         return self.initial_transistor_sizes
 
-
-    def generate_lut_driver_not_top(self):
-        """ Generate the top level lut input not driver SPICE file """
     
-        # Create directories
-        input_driver_name_no_not = self.name.replace("_not", "")
-        if not os.path.exists(input_driver_name_no_not):
-            os.makedirs(input_driver_name_no_not)  
-        # Change to directory    
-        os.chdir(input_driver_name_no_not)    
-        
-        lut_driver_filename = self.name + ".sp"
-        input_driver_file = open(lut_driver_filename, 'w')
-        input_driver_file.write(".TITLE " + self.name + " \n\n") 
-        
-        input_driver_file.write("********************************************************************************\n")
-        input_driver_file.write("** Include libraries, parameters and other\n")
-        input_driver_file.write("********************************************************************************\n\n")
-        input_driver_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        input_driver_file.write("********************************************************************************\n")
-        input_driver_file.write("** Setup and input\n")
-        input_driver_file.write("********************************************************************************\n\n")
-        input_driver_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-        input_driver_file.write(".OPTIONS BRIEF=1\n\n")
-        input_driver_file.write("* Input signal\n")
-        input_driver_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        input_driver_file.write("* Power rail for the circuit under test.\n")
-        input_driver_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-        input_driver_file.write("V_LUT_DRIVER vdd_lut_driver gnd supply_v\n\n")
-        
-        input_driver_file.write("********************************************************************************\n")
-        input_driver_file.write("** Measurement\n")
-        input_driver_file.write("********************************************************************************\n\n")
-        input_driver_file.write("* inv_" + self.name + "_1 delays\n")
-        input_driver_file.write(".MEASURE TRAN meas_inv_" + self.name + "_1_tfall TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        input_driver_file.write("+    TARG V(X" + self.name + "_1.n_1_1) VAL='supply_v/2' FALL=1\n")
-        input_driver_file.write(".MEASURE TRAN meas_inv_" + self.name + "_1_trise TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        input_driver_file.write("+    TARG V(X" + self.name + "_1.n_1_1) VAL='supply_v/2' RISE=1\n\n")
-        input_driver_file.write("* inv_" + self.name + "_2 delays\n")
-        input_driver_file.write(".MEASURE TRAN meas_inv_" + self.name + "_2_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        input_driver_file.write("+    TARG V(n_out_n) VAL='supply_v/2' FALL=1\n")
-        input_driver_file.write(".MEASURE TRAN meas_inv_" + self.name + "_2_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        input_driver_file.write("+    TARG V(n_out_n) VAL='supply_v/2' RISE=1\n\n")
-        input_driver_file.write("* Total delays\n")
-        input_driver_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_1_2) VAL='supply_v/2' FALL=1\n")
-        input_driver_file.write("+    TARG V(n_out_n) VAL='supply_v/2' FALL=1\n")
-        input_driver_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_1_2) VAL='supply_v/2' RISE=1\n")
-        input_driver_file.write("+    TARG V(n_out_n) VAL='supply_v/2' RISE=1\n\n")
-
-        input_driver_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_out) AT=3n\n\n")
-        
-        input_driver_file.write("* Measure the power required to propagate a rise and a fall transition through the lut driver at 250MHz.\n")
-        input_driver_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_LUT_DRIVER) FROM=0ns TO=4ns\n")
-        input_driver_file.write(".MEASURE TRAN meas_avg_power PARAM = '-((meas_current)/4n)*supply_v'\n\n")
-
-        input_driver_file.write("********************************************************************************\n")
-        input_driver_file.write("** Circuit\n")
-        input_driver_file.write("********************************************************************************\n\n")
-        input_driver_file.write("Xcb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd cb_mux_on\n")
-        input_driver_file.write("Xlocal_routing_wire_load_1 n_1_1 n_1_2 vsram vsram_n vdd gnd vdd local_routing_wire_load\n")
-        input_driver_file.write("X" + input_driver_name_no_not + "_1 n_1_2 n_out vsram vsram_n n_rsel n_2_1 vdd gnd " + input_driver_name_no_not + "\n")
-        if self.type == "default_rsel" or self.type == "reg_fb_rsel":
-            # Connect a load to n_rsel node
-            input_driver_file.write("Xff n_rsel n_ff_out vsram vsram_n gnd vdd gnd vdd gnd vdd vdd gnd ff\n")
-        input_driver_file.write("X" + self.name + "_1 n_2_1 n_out_n vdd_lut_driver gnd " + self.name + "\n")
-        input_driver_file.write("X" + input_driver_name_no_not + "_load_1 n_out n_vdd n_gnd " + input_driver_name_no_not + "_load\n")
-        input_driver_file.write("X" + input_driver_name_no_not + "_load_2 n_out_n n_vdd n_gnd " + input_driver_name_no_not + "_load\n\n")
-        input_driver_file.write(".END")
-        input_driver_file.close()
-
-        # Come out of lut_driver directory
-        os.chdir("../")
-        
-        return (input_driver_name_no_not + "/" + self.name + ".sp")  
-
-    def generate_top(self):
-        """ Generate top-level SPICE file for LUT not driver """
-
-        self.top_spice_path = self.generate_lut_driver_not_top()
-        
-    
-    def update_area(self, area_dict, width_dict):
+    def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]) -> float:
         """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
             the area of everything. It is expected that area_dict will have all the information we need to calculate area.
             We update area_dict and width_dict with calculations performed in this function. 
             We also return the area of this not_driver."""
         
-        area = (area_dict["inv_" + self.name + "_1"] +
-                area_dict["inv_" + self.name + "_2"])
+        area = (area_dict["inv_" + self.sp_name + "_1"] +
+                area_dict["inv_" + self.sp_name + "_2"])
         width = math.sqrt(area)
-        area_dict[self.name] = area
-        width_dict[self.name] = width
+        area_dict[self.sp_name] = area
+        width_dict[self.sp_name] = width
         
         return area
     
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]) -> List[str]:
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
         
         # Update wire lengths
-        wire_lengths["wire_" + self.name] = (width_dict["inv_" + self.name + "_1"] + width_dict["inv_" + self.name + "_2"])/4
+        wire_lengths["wire_" + self.sp_name] = (width_dict["inv_" + self.sp_name + "_1"] + width_dict["inv_" + self.sp_name + "_2"])/4
         # Update wire layers
-        wire_layers["wire_" + self.name] = 0
-    
+        wire_layers["wire_" + self.sp_name] = consts.LOCAL_WIRE_LAYER
 
-class _LUTInput(_CompoundCircuit):
+
+
+
+
+
+@dataclass
+class LUTInput(c_ds.CompoundCircuit):
     """ LUT input. It contains a LUT input driver and a LUT input not driver (complement). 
         The muxing on the LUT input is defined here """
 
-    def __init__(self, name, Rsel, Rfb, delay_weight, use_tgate, use_fluts):
-        # Subcircuit name (should be driver letter like a, b, c...)
-        self.name = name
-        # The type is either 'default': a normal input or 'reg_fb': a register feedback input 
-        # In addition, the input can (optionally) drive the register input 'default_rsel' or do both 'reg_fb_rsel'
-        # Therefore, there are 4 different types, which are controlled by Rsel and Rfb
-        # The register select (Rsel) could only be one signal. While the feedback could be used with multiple signals
-        if name in Rfb:
-            if Rsel == name:
+    name: str = None
+    lut_input_key: str = None # 'a' 'b' 'c', etc -> which input of the LUT this driver is connected to
+    delay_weight: float = None         # Delay weight in a representative critical path
+
+    Rsel: str = None # Register select signal, if the FF can get its input directly from this LUT input
+    Rfb: str = None
+
+    use_tgate: bool = None
+
+    # Circuit Dependancies
+    local_mux: lb_lib.LocalMux = None
+
+    # Initialized in __post_init__
+    driver: LUTInputDriver = None
+    not_driver: LUTInputNotDriver = None
+    type: str = None # LUT input driver type ("default", "default_rsel", "reg_fb" and "reg_fb_rsel")
+
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    def __post_init__(self):
+        self.sp_name = self.name # TODO update to sp_name
+        # super().__post_init__()
+        # Use self.name here as its just looking to see if the input key 'a', 'b', etc is a substr inside of the Rfb string
+        if self.Rfb and self.name in self.Rfb:
+            if self.Rsel == self.name:
                 self.type = "reg_fb_rsel"
             else:
                 self.type = "reg_fb"
         else:
-            if Rsel == name:
+            if self.Rsel == self.name:
                 self.type = "default_rsel"
             else:
                 self.type = "default"
-        # Create LUT input driver
-        self.driver = _LUTInputDriver(name, self.type, delay_weight, use_tgate, use_fluts)
-        # Create LUT input not driver
-        self.not_driver = _LUTInputNotDriver(name, self.type, delay_weight, use_tgate)
+        self.driver = LUTInputDriver(
+            id = 0,
+            lut_input_key = self.lut_input_key, 
+            type = self.type, 
+            delay_weight = self.delay_weight,
+            use_tgate = self.use_tgate, 
+            local_mux = self.local_mux,
+        )
+        self.not_driver = LUTInputNotDriver(
+            id = 0,
+            lut_input_key = self.lut_input_key, 
+            type = self.type, 
+            delay_weight = self.delay_weight,
+            use_tgate = self.use_tgate, 
+        )
         
-        # LUT input delays are the delays through the LUT for specific input (doesn't include input driver delay)
-        self.tfall = 1
-        self.trise = 1
-        self.delay = 1
-        self.delay_weight = delay_weight
-        
-        
-    def generate(self, subcircuit_filename, min_tran_width):
+
+    def generate(self, subcircuit_filename: str) -> Dict[str, float | int]:
         """ Generate both driver and not-driver SPICE netlists. """
         
         print("Generating lut " + self.name + "-input driver (" + self.type + ")")
 
         # Generate the driver
-        init_tran_sizes = self.driver.generate(subcircuit_filename, min_tran_width)
+        init_tran_sizes = self.driver.generate(subcircuit_filename)
         # Generate the not driver
-        init_tran_sizes.update(self.not_driver.generate(subcircuit_filename, min_tran_width))
+        init_tran_sizes.update(self.not_driver.generate(subcircuit_filename))
 
         return init_tran_sizes
-  
-            
-    def generate_top(self):
-        """ Generate top-level SPICE file for driver and not-driver. """
-        
-        print("Generating top-level lut " + self.name + "-input")
-        
-        # Generate the driver top
-        self.driver.generate_top()
-        # Generate the not driver top
-        self.not_driver.generate_top()
 
      
-    def update_area(self, area_dict, width_dict):
+    def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]) -> float:
         """ Update area. We update the area of the the driver and the not driver by calling area update functions
             inside these objects. We also return the total area of this input driver."""        
         
@@ -547,7 +855,7 @@ class _LUTInput(_CompoundCircuit):
         return driver_area + not_driver_area
     
     
-    def update_wires(self, width_dict, wire_lengths, wire_layers):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]) -> List[str]:
         """ Update wire lengths and wire layers for input driver and not_driver """
         
         # Update driver wires
@@ -562,28 +870,34 @@ class _LUTInput(_CompoundCircuit):
         utils.print_and_write(report_file, "  LUT input " + self.name + " type: " + self.type)
 
 
-
-class _LUTInputDriverLoad:
+@dataclass
+class LUTInputDriverLoad(c_ds.LoadCircuit):
     """ LUT input driver load. This load consists of a wire as well as the gates
         of a particular level in the LUT. """
 
-    def __init__(self, name, use_tgate, use_fluts):
-        self.name = name
-        self.use_tgate = use_tgate
-        self.use_fluts = use_fluts
+    # TODO update to use sp_name instead of name
+    name: str = None
+    use_tgate: bool = None
+    use_fluts: bool = None
+
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    def __post_init__(self):
+        # self.sp_name = f"lut_{self.name}_driver_load" 
+        super().__post_init__()
     
-    
-    def update_wires(self, width_dict, wire_lengths, wire_layers, ratio):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float], ratio: float):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
 
         # Update wire lengths
         wire_lengths["wire_lut_" + self.name + "_driver_load"] = width_dict["lut"] * ratio
         
         # Update set wire layers
-        wire_layers["wire_lut_" + self.name + "_driver_load"] = 0
+        wire_layers["wire_lut_" + self.name + "_driver_load"] = consts.LOCAL_WIRE_LAYER
         
         
-    def generate(self, subcircuit_filename, K):
+    def generate(self, subcircuit_filename: str, K: int):
         
         print("Generating LUT " + self.name + "-input driver load")
         
@@ -620,80 +934,117 @@ class _LUTInputDriverLoad:
     def print_details(self):
         print("LUT input driver load details.")
 
-class _LUT(_SizableCircuit):
+@dataclass
+class LUT(c_ds.SizeableCircuit):
     """ Lookup table. """
 
-    def __init__(self, K, Rsel, Rfb, use_tgate, use_finfet, use_fluts):
-        # Name of LUT 
-        self.name = "lut"
-        self.use_fluts = use_fluts
-        # Size of LUT
-        self.K = K
-        # Register feedback parameter
-        self.Rfb = Rfb
-        # Dictionary of input drivers (keys: "a", "b", etc...)
-        self.input_drivers = {}
-        # Dictionary of input driver loads
-        self.input_driver_loads = {}
-        # Delay weight in a representative critical path
-        self.delay_weight = fpga.DELAY_WEIGHT_LUT_A + fpga.DELAY_WEIGHT_LUT_B + fpga.DELAY_WEIGHT_LUT_C + fpga.DELAY_WEIGHT_LUT_D
-        if K >= 5:
-            self.delay_weight += fpga.DELAY_WEIGHT_LUT_E
-        if K >= 6:
-            self.delay_weight += fpga.DELAY_WEIGHT_LUT_F
-        
-        # Boolean to use transmission gates 
-        self.use_tgate = use_tgate
+    name: str = "lut"
 
+    # transistor parameters
+    use_tgate: bool = None
+    use_finfet: bool = None
+
+    # LUT related parameters
+    use_fluts: bool = None
+    K: int = None
+    Rfb: str = None
+    Rsel: str = None
+
+    # Circuit Dependancies
+    local_mux: lb_lib.LocalMux = None # Only passed to the LUTInputDrivers TODO clean up
+
+    # Dicts to store related circuits (yet not in a compound circuit fashion?)
+    input_drivers: Dict[str, LUTInput] = field(default_factory=dict)
+    input_driver_loads: Dict[str, LUTInputDriverLoad] = field(default_factory=dict)
+    
+    def __hash__(self) -> int:
+        return super().__hash__()
+
+    def __post_init__(self):
+        # This should just set our sp_name and other common functionality to all sizeable circuits
+        self.sp_name = self.name #TODO update to move to sp_name
+        # super().__post_init__()
+        assert self.K >= 4, "COFFE currently supports LUTs with 4 or more inputs"
+        self.delay_weight = consts.DELAY_WEIGHT_LUT_A + consts.DELAY_WEIGHT_LUT_B + consts.DELAY_WEIGHT_LUT_C + consts.DELAY_WEIGHT_LUT_D
+        if self.K >= 5:
+            self.delay_weight += consts.DELAY_WEIGHT_LUT_E
+        if self.K >= 6:
+            self.delay_weight += consts.DELAY_WEIGHT_LUT_F
         # Create a LUT input driver and load for each LUT input
 
-        tempK = self.K
+        tempK: int = self.K
         if self.use_fluts:
             tempK = self.K - 1
 
         for i in range(tempK):
-            name = chr(i+97)
+            name: str = chr(i+97)
             if name == "a":
-                delay_weight = fpga.DELAY_WEIGHT_LUT_A
+                delay_weight = consts.DELAY_WEIGHT_LUT_A
             elif name == "b":
-                delay_weight = fpga.DELAY_WEIGHT_LUT_B
+                delay_weight = consts.DELAY_WEIGHT_LUT_B
             elif name == "c":
-                delay_weight = fpga.DELAY_WEIGHT_LUT_C
+                delay_weight = consts.DELAY_WEIGHT_LUT_C
             elif name == "d":
-                delay_weight = fpga.DELAY_WEIGHT_LUT_D
+                delay_weight = consts.DELAY_WEIGHT_LUT_D
             elif name == "e":
-                delay_weight = fpga.DELAY_WEIGHT_LUT_E
+                delay_weight = consts.DELAY_WEIGHT_LUT_E
             elif name == "f":
-                delay_weight = fpga.DELAY_WEIGHT_LUT_F
+                delay_weight = consts.DELAY_WEIGHT_LUT_F
             else:
                 raise Exception("No delay weight definition for LUT input " + name)
-            self.input_drivers[name] = _LUTInput(name, Rsel, Rfb, delay_weight, use_tgate, use_fluts)
-            self.input_driver_loads[name] = _LUTInputDriverLoad(name, use_tgate, use_fluts)
+            # TODO update input drivers to use sp_name and get rid of this hackiness
+            self.input_drivers[name] = LUTInput(
+                id = 0,
+                name = name,
+                lut_input_key = name,
+                Rsel = self.Rsel,
+                Rfb = self.Rfb,
+                use_tgate = self.use_tgate,
+                delay_weight = delay_weight,
+                local_mux = self.local_mux,
+            )
+            self.input_driver_loads[name] = LUTInputDriverLoad(
+                id = 0,
+                name = name,
+                use_tgate = self.use_tgate,
+                use_fluts = self.use_fluts,
+            )
 
-        if use_fluts:
-            if K == 5:
+        if self.use_fluts:
+            if self.K == 5:
                 name = "e"
-                delay_weight = fpga.DELAY_WEIGHT_LUT_E
+                delay_weight = consts.DELAY_WEIGHT_LUT_E
             else:
                 name = "f"
-                delay_weight = fpga.DELAY_WEIGHT_LUT_F
-            self.input_drivers[name] = _LUTInput(name, Rsel, Rfb, delay_weight, use_tgate, use_fluts)
-            self.input_driver_loads[name] = _LUTInputDriverLoad(name, use_tgate, use_fluts)            
-    
-        self.use_finfet = use_finfet
+                delay_weight = consts.DELAY_WEIGHT_LUT_F
+            self.input_drivers[name] = LUTInput(
+                id = 0,
+                name = name,
+                lut_input_key = name,
+                Rsel = self.Rsel,
+                Rfb = self.Rfb,
+                delay_weight = delay_weight,
+                local_mux = self.local_mux,
+            )
+            self.input_driver_loads[name] = LUTInputDriverLoad(
+                id = 0,
+                name = name,
+                use_tgate = self.use_tgate,
+                use_fluts = self.use_fluts,
+            )           
         
     
-    def generate(self, subcircuit_filename, min_tran_width):
+    def generate(self, subcircuit_filename: str, min_tran_width: float) -> Dict[str, float | int]:
         """ Generate LUT SPICE netlist based on LUT size. """
         
         # Generate LUT differently based on K
-        tempK = self.K
+        tempK: int = self.K
 
         # *TODO: this - 1 should depend on the level of fracturability
         #        if the level is one a 6 lut will be two 5 luts if its
         #        a 6 lut will be four 4 input luts
         if self.use_fluts:
-            tempK = self.K - 1
+            tempK: int = self.K - 1
 
         if tempK == 6:
             init_tran_sizes = self._generate_6lut(subcircuit_filename, min_tran_width, self.use_tgate, self.use_finfet, self.use_fluts)
@@ -705,324 +1056,8 @@ class _LUT(_SizableCircuit):
   
         return init_tran_sizes
 
-    def generate_lut6_top(self):
-        """ Generate the top level 6-LUT SPICE file """
-
-        """
-        TODO:
-        - This should be modified for the case of FLUTs since the LUTs in this case are loaded differently
-        they are loaded with a full adder and the input to the flut mux and not with the lut output load.
-        """
-
-        # Create directory
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name) 
-        
-        lut_filename = self.name + ".sp"
-        lut_file = open(lut_filename, 'w')
-        lut_file.write(".TITLE 6-LUT\n\n") 
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Include libraries, parameters and other\n")
-        lut_file.write("********************************************************************************\n\n")
-        lut_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Setup and input\n")
-        lut_file.write("********************************************************************************\n\n")
-        lut_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-        lut_file.write(".OPTIONS BRIEF=1\n\n")
-        lut_file.write("* Input signal\n")
-        lut_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Measurement\n")
-        lut_file.write("********************************************************************************\n\n")
-        lut_file.write("* inv_lut_0sram_driver_1 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_1_tfall TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_1_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_1_trise TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_1_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* inv_lut_sram_driver_2 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_2_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_2_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_2_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_2_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_int_buffer_1 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_1_tfall TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_6_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_1_trise TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_6_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_int_buffer_2 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_2_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_7_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_2_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_7_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_out_buffer_1 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_1_tfall TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_11_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_1_trise TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_11_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_out_buffer_2 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_2_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_2_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Total delays\n")
-        lut_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_out) AT=3n\n\n")
-        
-        lut_file.write(".MEASURE TRAN info_node1_lut_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_3_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN info_node1_lut_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_3_1) VAL='supply_v/2' RISE=1\n\n") 
-
-        lut_file.write(".MEASURE TRAN info_node2_lut_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_4_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN info_node2_lut_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_4_1) VAL='supply_v/2' RISE=1\n\n")     
-
-        lut_file.write(".MEASURE TRAN info_node3_lut_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_7_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN info_node3_lut_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_7_1) VAL='supply_v/2' RISE=1\n\n")   
-
-        lut_file.write(".MEASURE TRAN info_node4_lut_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_8_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN info_node4_lut_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_8_1) VAL='supply_v/2' RISE=1\n\n")   
-
-
-        lut_file.write(".MEASURE TRAN info_node5_lut_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_9_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN info_node5_lut_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_9_1) VAL='supply_v/2' RISE=1\n\n")   
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Circuit\n")
-        lut_file.write("********************************************************************************\n\n")
-
-        if not self.use_tgate :
-            lut_file.write("Xlut n_in n_out vdd vdd vdd vdd vdd vdd vdd gnd lut\n\n")
-            lut_file.write("Xlut_output_load n_out n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
-        else :
-            lut_file.write("Xlut n_in n_out vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
-            lut_file.write("Xlut_output_load n_out n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
-        
-        lut_file.write(".END")
-        lut_file.close()
-
-        # Come out of lut directory
-        os.chdir("../")
-        
-        return (self.name + "/" + self.name + ".sp")
-    
-
-    def generate_lut5_top(self):
-        """ Generate the top level 5-LUT SPICE file """
-
-        
-        # TODO:
-        # This should be modified for the case of FLUTs since the LUTs in this case are loaded differently
-        # they are loaded with a full adder and the input to the flut mux and not with the lut output load.
-        
-
-        # Create directory
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name) 
-        
-        lut_filename = self.name + ".sp"
-        lut_file = open(lut_filename, 'w')
-        lut_file.write(".TITLE 5-LUT\n\n") 
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Include libraries, parameters and other\n")
-        lut_file.write("********************************************************************************\n\n")
-        lut_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Setup and input\n")
-        lut_file.write("********************************************************************************\n\n")
-        lut_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-        lut_file.write(".OPTIONS BRIEF=1\n\n")
-        lut_file.write("* Input signal\n")
-        lut_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Measurement\n")
-        lut_file.write("********************************************************************************\n\n")
-        lut_file.write("* inv_lut_0sram_driver_1 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_1_tfall TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_1_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_1_trise TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_1_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* inv_lut_sram_driver_2 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_2_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_2_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_2_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_2_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_int_buffer_1 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_1_tfall TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_6_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_1_trise TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_6_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_int_buffer_2 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_2_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_7_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_2_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_7_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_out_buffer_1 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_1_tfall TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_11_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_1_trise TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_11_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_out_buffer_2 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_2_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_2_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Total delays\n")
-        lut_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_out) AT=3n\n\n")
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Circuit\n")
-        lut_file.write("********************************************************************************\n\n")
-        if not self.use_tgate :
-            lut_file.write("Xlut n_in n_out vdd vdd vdd vdd vdd vdd vdd gnd lut\n\n")
-            lut_file.write("Xlut_output_load n_out n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
-        else :
-            lut_file.write("Xlut n_in n_out vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
-            lut_file.write("Xlut_output_load n_out n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
-        
-        lut_file.write(".END")
-        lut_file.close()
-
-        # Come out of lut directory
-        os.chdir("../")
-        
-        return (self.name + "/" + self.name + ".sp") 
-    
-
-    def generate_lut4_top(self):
-        """ Generate the top level 4-LUT SPICE file """
-
-        
-        # TODO:
-        # This should be modified for the case of FLUTs since the LUTs in this case are loaded differently
-        # they are loaded with a full adder and the input to the flut mux and not with the lut output load.
-        
-
-        # Create directory
-        if not os.path.exists(self.name):
-            os.makedirs(self.name)  
-        # Change to directory    
-        os.chdir(self.name) 
-        
-        lut_filename = self.name + ".sp"
-        lut_file = open(lut_filename, 'w')
-        lut_file.write(".TITLE 4-LUT\n\n") 
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Include libraries, parameters and other\n")
-        lut_file.write("********************************************************************************\n\n")
-        lut_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Setup and input\n")
-        lut_file.write("********************************************************************************\n\n")
-        lut_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-        lut_file.write(".OPTIONS BRIEF=1\n\n")
-        lut_file.write("* Input signal\n")
-        lut_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Measurement\n")
-        lut_file.write("********************************************************************************\n\n")
-        lut_file.write("* inv_lut_0sram_driver_1 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_1_tfall TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_1_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_1_trise TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_1_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* inv_lut_sram_driver_2 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_2_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_2_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_0sram_driver_2_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_2_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_int_buffer_1 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_1_tfall TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_5_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_1_trise TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_5_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_int_buffer_2 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_2_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_6_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_int_buffer_2_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_6_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_out_buffer_1 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_1_tfall TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(Xlut.n_9_1) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_1_trise TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(Xlut.n_9_1) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Xinv_lut_out_buffer_2 delay\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_2_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_inv_lut_out_buffer_2_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write("* Total delays\n")
-        lut_file.write(".MEASURE TRAN meas_total_tfall TRIG V(n_in) VAL='supply_v/2' FALL=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' FALL=1\n")
-        lut_file.write(".MEASURE TRAN meas_total_trise TRIG V(n_in) VAL='supply_v/2' RISE=1\n")
-        lut_file.write("+    TARG V(n_out) VAL='supply_v/2' RISE=1\n\n")
-        lut_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_out) AT=3n\n\n")
-        
-        lut_file.write("********************************************************************************\n")
-        lut_file.write("** Circuit\n")
-        lut_file.write("********************************************************************************\n\n")
-        if not self.use_tgate :
-            lut_file.write("Xlut n_in n_out vdd vdd vdd vdd vdd vdd vdd gnd lut\n\n")
-            lut_file.write("Xlut_output_load n_out n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
-        else :
-            lut_file.write("Xlut n_in n_out vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd vdd gnd lut\n\n")
-            lut_file.write("Xlut_output_load n_out n_local_out n_general_out vsram vsram_n vdd gnd vdd vdd lut_output_load\n\n")
-
-        lut_file.write(".END")
-        lut_file.close()
-
-        # Come out of lut directory
-        os.chdir("../")
-        
-        return (self.name + "/" + self.name + ".sp")
-
-
-    def generate_top(self):
-        print("Generating top-level lut")
-        tempK = self.K
-        if self.use_fluts:
-            tempK = self.K - 1
-
-        if tempK == 6:
-            self.top_spice_path = self.generate_lut6_top()
-        elif tempK == 5:
-            self.top_spice_path = self.generate_lut5_top()
-        elif tempK == 4:
-            self.top_spice_path = self.generate_lut4_top()
-            
-        # Generate top-level driver files
-        for input_driver_name, input_driver in self.input_drivers.items():
-            input_driver.generate_top()
    
-   
-    def update_area(self, area_dict, width_dict):
+    def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]) -> float:
         """ Update area. To do this, we use area_dict which is a dictionary, maintained externally, that contains
             the area of everything. It is expected that area_dict will have all the information we need to calculate area.
             We update area_dict and width_dict with calculations performed in this function. 
@@ -1037,7 +1072,7 @@ class _LUT(_SizableCircuit):
         if not self.use_tgate :
             # Calculate area (differs with different values of K)
             if tempK == 6:    
-                area += (64*area_dict["inv_lut_0sram_driver_2"] + 
+                area += (64*area_dict["inv_lut_sram_driver_2"] + 
                         64*area_dict["ptran_lut_L1"] + 
                         32*area_dict["ptran_lut_L2"] + 
                         16*area_dict["ptran_lut_L3"] +      
@@ -1052,7 +1087,7 @@ class _LUT(_SizableCircuit):
                         area_dict["inv_lut_out_buffer_2"] +
                         64*area_dict["sram"])
             elif tempK == 5:
-                area += (32*area_dict["inv_lut_0sram_driver_2"] + 
+                area += (32*area_dict["inv_lut_sram_driver_2"] + 
                         32*area_dict["ptran_lut_L1"] + 
                         16*area_dict["ptran_lut_L2"] + 
                         8*area_dict["ptran_lut_L3"] + 
@@ -1066,7 +1101,7 @@ class _LUT(_SizableCircuit):
                         area_dict["inv_lut_out_buffer_2"] +
                         32*area_dict["sram"])
             elif tempK == 4:
-                area += (16*area_dict["inv_lut_0sram_driver_2"] + 
+                area += (16*area_dict["inv_lut_sram_driver_2"] + 
                         16*area_dict["ptran_lut_L1"] + 
                         8*area_dict["ptran_lut_L2"] + 
                         4*area_dict["rest_lut_int_buffer"] + 
@@ -1081,7 +1116,7 @@ class _LUT(_SizableCircuit):
         else :
             # Calculate area (differs with different values of K)
             if tempK == 6:    
-                area += (64*area_dict["inv_lut_0sram_driver_2"] + 
+                area += (64*area_dict["inv_lut_sram_driver_2"] + 
                         64*area_dict["tgate_lut_L1"] + 
                         32*area_dict["tgate_lut_L2"] + 
                         16*area_dict["tgate_lut_L3"] + 
@@ -1094,7 +1129,7 @@ class _LUT(_SizableCircuit):
                         area_dict["inv_lut_out_buffer_2"] +
                         64*area_dict["sram"])
             elif tempK == 5:
-                area += (32*area_dict["inv_lut_0sram_driver_2"] + 
+                area += (32*area_dict["inv_lut_sram_driver_2"] + 
                         32*area_dict["tgate_lut_L1"] + 
                         16*area_dict["tgate_lut_L2"] + 
                         8*area_dict["tgate_lut_L3"] + 
@@ -1106,7 +1141,7 @@ class _LUT(_SizableCircuit):
                         area_dict["inv_lut_out_buffer_2"] +
                         32*area_dict["sram"])
             elif tempK == 4:
-                area += (16*area_dict["inv_lut_0sram_driver_2"] + 
+                area += (16*area_dict["inv_lut_sram_driver_2"] + 
                         16*area_dict["tgate_lut_L1"] + 
                         8*area_dict["tgate_lut_L2"] + 
                         4*area_dict["inv_lut_int_buffer_1"] + 
@@ -1142,14 +1177,14 @@ class _LUT(_SizableCircuit):
         return total_lut_area
     
 
-    def update_wires(self, width_dict, wire_lengths, wire_layers, lut_ratio):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], lut_ratio: float):
         """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
 
         if not self.use_tgate :
             if self.K == 6:        
                 # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["ptran_lut_L1"])/4
+                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["inv_lut_sram_driver_2"])/4
+                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["ptran_lut_L1"])/4
                 wire_lengths["wire_lut_L1"] = width_dict["ptran_lut_L1"]
                 wire_lengths["wire_lut_L2"] = 2*width_dict["ptran_lut_L1"]
                 wire_lengths["wire_lut_L3"] = 4*width_dict["ptran_lut_L1"]
@@ -1161,22 +1196,22 @@ class _LUT(_SizableCircuit):
                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
                 # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_L5"] = 0
-                wire_layers["wire_lut_L6"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+                wire_layers["wire_lut_sram_driver"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_sram_driver_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L1"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L2"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L3"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L4"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L5"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L6"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_out_buffer"] = consts.LOCAL_WIRE_LAYER
               
             elif self.K == 5:
                 # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["ptran_lut_L1"])/4
+                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["inv_lut_sram_driver_2"])/4
+                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["ptran_lut_L1"])/4
                 wire_lengths["wire_lut_L1"] = width_dict["ptran_lut_L1"]
                 wire_lengths["wire_lut_L2"] = 2*width_dict["ptran_lut_L1"]
                 wire_lengths["wire_lut_L3"] = 4*width_dict["ptran_lut_L1"]
@@ -1187,21 +1222,21 @@ class _LUT(_SizableCircuit):
                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
                 # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_L5"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+                wire_layers["wire_lut_sram_driver"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_sram_driver_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L1"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L2"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L3"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L4"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L5"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_out_buffer"] = consts.LOCAL_WIRE_LAYER
                 
             elif self.K == 4:
                 # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["ptran_lut_L1"])/4
+                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["inv_lut_sram_driver_2"])/4
+                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["ptran_lut_L1"])/4
                 wire_lengths["wire_lut_L1"] = width_dict["ptran_lut_L1"]
                 wire_lengths["wire_lut_L2"] = 2*width_dict["ptran_lut_L1"]
                 wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
@@ -1211,21 +1246,21 @@ class _LUT(_SizableCircuit):
                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
                 # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+                wire_layers["wire_lut_sram_driver"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_sram_driver_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L1"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L2"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L3"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L4"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_out_buffer"] = consts.LOCAL_WIRE_LAYER
 
         else :
             if self.K == 6:        
                 # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["tgate_lut_L1"])/4
+                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["inv_lut_sram_driver_2"])/4
+                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["tgate_lut_L1"])/4
                 wire_lengths["wire_lut_L1"] = width_dict["tgate_lut_L1"]
                 wire_lengths["wire_lut_L2"] = 2*width_dict["tgate_lut_L1"]
                 wire_lengths["wire_lut_L3"] = 4*width_dict["tgate_lut_L1"]
@@ -1237,22 +1272,22 @@ class _LUT(_SizableCircuit):
                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
                 # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_L5"] = 0
-                wire_layers["wire_lut_L6"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+                wire_layers["wire_lut_sram_driver"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_sram_driver_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L1"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L2"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L3"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L4"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L5"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L6"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_out_buffer"] = consts.LOCAL_WIRE_LAYER
               
             elif self.K == 5:
                 # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["tgate_lut_L1"])/4
+                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["inv_lut_sram_driver_2"])/4
+                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["tgate_lut_L1"])/4
                 wire_lengths["wire_lut_L1"] = width_dict["tgate_lut_L1"]
                 wire_lengths["wire_lut_L2"] = 2*width_dict["tgate_lut_L1"]
                 wire_lengths["wire_lut_L3"] = 4*width_dict["tgate_lut_L1"]
@@ -1263,21 +1298,21 @@ class _LUT(_SizableCircuit):
                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
                 # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_L5"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+                wire_layers["wire_lut_sram_driver"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_sram_driver_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L1"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L2"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L3"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L4"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L5"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_out_buffer"] = consts.LOCAL_WIRE_LAYER
                 
             elif self.K == 4:
                 # Update wire lengths
-                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["inv_lut_0sram_driver_2"])/4
-                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_0sram_driver_2"] + width_dict["tgate_lut_L1"])/4
+                wire_lengths["wire_lut_sram_driver"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["inv_lut_sram_driver_2"])/4
+                wire_lengths["wire_lut_sram_driver_out"] = (width_dict["inv_lut_sram_driver_2"] + width_dict["tgate_lut_L1"])/4
                 wire_lengths["wire_lut_L1"] = width_dict["tgate_lut_L1"]
                 wire_lengths["wire_lut_L2"] = 2*width_dict["tgate_lut_L1"]
                 wire_lengths["wire_lut_int_buffer"] = (width_dict["inv_lut_int_buffer_1"] + width_dict["inv_lut_int_buffer_2"])/4
@@ -1287,15 +1322,15 @@ class _LUT(_SizableCircuit):
                 wire_lengths["wire_lut_out_buffer"] = (width_dict["inv_lut_out_buffer_1"] + width_dict["inv_lut_out_buffer_2"])/4
 
                 # Update wire layers
-                wire_layers["wire_lut_sram_driver"] = 0
-                wire_layers["wire_lut_sram_driver_out"] = 0
-                wire_layers["wire_lut_L1"] = 0
-                wire_layers["wire_lut_L2"] = 0
-                wire_layers["wire_lut_int_buffer"] = 0
-                wire_layers["wire_lut_int_buffer_out"] = 0
-                wire_layers["wire_lut_L3"] = 0
-                wire_layers["wire_lut_L4"] = 0
-                wire_layers["wire_lut_out_buffer"] = 0
+                wire_layers["wire_lut_sram_driver"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_sram_driver_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L1"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L2"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_int_buffer_out"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L3"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_L4"] = consts.LOCAL_WIRE_LAYER
+                wire_layers["wire_lut_out_buffer"] = consts.LOCAL_WIRE_LAYER
           
         # Update input driver wires
         for driver_name, input_driver in self.input_drivers.items():
@@ -1321,7 +1356,7 @@ class _LUT(_SizableCircuit):
         utils.print_and_write(report_file,"")
         
     
-    def _generate_6lut(self, subcircuit_filename, min_tran_width, use_tgate, use_finfet, use_fluts):
+    def _generate_6lut(self, subcircuit_filename: str, min_tran_width: float):
         """ This function created the lut subcircuit and all the drivers and driver not subcircuits """
         print("Generating 6-LUT")
 
@@ -1330,13 +1365,13 @@ class _LUT(_SizableCircuit):
         # assert use_fluts == False
         
         # Call the generation function
-        if not use_tgate :
+        if not self.use_tgate :
             # use pass transistors
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut6(subcircuit_filename, min_tran_width, use_finfet)
+            self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut6(subcircuit_filename, min_tran_width, self.use_finfet)
 
             # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_nmos"] = 4
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_pmos"] = 6
             self.initial_transistor_sizes["ptran_lut_L1_nmos"] = 2
             self.initial_transistor_sizes["ptran_lut_L2_nmos"] = 2
             self.initial_transistor_sizes["ptran_lut_L3_nmos"] = 2
@@ -1356,11 +1391,11 @@ class _LUT(_SizableCircuit):
 
         else :
             # use transmission gates
-            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut6(subcircuit_filename, min_tran_width, use_finfet)
+            self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut6(subcircuit_filename, min_tran_width, self.use_finfet)
 
             # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_nmos"] = 4
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_pmos"] = 6
             self.initial_transistor_sizes["tgate_lut_L1_nmos"] = 2
             self.initial_transistor_sizes["tgate_lut_L1_pmos"] = 2
             self.initial_transistor_sizes["tgate_lut_L2_nmos"] = 2
@@ -1384,12 +1419,12 @@ class _LUT(_SizableCircuit):
         
         
         # Generate input drivers (with register feedback if input is in Rfb)
-        self.input_drivers["a"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["b"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["c"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["d"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["e"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["f"].generate(subcircuit_filename, min_tran_width)
+        self.input_drivers["a"].generate(subcircuit_filename)
+        self.input_drivers["b"].generate(subcircuit_filename)
+        self.input_drivers["c"].generate(subcircuit_filename)
+        self.input_drivers["d"].generate(subcircuit_filename)
+        self.input_drivers["e"].generate(subcircuit_filename)
+        self.input_drivers["f"].generate(subcircuit_filename)
         
         # Generate input driver loads
         self.input_driver_loads["a"].generate(subcircuit_filename, self.K)
@@ -1402,7 +1437,7 @@ class _LUT(_SizableCircuit):
         return self.initial_transistor_sizes
 
         
-    def _generate_5lut(self, subcircuit_filename, min_tran_width, use_tgate, use_finfet, use_fluts):
+    def _generate_5lut(self, subcircuit_filename: str, min_tran_width: float, use_tgate: bool, use_finfet: bool, use_fluts: bool):
         """ This function created the lut subcircuit and all the drivers and driver not subcircuits """
         print("Generating 5-LUT")
         
@@ -1411,8 +1446,8 @@ class _LUT(_SizableCircuit):
             # use pass transistor
             self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut5(subcircuit_filename, min_tran_width, use_finfet)
             # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_nmos"] = 4
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_pmos"] = 6
             self.initial_transistor_sizes["ptran_lut_L1_nmos"] = 2
             self.initial_transistor_sizes["ptran_lut_L2_nmos"] = 2
             self.initial_transistor_sizes["ptran_lut_L3_nmos"] = 2
@@ -1432,8 +1467,8 @@ class _LUT(_SizableCircuit):
             # use transmission gates
             self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut5(subcircuit_filename, min_tran_width, use_finfet)
             # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_nmos"] = 4
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_pmos"] = 6
             self.initial_transistor_sizes["tgate_lut_L1_nmos"] = 2
             self.initial_transistor_sizes["tgate_lut_L1_pmos"] = 2
             self.initial_transistor_sizes["tgate_lut_L2_nmos"] = 2
@@ -1455,16 +1490,29 @@ class _LUT(_SizableCircuit):
 
        
         # Generate input drivers (with register feedback if input is in Rfb)
-        self.input_drivers["a"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["b"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["c"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["d"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["e"].generate(subcircuit_filename, min_tran_width)
+        self.initial_transistor_sizes.update(
+            self.input_drivers["a"].generate(subcircuit_filename)
+        )
+        self.initial_transistor_sizes.update(
+            self.input_drivers["b"].generate(subcircuit_filename)
+        )
+        self.initial_transistor_sizes.update(
+            self.input_drivers["c"].generate(subcircuit_filename)
+        )
+        self.initial_transistor_sizes.update(
+            self.input_drivers["d"].generate(subcircuit_filename)
+        )
+        self.initial_transistor_sizes.update(
+            self.input_drivers["e"].generate(subcircuit_filename)
+        )
 
         if use_fluts:
-            self.input_drivers["f"].generate(subcircuit_filename, min_tran_width)
+            self.initial_transistor_sizes.update(
+                self.input_drivers["f"].generate(subcircuit_filename)
+            )
         
         # Generate input driver loads
+        
         self.input_driver_loads["a"].generate(subcircuit_filename, self.K)
         self.input_driver_loads["b"].generate(subcircuit_filename, self.K)
         self.input_driver_loads["c"].generate(subcircuit_filename, self.K)
@@ -1486,8 +1534,8 @@ class _LUT(_SizableCircuit):
             # use pass transistor
             self.transistor_names, self.wire_names = lut_subcircuits.generate_ptran_lut4(subcircuit_filename, min_tran_width, use_finfet)
             # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_nmos"] = 4
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_pmos"] = 6
             self.initial_transistor_sizes["ptran_lut_L1_nmos"] = 2
             self.initial_transistor_sizes["ptran_lut_L2_nmos"] = 2
             self.initial_transistor_sizes["rest_lut_int_buffer_pmos"] = 1
@@ -1506,8 +1554,8 @@ class _LUT(_SizableCircuit):
             # use transmission gates
             self.transistor_names, self.wire_names = lut_subcircuits.generate_tgate_lut4(subcircuit_filename, min_tran_width, use_finfet)
             # Give initial transistor sizes
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_nmos"] = 4
-            self.initial_transistor_sizes["inv_lut_0sram_driver_2_pmos"] = 6
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_nmos"] = 4
+            self.initial_transistor_sizes["inv_lut_sram_driver_2_pmos"] = 6
             self.initial_transistor_sizes["tgate_lut_L1_nmos"] = 2
             self.initial_transistor_sizes["tgate_lut_L1_pmos"] = 2
             self.initial_transistor_sizes["tgate_lut_L2_nmos"] = 2
@@ -1526,10 +1574,10 @@ class _LUT(_SizableCircuit):
             self.initial_transistor_sizes["inv_lut_out_buffer_2_pmos"] = 6
        
         # Generate input drivers (with register feedback if input is in Rfb)
-        self.input_drivers["a"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["b"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["c"].generate(subcircuit_filename, min_tran_width)
-        self.input_drivers["d"].generate(subcircuit_filename, min_tran_width)
+        self.input_drivers["a"].generate(subcircuit_filename)
+        self.input_drivers["b"].generate(subcircuit_filename)
+        self.input_drivers["c"].generate(subcircuit_filename)
+        self.input_drivers["d"].generate(subcircuit_filename)
         
         # Generate input driver loads
         self.input_driver_loads["a"].generate(subcircuit_filename, self.K)
@@ -1540,7 +1588,181 @@ class _LUT(_SizableCircuit):
         # *TODO: Add the second level of fracturability where the input f also will be used
         # If this is one level fracutrable LUT then the e input will still be used
         if use_fluts:
-            self.input_drivers["e"].generate(subcircuit_filename, min_tran_width)
+            self.input_drivers["e"].generate(subcircuit_filename)
             self.input_driver_loads["e"].generate(subcircuit_filename, self.K)
         
         return self.initial_transistor_sizes
+
+@dataclass
+class LUTTB(c_ds.SimTB):
+    lut: LUT = None
+    lut_output_load: ble_lib.LUTOutputLoad = None
+    
+    subckt_lib: InitVar[Dict[str, Type[c_ds.SizeableCircuit]]] = None
+
+    # Initialized in __post_init__
+    dut_ckt: LUT = None
+    local_out_node: str = None
+    general_out_node: str = None
+    
+    def __hash__(self) -> int:
+        return super().__hash__()
+    
+    def __post_init__(self, subckt_lib):
+        super().__post_init__()
+        self.meas_points = []
+        self.local_out_node = "n_local_out"
+        self.general_out_node = "n_general_out"
+
+        pwr_v_node: str = "vdd_lut"
+        # DUT DC Voltage Source
+        self.dut_dc_vsrc: c_ds.SpVoltageSrc = c_ds.SpVoltageSrc(
+            name = "_LUT",
+            out_node = pwr_v_node,
+            init_volt = c_ds.Value(name = self.supply_v_param),
+        )
+        # Initialize the DUT
+        self.dut_ckt = self.lut
+        if self.lut.use_tgate:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_out",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_c": self.vdd_node,
+                "n_c_n": self.gnd_node,
+                "n_d": self.vdd_node,
+                "n_d_n": self.gnd_node,
+                "n_e": self.vdd_node,
+                "n_e_n": self.gnd_node,
+                "n_f": self.vdd_node,
+                "n_f_n": self.gnd_node,
+                "n_vdd": pwr_v_node,
+                "n_gnd": self.gnd_node,
+            }
+        else:
+            lut_conns: Dict[str, str] = {
+                "n_in": "n_in",
+                "n_out": "n_out",
+                "n_a": self.vdd_node,
+                "n_a_n": self.gnd_node,
+                "n_b": self.vdd_node,
+                "n_b_n": self.gnd_node,
+                "n_vdd": pwr_v_node,
+                "n_gnd": self.gnd_node,
+            }
+        
+        self.top_insts = [
+            # LUT
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut.name}", # TODO update to sp_name
+                subckt = subckt_lib[self.lut.name], # TODO update to sp_name
+                conns = lut_conns,
+            ),
+            # LUT OUTPUT LOAD
+            rg_ds.SpSubCktInst(
+                name = f"X{self.lut_output_load.sp_name}",
+                subckt = subckt_lib[self.lut_output_load.sp_name],
+                conns = {
+                    "n_in": "n_out",
+                    "n_local_out": self.local_out_node,
+                    "n_general_out": self.general_out_node,
+                    "n_gate": self.sram_vdd_node,
+                    "n_gate_n": self.sram_vss_node,
+                    "n_vdd": self.vdd_node,
+                    "n_gnd": self.gnd_node,
+                    "n_vdd_local_output_on": self.vdd_node,
+                    "n_vdd_general_output_on": self.vdd_node,
+                }
+            ),
+        ]
+    def generate_top(self) -> str:
+        dut_sp_name: str = self.dut_ckt.name # TODO update to sp_name
+        lut_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
+            self.top_insts,
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+                for re_str in [
+                    "lut"
+                ] 
+            ],
+            [] # You need to pass in an empty list to init function, if you don't weird things will happen (like getting previous results from other function calls)
+        )
+
+        # K basically reduced by 1 if we use a fracturable LUT
+        tempK: int = self.dut_ckt.K
+        if self.dut_ckt.use_fluts:
+            tempK -= 1
+
+        sram_drv_1_out_node: str = ".".join(
+            [inst.name for inst in lut_path] + ["n_1_1"]
+        )
+        sram_drv_2_out_node: str = ".".join(
+            [inst.name for inst in lut_path] + ["n_2_1"]
+        )
+        node_str: str = "n_5_1" if tempK == 4 else "n_6_1"
+        lut_int_buff_1_out_node: str = ".".join(
+            [inst.name for inst in lut_path] + [node_str]
+        )
+        node_str: str = "n_6_1" if tempK == 4 else "n_7_1"
+        lut_int_buff_2_out_node: str = ".".join(
+            [inst.name for inst in lut_path] + [node_str]
+        )
+        node_str: str = "n_9_1" if tempK == 4 else "n_11_1"
+        lut_out_buff_1_out_node: str = ".".join(
+            [inst.name for inst in lut_path] + [node_str]
+        )
+        lut_out_buff_2_out_node: str = "n_out"
+
+        delay_names: str = [
+            f"inv_{dut_sp_name}_sram_driver_1",
+            f"inv_{dut_sp_name}_sram_driver_2",
+            f"inv_{dut_sp_name}_int_buffer_1",
+            f"inv_{dut_sp_name}_int_buffer_2",
+            f"inv_{dut_sp_name}_out_buffer_1",
+            f"inv_{dut_sp_name}_out_buffer_2",
+            f"total",
+        ]
+
+        targ_nodes: str = [
+            sram_drv_1_out_node,
+            sram_drv_2_out_node,
+            lut_int_buff_1_out_node,
+            lut_int_buff_2_out_node,
+            lut_out_buff_1_out_node,
+            lut_out_buff_2_out_node,
+            "n_out",
+        ]
+
+
+        if tempK == 6:
+            add_nodes: List[str] = [
+                "n_3_1",
+                "n_4_1",
+                "n_7_1",
+                "n_8_1",
+                "n_9_1",
+            ]
+            targ_nodes += [
+                ".".join([inst.name for inst in lut_path] + [node])
+                for node in add_nodes
+            ]
+            delay_names += [
+                f"info_{dut_sp_name}_node_{i+1}" for i in range(len(add_nodes))
+            ]
+        trig_node: str = "n_in"
+        low_v_node: str = "n_out"
+        
+        tb_fname: str = f"{dut_sp_name}_tb_{self.id}"
+        return super().generate_top(
+            delay_names = delay_names,
+            trig_node = trig_node,
+            targ_nodes = targ_nodes,
+            low_v_node = low_v_node,
+            tb_fname = tb_fname,
+        )
+
+
+
+
