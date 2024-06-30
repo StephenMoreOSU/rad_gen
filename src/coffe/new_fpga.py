@@ -420,7 +420,7 @@ class FPGA:
     
     # Init only fields
     coffe_info: InitVar[rg_ds.Coffe]
-    run_options: InitVar[NamedTuple]
+    run_options: NamedTuple
 
     # Required fields pre __post_init__
     spice_interface: spice.SpiceInterface
@@ -446,7 +446,7 @@ class FPGA:
         )
     )
     log_out_catagories: List[str] = field(
-        default_factory=lambda: []
+        default_factory = lambda: []
     )
 
     update_area_cnt: int = 0
@@ -753,7 +753,7 @@ class FPGA:
 
 
 
-    def __post_init__(self, coffe_info: rg_ds.Coffe, run_options: NamedTuple):
+    def __post_init__(self, coffe_info: rg_ds.Coffe):
         """ 
             Post init function for FPGA class. 
             This function is called after the FPGA class is initialized.
@@ -768,14 +768,18 @@ class FPGA:
             "delay",
         ]
 
+        # TODO refactor
+        consts.PASSTHROUGH_DEBUG_FLAG = self.run_options.pass_through
+
+        # TODO refactor
         # Optimization Weights
-        self.area_opt_weight = run_options.area_opt_weight
-        self.delay_opt_weight = run_options.delay_opt_weight
+        self.area_opt_weight = self.run_options.area_opt_weight
+        self.delay_opt_weight = self.run_options.delay_opt_weight
 
         # Init Specs
         self.specs = c_ds.Specs(
             coffe_info.fpga_arch_conf["fpga_arch_params"], 
-            run_options.quick_mode
+            self.run_options.quick_mode
         )
 
         # Global Setting inits
@@ -784,7 +788,6 @@ class FPGA:
 
         # Init height of logic block to 0 (representing uninitialized)
         # TODO update all initializations to None instead of some other value
-        # self.lb_height = 0.0
 
         # All general routing wires in the FPGA 
         self.gen_r_wires: Dict[str, c_ds.GenRoutingWire] = {}

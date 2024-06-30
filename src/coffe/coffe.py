@@ -47,7 +47,11 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     total_start_time = time.time()
 
     # Create an FPGA instance
-    fpga_inst = fpga.FPGA(coffe_info, args, spice_interface, telemetry_file_path)   
+    fpga_inst = fpga.FPGA(
+        coffe_info = coffe_info,
+        run_options = args,
+        spice_interface = spice_interface,
+    )   # telemetry_file_path
     
     ###############################################################
     ## GENERATE FILES

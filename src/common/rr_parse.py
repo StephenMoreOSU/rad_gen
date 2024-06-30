@@ -17,10 +17,11 @@ import scipy.stats as stats
 import copy
 
 from timeit import default_timer as timer 
-from lxml import etree
 import argparse
 
 import multiprocessing as mp
+
+import src.common.utils as rg_utils
 
 
 @dataclasses.dataclass
@@ -54,51 +55,8 @@ class Edge:
     switch_id: int
 
 
-
-
-
-# def parse_xml_chunk(xml_chunk: str, tags: List[str]) -> Dict[str, Dict[str, str]]:
-#     result: Dict[str, Dict[str, str]] = defaultdict(dict)
-    
-    
-#     # Parse the XML chunk
-#     parser = etree.XMLParser(recover=True)
-#     root = etree.fromstring(xml_chunk, parser=parser)
-
-
-#     # Iterate over the XML elements in the chunk
-#     for elem in root.iter():
-#         if elem.tag in tags:
-#             # Convert the element to a dictionary
-#             # element_dict = {'tag': elem.tag}
-#             element_dict = {}
-#             element_dict.update(elem.attrib)  # Add attributes
-#             # element_dict['text'] = elem.text  # Add text content
-#             result[elem.tag] = element_dict
-#             # result.append(element_dict)
-
-#     return result
-
-# def parse_xml_to_dict_parallel(xml_file: str, tags: List[str], chunk_size: int = 10000):
-#     result: Dict[str, Dict[str, str]] = defaultdict(dict)
-
-#     # Open the XML file
-#     with open(xml_file, 'rb') as f:
-#         # Read the XML file in chunks
-#         xml_chunks = iter(lambda: f.read(chunk_size), b'')
-        
-#         # Create a multiprocessing pool
-#         with mp.Pool() as pool:
-#             # Map the parsing function to each XML chunk
-#             results = pool.starmap(parse_xml_chunk, [(chunk, tags) for chunk in xml_chunks])
-#             # Combine the results from all processes
-#             for res in results:
-#                 result.update(res)
-
-#     return result
-
-
 def parse_xml_to_dict(xml_file: str, tags: List[str]):
+    from lxml import etree
     result: Dict[str, Dict[str, Any]] = defaultdict(dict)
 
     # Create an iterator for streaming parsing
@@ -116,34 +74,6 @@ def parse_xml_to_dict(xml_file: str, tags: List[str]):
 
     return result
 
-def pretty(d, indent=2):
-   for key, value in d.items():
-      print('\t' * indent + str(key))
-      if isinstance(value, dict):
-         pretty(value, indent+1)
-      else:
-         print('\t' * (indent+1) + str(value))
-
-# def desctructive_flatten_dict(d: dict):
-#     for k, v in list(d.items()):
-#         if isinstance(v, dict):
-#             for i in v:
-#                 if isinstance(v[i], dict):
-#                     d.update(v[i])
-#                 else:
-#                     d.update(v)
-#                 del d[k]
-
-def write_dict_to_csv(csv_lines: List[Dict[str, Any]], csv_fname: str) -> None:
-    """
-        Writes a list of dictionaries to a csv file (in current directory)
-    """
-    csv_fd = open(f"{csv_fname}.csv","w")
-    writer = csv.DictWriter(csv_fd, fieldnames=csv_lines[0].keys())
-    writer.writeheader()
-    for line in csv_lines:
-        writer.writerow(line)
-    csv_fd.close()
 
 def typecast_input_to_dataclass(input_value: dict, dataclass_type: Any) -> Any:
     """
@@ -186,12 +116,10 @@ def rec_clean_dict_keys(input_dict: Dict[str, Any]) -> Dict[str, Any]:
             output_dict[k.replace("@","")] = v
     return output_dict
 
-
 # VIRTUAL_PIN_ID = 0
 # CB_IPIN_SW_ID = 1
 # L4_SW_ID = 2
 # L16_SW_ID = 3
-
 
 def parse_cli_args(argv: List[str] = []) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Parses VPR rr_graph.xml file and outputs information on the routing architecture")
@@ -223,11 +151,13 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
     rr_dict = xmltodict.parse(input_rr_xml_text)
     print( f"Finished parsing {input_rr_xml_fpath} with xmltodict in {timer() - timer_start} seconds")
     
+    # LXML parsing information
     # print( f"Starting to parse {input_rr_xml_fpath} with lxml")
     # timer_start = timer()
     # out_tags = ["switches", "segments", "rr_nodes", "rr_edges"]
     # rr_dict = parse_xml_to_dict(input_rr_xml_fpath, out_tags)
     # print( f"Finished parsing {input_rr_xml_fpath} with lxml in {timer() - timer_start} seconds")
+    
     switches: Dict[int, Switch] = {}
     segments: Dict[int, Segment] = {}
     nodes: Dict[int, Node] = {}
@@ -396,7 +326,6 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
         # AND Make sure that there exists a common src for the same sink -> Basically is this a non terminal SINK node
         # wire_segment_id: int = int(nodes[edges[0].sink_node].segment.get("segment_id")) if nodes[edges[0].sink_node].segment else None
         wire_segment_id: int = int(nodes[node_id].segment.get("segment_id")) if nodes[node_id].segment else None
-        # (wire_segment_id in list(segments.keys()) ) and
         if (wire_segment_id in list(segments.keys()) ) and node_id in common_src_edges.keys():
 
             # Make sure that all edges have the same switch id
@@ -628,7 +557,7 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
     print(f"Writing results to {result_dpath}")
 
     # Output results for frequency of muxes
-    write_dict_to_csv([{"SWITCH_TYPE": k, "FREQ": v["FREQ"], "FREQ_PER_TILE": v["FREQ_PER_TILE"]} for k, v in mux_freq_info.items()], os.path.join(result_dpath, "rr_mux_freqs"))
+    rg_utils.write_dict_to_csv([{"SWITCH_TYPE": k, "FREQ": v["FREQ"], "FREQ_PER_TILE": v["FREQ_PER_TILE"]} for k, v in mux_freq_info.items()], os.path.join(result_dpath, "rr_mux_freqs"))
 
     # We need to get fanin / fanout catagories for each switch type that exists in device
     fanin_label_sw_pairs = list(set([
@@ -742,7 +671,7 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
         # fanin_vals_str = f"{mux_infos[k]['fanin']['total']:<{stdout_col_width}}{mux_infos[k]['fanin'].get(L4_SW_ID, 0):<{stdout_col_width}}{mux_infos[k]['fanin'].get(L16_SW_ID, 0):<{stdout_col_width}}{mux_infos[k]['fanin'].get(CB_IPIN_SW_ID, 0):<{stdout_col_width}}{mux_infos[k]['fanin'].get(VIRTUAL_PIN_ID, 0):<{stdout_col_width}}"
         # print(f"{k:<{stdout_col_width}}{fanout_vals_str}{fanin_vals_str}")
 
-    write_dict_to_csv(csv_out_dicts, os.path.join(result_dpath,"rr_wires_detailed"))
+    rg_utils.write_dict_to_csv(csv_out_dicts, os.path.join(result_dpath,"rr_wires_detailed"))
 
     # Print out frequency of occurances
 
@@ -931,7 +860,7 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
                 )
     
     # Output the wire analysis as another CSV
-    write_dict_to_csv(wire_info_out_csv_rows, os.path.join(result_dpath,"rr_wire_stats"))
+    rg_utils.write_dict_to_csv(wire_info_out_csv_rows, os.path.join(result_dpath,"rr_wire_stats"))
     
     # Put the wire analysis info as well as segment/switches extracted from rr graph to return dict
     rr_info: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
@@ -975,8 +904,8 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, Dict[st
             if k not in switch_out_dicts[i]:
                 switch_out_dicts[i][k] = None
 
-    write_dict_to_csv(seg_out_dicts, os.path.join(result_dpath,"rr_segments"))
-    write_dict_to_csv(switch_out_dicts, os.path.join(result_dpath,"rr_switches"))
+    rg_utils.write_dict_to_csv(seg_out_dicts, os.path.join(result_dpath,"rr_segments"))
+    rg_utils.write_dict_to_csv(switch_out_dicts, os.path.join(result_dpath,"rr_switches"))
     rr_info["segments"] = {seg_id: dataclasses.asdict(segment) for seg_id, segment in segments.items()}
     rr_info["switches"] = {sw_id: dataclasses.asdict(sw) for sw_id, sw in switches.items()}
 

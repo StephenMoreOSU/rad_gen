@@ -191,7 +191,10 @@ def test_alu_sw_pt_parse_conf_init(test_alu_sw_pt_parse_conf_init_tb, request):
 @pytest.mark.parse
 @skip_if_fixtures_only
 def test_alu_sw_pt_parse(alu_sw_pt_parse_tb, request):
-    tests_common.run_verif_hammer_asic_flow(rg_args = alu_sw_pt_parse_tb)
+    tests_common.run_verif_hammer_asic_flow(
+        rg_args = alu_sw_pt_parse_tb,
+        backup_flag = False, # Don't backup as this is for parsing existing results
+    )
 
 
 

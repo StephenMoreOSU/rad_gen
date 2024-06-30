@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, fields, make_dataclass, MISSING
 import os, sys
 
 import re
-from typing import Pattern, Dict, List, Any, Tuple, Union, Generator, Optional, Callable, Type
+from typing import Pattern, Dict, List, Any, Tuple, Union, Generator, Optional, Callable, Type, ClassVar, Protocol
 from datetime import datetime
 import logging
 from pathlib import Path
@@ -31,13 +31,17 @@ CLI_HIER_KEY = "."
 STRUCT_HIER_KEY = "__"
 
 
-
 # ██████╗  █████╗ ██████╗        ██████╗ ███████╗███╗   ██╗
 # ██╔══██╗██╔══██╗██╔══██╗      ██╔════╝ ██╔════╝████╗  ██║
 # ██████╔╝███████║██║  ██║█████╗██║  ███╗█████╗  ██╔██╗ ██║
 # ██╔══██╗██╔══██║██║  ██║╚════╝██║   ██║██╔══╝  ██║╚██╗██║
 # ██║  ██║██║  ██║██████╔╝      ╚██████╔╝███████╗██║ ╚████║
 # ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝        ╚═════╝ ╚══════╝╚═╝  ╚═══╝
+
+class Dataclass(Protocol):
+    # as already noted in comments, checking for this attribute is currently
+    # the most reliable way to ascertain that something is a dataclass
+    __dataclass_fields__: ClassVar[Dict[str, Any]] 
 
 def create_timestamp(fmt_only_flag: bool = False) -> str:
     """
@@ -463,6 +467,8 @@ class Common:
     # args: Any = None 
 
     # Args 
+    # top_config_fpath: str = None
+    # just_config_init: bool = None
     override_outputs: bool = False # If true will override any files which already exist in the output directory
     manual_obj_dir: str = None # If set will use this as the object directory for the current run
 
@@ -611,7 +617,7 @@ class RadGenCLI(ParentCLI):
     
     cli_args: List[GeneralCLI] = field(default_factory = lambda: [ 
         GeneralCLI(key = "subtools", shortcut="-st", datatype = str, nargs = "*", help_msg = "subtool to run"),
-        GeneralCLI(key = "top_config_path", shortcut = "-tc", datatype = str, help_msg = "path to (optional) RAD-GEN top level config file"),
+        GeneralCLI(key = "top_config_fpath", shortcut = "-tc", datatype = str, help_msg = "path to (optional) RAD-GEN top level config file"),
         GeneralCLI(key = "override_outputs", shortcut = "-l", datatype = bool, action = "store_true", help_msg = "Uses latest obj / work dir / file paths found in the respective output dirs, overriding existing files"),
         GeneralCLI(key = "manual_obj_dir", shortcut = "-o", datatype = str, help_msg = "Uses user specified obj dir"),
         GeneralCLI(key = "project_name", shortcut = "-n", datatype = str, help_msg = "Name of Project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them"),
@@ -1069,9 +1075,14 @@ class HammerFlow:
                 # Instantiating a hammer driver class creates an obj_dir named "obj_dir" in the current directory, as a quick fix we will delete this directory after its created
                 # TODO this should be fixed somewhere
                 dummy_obj_dir_path = os.path.join(os.getcwd(),"obj_dir")
-                if os.path.isdir(dummy_obj_dir_path):
-                    # Please be careful changing things here, always scary when you're calling "rm -rf"
-                    shutil.rmtree(dummy_obj_dir_path)
+                try:
+                    if os.path.exists(dummy_obj_dir_path):
+                        # Please be careful changing things here, always scary when you're calling "rm -rf"
+                        shutil.rmtree(dummy_obj_dir_path)
+                except: 
+                    # This operation can fail because of possibly running rad gen on multiple processes at the same time 
+                    # Its not critical and just for clean up so we can ignore the error
+                    pass
             if self.cli_driver_bpath is None:
                 # the hammer-vlsi exec should point to default cli driver in hammer repo if everything installed correctly
                 self.cli_driver_bpath = "hammer-vlsi"
@@ -1213,7 +1224,12 @@ class CoffeCLI(ParentCLI):
         GeneralCLI(key = "quick_mode", shortcut = "-q", datatype = float, default_val = -1.0, help_msg = "minimum cost function improvement for resizing, Ex. could try 0.03 for 3% improvement"),
         GeneralCLI(key = "ctrl_comp_telemetry_fpath", shortcut = "-ct", datatype = str, help_msg = "path to control compare telemetry file"),
         # Additional Args for FPL'24
-        GeneralCLI(key = "rrg_data_dpath", shortcut = "-rrg", datatype = str, help_msg = "Path to directory containing parsed RRG output csvs")
+        GeneralCLI(key = "rrg_data_dpath", shortcut = "-rrg", datatype = str, help_msg = "Path to directory containing parsed RRG output csvs"),
+        GeneralCLI(key = "pass_through", shortcut = "-pass", datatype = bool, action = "store_true", help_msg = "Flag which enables pass-through mode for COFFE, this does NOT run spice simulations but allows the tool to be run to the end for debugging purposes" ),
+        GeneralCLI(
+            key = "checkpoint_dpaths", shortcut = "-ckpt", datatype = str, nargs = "*", 
+            help_msg = "Paths to spice subckt sizing grid search iterations from previous COFFE runs. This allows the current run to skip the found iterations and run spice simulations for missing iterations"
+        )
     ])
 
 # Use CoffeCLI as factory for creating CoffeArgs dataclass
@@ -1328,6 +1344,7 @@ class FPGAArchParams:
 
 @dataclass
 class Coffe:
+    common: Common # common settings for RAD Gen
     # args: CoffeArgs = None
     # TODO put coffe CLI in here
     no_sizing: bool # don't perform sizing
@@ -1343,7 +1360,8 @@ class Coffe:
     ctrl_comp_telemetry_fpath: str # path to control compare telemetry file 
     # Args for COFFE updates FPL'24
     rrg_data_dpath: str # Path to directory containing parsed RRG output csvs
-
+    pass_through: bool # Flag which enables pass-through mode for COFFE, this does NOT run spice simulations but allows the tool to be run to the end for debugging purposes
+    checkpoint_dpaths: List[str] # Paths to spice subckt sizing grid search iterations from previous COFFE runs. This allows the current run to skip the found iterations and run spice simulations for missing iterations
     # NON cli args are below:
     arch_name: str # name of FPGA architecture
     hardblocks: List[Hardblock] = None # Hard block flows configuration dictionary
@@ -2543,35 +2561,6 @@ class Ic3dCLI(ParentCLI):
         GeneralCLI(key = "buffer_dse", shortcut = "-bd", datatype = bool, action = "store_true", help_msg = "runs the buffer DSE flow"),
         GeneralCLI(key = "buffer_sens_study", shortcut = "-bs", datatype = bool, action = "store_true", help_msg = "runs the buffer sensitivity study flow (sweeps parameters for buffer chain wire load, plots results)"),
     ])
-    arg_definitions: dict = field(default_factory = lambda: [ 
-        {"key": "input_config_path", 
-            "shortcut" : "-ic" ,"type": str, "help": "path to ic_3d subtool specific configuration file"},
-
-        {"key": "debug_spice",
-            "shortcut" : "-ds" ,"type": str, "nargs": "*", "help": "takes in directory(ies) named according to tile of spice sim, runs sim, opens waveforms and param settings for debugging"},
-        
-        {"key": "pdn_modeling",
-            "shortcut" : "-pm", "action": "store_true", "help": "runs the PDN modeling flow"},
-        
-        {"key": "buffer_dse", 
-            "shortcut" : "-bd", "action": "store_true", "help": "runs the buffer DSE flow"},
-        
-        {"key": "buffer_sens_study",
-            "shortcut" : "-bs", "action": "store_true", "help": "runs the buffer sensitivity study flow (sweeps parameters for buffer chain wire load, plots results)"},
-
-        # {"key": "use_latest_obj_dir",
-            # "shortcut" : "-l", "action": "store_true", "help": "uses the latest directory in the output folder rather than creating a new one"},
-    ])
-
-    """
-        input_config_path: str = None # path to input configuration file
-        debug_spice: bool = False # plot spice waveforms
-        pdn_modeling: bool = False
-        buffer_dse: bool = False
-        buffer_sens_study: bool = False
-        # This arg is for the WIP buffer DSE flow, one can use it by uncommenting the command in ic_3d.py or wait a little bit
-        use_latest_obj_dir: bool = False # Uses the latest directory in the output folder rather than creating a new one
-    """
 
 # Use factory to create Args dataclass
 

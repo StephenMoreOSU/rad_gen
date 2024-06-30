@@ -25,16 +25,16 @@ vlsi.inputs:
   ]
 
   # These placement constraints will not be used if the "manual" floorplan mode is used in the "par" section, but they may still be required by hammer so we keep them in
-  # placement_constraints:
-  # - path: null ## RAD-Gen -t argument
-  #   type: toplevel
-  #   x: 20
-  #   y: 20
-  #   width: 500
-  #   height: 500
-  #   margins:
-  #     left: 0
-  #     right: 0
-  #     top: 0
-  #     bottom: 0
+  placement_constraints:
+  - path: null ## RAD-Gen -t argument
+    type: toplevel
+    x: 20
+    y: 20
+    width: 500
+    height: 500
+    margins:
+      left: 0
+      right: 0
+      top: 0
+      bottom: 0
 

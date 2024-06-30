@@ -398,7 +398,7 @@ def mod_n_write_template_config_file(hdl_dpath: str, top_lvl_module: str, mod_co
 
     # init top level placement constraints
     placement_constraints = design_conf.get("vlsi.inputs.placement_constraints")
-    if isinstance(placement_constraints, list) and len(placement_constraints) > 0 and placement_constraints[0].get("path"):
+    if isinstance(placement_constraints, list) and len(placement_constraints) > 0:
         design_conf["vlsi.inputs.placement_constraints"][0]["path"] = top_lvl_module
     
     # Write out new config
@@ -440,7 +440,7 @@ def modify_config_file(asic_dse: rg_ds.AsicDSE) -> str:
     
     # init top level placement constraints
     placement_constraints = design_config.get("vlsi.inputs.placement_constraints")
-    if isinstance(placement_constraints, list) and len(placement_constraints) > 0 and placement_constraints[0].get("path"):
+    if isinstance(placement_constraints, list) and len(placement_constraints) > 0:
         design_config["vlsi.inputs.placement_constraints"][0]["path"] = asic_dse.common_asic_flow.top_lvl_module
 
     # Creates directory for modified config files and writes new config

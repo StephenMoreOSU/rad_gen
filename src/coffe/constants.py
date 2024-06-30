@@ -32,7 +32,7 @@ LUT_INPUT_USAGE_ASSUMPTION = 0.85
 # This allows us to test the rest of the code to make sure it doesn't error out
 PASSTHROUGH_DEBUG_FLAG = False
 # Verbosity level, TODO move this to logger and make it clean
-BREIF = 0
+BRIEF = 0
 VERBOSE = 1
 DEBUG = 2
 VERBOSITY = DEBUG

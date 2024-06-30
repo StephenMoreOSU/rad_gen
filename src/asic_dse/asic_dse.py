@@ -117,6 +117,9 @@ def design_sweep(asic_dse: rg_ds.AsicDSE) -> List[rg_ds.MetaDataclass]:
             else:
                 raise ValueError("No hdl path specified in config file or sweep config file")
 
+            if not base_config.get('vlsi.inputs.placement_constraints'):                
+                raise ValueError("No placement_constraints specified in config file or sweep config file")
+
             # General solution for checking validity 
             
             # # If the base config does not have 'synthesis.inputs.top_module' or 'synthesis.inputs.input_files' set

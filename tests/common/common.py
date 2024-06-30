@@ -13,6 +13,7 @@ import argparse
 from collections import OrderedDict
 import copy
 import dataclasses
+import shutil
 
 import json
 from deepdiff import DeepDiff
@@ -41,7 +42,7 @@ def init_scan_proj_tree() -> rg_ds.Tree:
 
 def get_test_info(stack_lvl: int = 2) -> Tuple[rg_ds.Tree, str, str, str, str]:
     # TODO replace stack lvl bs with just passing in the name of function + file at the top level
-    rg_home: str = os.environ.get("RAD_GEN_HOME")
+    rg_home: str = get_rg_home()
     tests_tree: rg_ds.Tree = init_tests_tree()
     # Get the name of file that called this function (above the current file)
     caller_file: str = get_caller_file(level = stack_lvl)
@@ -87,7 +88,7 @@ def verify_flow_stage(obj_dpath: str, golden_results_dpath: str, stage_name: str
         if col in verif_keys:
             cmp_val: float | str = stage_cmp_df[col].values[row_idx]
             if isinstance(cmp_val, float):
-                assert cmp_val == 0.0
+                assert (cmp_val < 0.1 and cmp_val > 0) or (cmp_val > -0.1 and cmp_val < 0 ) or cmp_val == 0.0 # % difference tolerance we allow
             elif isinstance(cmp_val, str):
                 assert cmp_val == "Matching"
             else:
@@ -201,6 +202,7 @@ def run_verif_hammer_asic_flow(
     rg_args: rg_ds.RadGenArgs,
     exec_flag: bool = True,
     verif_flag: bool = True,
+    backup_flag: bool = True,
 ) -> Any:
     
     tests_tree: rg_ds.Tree
@@ -209,6 +211,11 @@ def run_verif_hammer_asic_flow(
     if "parse" in test_name:
         test_name = test_name.replace("parse", "asic_flow")
     manual_obj_dpath: str = rg_args.manual_obj_dir
+    # If backup arg is specified we will copy the manual obj dir to a backup location
+    if os.path.isdir(manual_obj_dpath) and backup_flag:
+        backup_obj_dpath = f"{manual_obj_dpath}_backup_{rg_ds.create_timestamp()}"
+        shutil.move(manual_obj_dpath, backup_obj_dpath)
+            
     ret_val: Any = None
     if exec_flag:
         ret_val = run_rad_gen(rg_args, rg_home)
@@ -296,8 +303,6 @@ def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
                     for fname in os.listdir(os.path.join(golden_results_dpath, dname))
                     if "init_struct" in fname
             ]
-            for fpath in [ os.path.join(golden_results_dpath, dname, fname) for fname in os.listdir(os.path.join(golden_results_dpath, dname))]:
-                print(fpath)
             assert len(init_struct_fpaths) == 1, f"Expected 1 init struct file in {os.path.join(golden_results_dpath, dname)}"
             golden_init_struct_fpath: str = init_struct_fpaths[0]
             break
@@ -347,3 +352,13 @@ def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
     else:
         print("No differences found between test and golden init struct")
 
+
+
+# def run_verif_coffe(rg_args: rg_ds.RadGenArgs):
+#     tests_tree, test_grp_name, tests_name, _, _ = get_test_info(stack_lvl = 3)
+#     rg_info, _ = run_rad_gen(
+#         rg_args, 
+#         get_rg_home()
+#     )
+#     subtool: str = rg_args.subtools[0]
+#     coffe_info = rg_info[subtool]

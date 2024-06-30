@@ -88,8 +88,6 @@ def init_logger():
     file_handler.setFormatter(fmt)     
     logger.addHandler(stream_handler)
     logger.addHandler(file_handler)
-
-
     return logger
 
 # ██████╗  █████╗ ██████╗      ██████╗ ███████╗███╗   ██╗    ███████╗██╗  ██╗███████╗ ██████╗    ███╗   ███╗ ██████╗ ██████╗ ███████╗███████╗
@@ -113,11 +111,9 @@ def main(args: argparse.Namespace | None = None) -> Tuple[ Any | None, rg_ds.Tre
 
     # Parse command line arguments
     args, default_arg_vals = rg_utils.parse_rad_gen_top_cli_args(args)
-
-    # rad_gen_settings = init_structs(args)
     rad_gen_info = rg_utils.init_structs_top(args, default_arg_vals)
-
     arg_dict = vars(args)
+
     # If we want to return initialized data structs for a subtool, just return here
     if arg_dict["common.just_config_init"]:
         return rad_gen_info, list(rad_gen_info.values())[0].common.project_tree

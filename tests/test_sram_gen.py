@@ -48,11 +48,33 @@ def sram_gen() -> rg_ds.RadGenArgs:
     return sram_gen_args
 
 @pytest.fixture
-def sram_gen_output(sram_gen: rg_ds.RadGenArgs) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree]:
+def sram_gen_output(sram_gen: rg_ds.RadGenArgs) -> Tuple[
+    List[rg_ds.RadGenArgs],
+    rg_ds.Tree,
+    rg_ds.RadGenArgs
+]:
+    """
+        Fixture to ingest the SRAM sweep generation driver, run the sweep command, and return its output
+
+        Args:
+            sram_gen: The driver for generating SRAM configs + RTL
+
+        Returns:
+            Tuple of the output of the SRAM sweep. 
+                [0] is the list of all RadGenArgs that can be used to run each individual generated SRAM through asic flow.
+                [1] is the project tree that has been initialized through the RAD-Gen sweep command.
+                [2] is the original input RadGenArgs (`sram_gen`) that was used to generate the sweep
+    """
     return tests_common.run_sweep(sram_gen)
 
 @pytest.fixture
 def get_stitched_srams() -> List[Dict[str, int]]:
+    """
+        Fixture to generate a list of dictionaries of all stitched SRAM macros to be generated.
+        
+        Returns:
+            List of dictionaries of stitched SRAM macros to be generated / verified
+    """
     stitched_macros: List[Dict[str, int]] = [
         {
             # for now this will only support RW not either R or W
@@ -158,6 +180,16 @@ def get_dut_single_macro(sram_gen_output) -> Tuple[
     str,
     Dict[str, int],
 ]:
+    """
+        Fixture to generate information required to test a single DUT SRAM macro defined by the `macro_params` dict.
+
+        Args:
+            sram_gen_output: The output of the SRAM sweep generation driver
+        
+        Returns:
+            Tuple of the project tree (taken from `sram_gen_output`), the path to the macro config file, and the macro parameters
+
+    """
     macro_params: dict = {
         "rw_ports": 2,
         "w": 32,
@@ -186,6 +218,15 @@ def get_dut_stitched_sram(sram_gen_output) ->Tuple[
     str,
     Dict[str, int],
 ]:
+    """
+        Fixture to generate information required to test a previously generated stitched DUT SRAM macro defined by the `sram_params` dict.
+
+        Args:
+            sram_gen_output: The output of the SRAM sweep generation driver
+
+        Returns:
+            Tuple of the project tree (taken from `sram_gen_output`), the path to the stitched macro config file, and the stitch macro SRAM parameters
+    """
     sram_params = {
         "rw_ports": 2,
         "w": 256,
@@ -220,12 +261,28 @@ sram_gen_conf_init_tb = conftest.create_rg_fixture(
 @pytest.mark.init
 @skip_if_fixtures_only
 def test_sram_gen_conf_init(sram_gen_conf_init_tb, request):
+    """
+        Test the data struct initialization of the SRAM generation test `test_sram_gen`
+        
+        Args:
+            sram_gen_conf_init_tb: rg_ds.RadGenArgs obj from conf_init fixture generated from the `sram_gen` fixture
+            request: pytest request, for @skip_if_fixtures_only decorator, to skip if only fixtures are being run
+        
+    """
     tests_common.run_and_verif_conf_init(sram_gen_conf_init_tb)
 
 @pytest.mark.sram
 @pytest.mark.asic_sweep
 @skip_if_fixtures_only
 def test_sram_gen(sram_gen_output, get_stitched_srams, request):
+    """
+        Test the generation of SRAM configs and RTL for a list of stitched SRAM macros
+
+        Args:
+            sram_gen_output: The output of the SRAM sweep generation driver
+            get_stitched_srams: The list of stitched SRAM macros to be generated / verified
+            request: pytest request, for @skip_if_fixtures_only decorator, to skip if only fixtures are being run
+    """
     proj_tree: rg_ds.Tree
     _, proj_tree, _ = sram_gen_output
     stitched_mems: List[Dict[str, int]] = get_stitched_srams
@@ -260,6 +317,9 @@ def single_macro_asic_flow_tb(
     hammer_flow_template, 
     get_dut_single_macro
 ) -> rg_ds.RadGenArgs:
+    """
+        
+    """
     proj_tree: rg_ds.Tree
     subtool_fields: dict = {
         "common_asic_flow__flow_stages__sram__run": True,
@@ -318,7 +378,10 @@ def test_single_macro_parse_conf_init(single_macro_parse_conf_init_tb, request):
 @pytest.mark.parse
 @skip_if_fixtures_only
 def test_single_macro_parse(single_macro_parse_tb, request):
-    tests_common.run_verif_hammer_asic_flow(rg_args = single_macro_parse_tb)
+    tests_common.run_verif_hammer_asic_flow(
+        rg_args = single_macro_parse_tb,
+        backup_flag = False, # Don't backup as this is for parsing existing results
+    )
 
 #   ___ ___    _   __  __   ___ _____ ___ _____ ___ _  _ ___ ___    __  __   _   ___ ___  ___  
 #  / __| _ \  /_\ |  \/  | / __|_   _|_ _|_   _/ __| || | __|   \  |  \/  | /_\ / __| _ \/ _ \ 
@@ -388,5 +451,8 @@ def test_stitched_sram_parse_conf_init(stitched_sram_parse_conf_init_tb, request
 @pytest.mark.parse
 @skip_if_fixtures_only
 def test_stitched_sram_parse(stitched_sram_parse, request):
-    tests_common.run_verif_hammer_asic_flow(rg_args = stitched_sram_parse)
+    tests_common.run_verif_hammer_asic_flow(
+        rg_args = stitched_sram_parse,
+        backup_flag = False, # Don't backup as this is for parsing existing results
+    )
 

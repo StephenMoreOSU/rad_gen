@@ -1425,7 +1425,8 @@ def write_out_sweep_file(parameter_dict: Dict[str, List[float]], sweep_out_fpath
 def search_ranges(
         sizing_ranges, 
         fpga_inst: fpga.FPGA, 
-        sizable_circuit: c_ds.SizeableCircuit, 
+        sizable_circuit: c_ds.SizeableCircuit,
+        run_options: NamedTuple, 
         opt_type: str, 
         re_erf: int, 
         area_opt_weight: float, 
@@ -1472,10 +1473,9 @@ def search_ranges(
     best_combo_erf_ratios: dict = None
     best_results: List[tuple] = None
     best_combo: tuple = None
-
-    if consts.CKPT_FLAG:
+    if run_options.checkpoint_dpaths:
         # If we are getting our transistor sizes from a checkpoint look for the file
-        for dir in consts.CKPT_DPATHS:
+        for dir in run_options.checkpoint_dpaths:
             if os.path.isdir(dir):
                 post_erf_res_fpath = os.path.join(dir, post_erf_results_fname)
                 # we prioritize the post erf results file, if it doesn't exist we should look in results file
@@ -2173,6 +2173,7 @@ def update_sizing_ranges(sizing_ranges, sizing_results):
 def size_subcircuit_transistors(
         fpga_inst: fpga.FPGA, 
         subcircuit: c_ds.SizeableCircuit, # This could be many subckt objects
+        run_options: NamedTuple,
         opt_type: str, # "global" | "local" 
         re_erf: int, 
         area_opt_weight: int | float, 
@@ -2266,20 +2267,23 @@ def size_subcircuit_transistors(
             sizing_ranges_copy = sizing_ranges.copy()
         
             # Perform transistor sizing on ranges
-            search_ranges_return = search_ranges(sizing_ranges_copy,            
-                                                 fpga_inst, 
-                                                 subcircuit, 
-                                                 opt_type, 
-                                                 re_erf, 
-                                                 area_opt_weight, 
-                                                 delay_opt_weight, 
-                                                 outer_iter, 
-                                                 inner_iter, 
-                                                 set_num, 
-                                                 spice_interface,
-                                                 is_ram_component,
-                                                 is_cc_component,
-                                                 ckt_tbs)
+            search_ranges_return = search_ranges(
+                sizing_ranges = sizing_ranges_copy,            
+                fpga_inst = fpga_inst, 
+                sizable_circuit = subcircuit, 
+                run_options = run_options,
+                opt_type = opt_type, 
+                re_erf = re_erf, 
+                area_opt_weight = area_opt_weight, 
+                delay_opt_weight = delay_opt_weight, 
+                outer_iter = outer_iter, 
+                inner_iter = inner_iter, 
+                bunch_num = set_num, 
+                spice_interface = spice_interface,
+                is_ram_component = is_ram_component,
+                is_cc_component = is_cc_component,
+                ckt_tbs = ckt_tbs,
+            )
                                          
             sizing_results_set = search_ranges_return[0]
             sizing_results_set_detailed = search_ranges_return[1]
@@ -2517,6 +2521,7 @@ def size_subckt_grp(
         sizing_results_detailed_list: list,
         sizing_results_detailed_dict: dict,
         # Arguments for size_subcircuit_transistors
+        run_options: NamedTuple,
         opt_type: str,         
         re_erf: int,
         area_opt_weight: int | float,
@@ -2548,17 +2553,18 @@ def size_subckt_grp(
         # So every time we size we are in quick mode?
         if quick_mode_dict[sp_name] == 1:
             sizing_results_dict[sp_name], sizing_results_detailed_dict[sp_name] = size_subcircuit_transistors(
-                fpga_inst, 
-                subckt, 
-                opt_type, 
-                re_erf, 
-                area_opt_weight, 
-                delay_opt_weight, 
-                iteration, 
-                starting_transistor_sizes, 
-                sp_interface, 
-                is_cc,
-                is_ram,
+                fpga_inst = fpga_inst, 
+                subcircuit = subckt, 
+                run_options = run_options,
+                opt_type = opt_type, 
+                re_erf = re_erf, 
+                area_opt_weight = area_opt_weight, 
+                delay_opt_weight = delay_opt_weight, 
+                outer_iter = iteration, 
+                initial_transistor_sizes = starting_transistor_sizes, 
+                spice_interface = sp_interface, 
+                is_ram_component = is_cc,
+                is_cc_component = is_ram,
             )
         else:
             sizing_results_dict[sp_name] = sizing_results_list[-1][sp_name]
@@ -2592,6 +2598,7 @@ def size_bram_ckts(
         sizing_results_dict: dict, 
         sizing_results_detailed_list: list, 
         sizing_results_detailed_dict: dict, 
+        run_options: NamedTuple,
         opt_type: str, 
         re_erf: int, 
         area_opt_weight: int | float, 
@@ -3196,39 +3203,41 @@ def size_fpga_transistors(fpga_inst: fpga.FPGA, run_options: NamedTuple, spice_i
                 # Iterate over our list of sizing circuits and size them
                 for sizing_ckts in sizing_grps:
                     current_cost = size_subckt_grp(
-                        fpga_inst,
-                        sizing_ckts,
-                        iteration,
-                        quick_mode_dict,
-                        sizing_results_list,
-                        sizing_results_dict,
-                        sizing_results_detailed_list,
-                        sizing_results_detailed_dict,
-                        opt_type,
-                        re_erf,
-                        area_opt_weight,
-                        delay_opt_weight,
-                        spice_interface,
-                        current_cost,
-                        is_cc,
-                        is_ram,
+                        fpga_inst = fpga_inst,
+                        sizing_subckts = sizing_ckts,
+                        iteration = iteration,
+                        quick_mode_dict = quick_mode_dict,
+                        sizing_results_list = sizing_results_list,
+                        sizing_results_dict = sizing_results_dict,
+                        sizing_results_detailed_list = sizing_results_detailed_list,
+                        sizing_results_detailed_dict = sizing_results_detailed_dict,
+                        run_options = run_options,
+                        opt_type = opt_type,
+                        re_erf = re_erf,
+                        area_opt_weight = area_opt_weight,
+                        delay_opt_weight = delay_opt_weight,
+                        sp_interface = spice_interface,
+                        current_cost = current_cost,
+                        is_cc = is_cc,
+                        is_ram = is_ram,
                     ) 
 
             if fpga_inst.specs.enable_bram_block == 1:
                 current_cost = size_bram_ckts(
-                    fpga_inst,
-                    iteration,
-                    quick_mode_dict,
-                    sizing_results_list,
-                    sizing_results_dict,
-                    sizing_results_detailed_list,
-                    sizing_results_detailed_dict,
-                    opt_type,
-                    re_erf,
-                    area_opt_weight,
-                    delay_opt_weight,
-                    spice_interface,
-                    current_cost
+                    fpga_inst = fpga_inst,
+                    iteration = iteration,
+                    quick_mode_dict = quick_mode_dict,
+                    sizing_results_list = sizing_results_list,
+                    sizing_results_dict = sizing_results_dict,
+                    sizing_results_detailed_list = sizing_results_detailed_list,
+                    sizing_results_detailed_dict = sizing_results_detailed_dict,
+                    run_options = run_options,
+                    opt_type = opt_type,
+                    re_erf = re_erf,
+                    area_opt_weight = area_opt_weight,
+                    delay_opt_weight = delay_opt_weight,
+                    spice_interface = spice_interface,
+                    current_cost = current_cost
                 )
 
             ############################################

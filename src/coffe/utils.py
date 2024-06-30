@@ -11,10 +11,10 @@ import yaml
 # These denote the widths of various columns - first (FIRS), last (LAST) and the rest (MIDL).
 # We could use better libraries for pretty printing tables, but currently we use a simple method.
 FIRS_COL_WIDTH = 30  #First solu
-MIDL_COL_WIDTH = 13
+MIDL_COL_WIDTH = 22
 LAST_COL_WIDTH = 22
 
-
+VPR_DEL_COL_WIDTH = 75
 
 #  ___    _   ___     ___ ___ _  _   ___  _   ___  ___ ___ _  _  ___   _   _ _____ ___ _    ___ 
 # | _ \  /_\ |   \   / __| __| \| | | _ \/_\ | _ \/ __|_ _| \| |/ __| | | | |_   _|_ _| |  / __|
@@ -432,43 +432,43 @@ def print_block_area(report_file, fpga_inst):
 
         print_and_write(report_file, "  TILE AREA CONTRIBUTIONS")
         print_and_write(report_file, "  -----------------------")
-        print_and_write(report_file, "  Block".ljust(20) + "Total Area (um^2)".ljust(20) + "Fraction of total tile area")
-        print_and_write(report_file, "  Tile".ljust(20) + str(round(tile,3)).ljust(20) + "100%")
-        print_and_write(report_file, "  LUT".ljust(20) + str(round(lut,3)).ljust(20) + str(round(lut/tile*100,3)) + "%")
-        print_and_write(report_file, "  FF".ljust(20) + str(round(ff,3)).ljust(20) + str(round(ff/tile*100,3)) + "%")
-        print_and_write(report_file, "  Carry Chain".ljust(20) + str(round(cc,3)).ljust(20) + str(round(cc/tile*100,3)) + "%")
-        print_and_write(report_file, "  BLE output".ljust(20) + str(round(ble_output,3)).ljust(20) + str(round(ble_output/tile*100,3)) + "%")
-        print_and_write(report_file, "  Local mux".ljust(20) + str(round(local_mux,3)).ljust(20) + str(round(local_mux/tile*100,3)) + "%")
-        print_and_write(report_file, "  Connection block".ljust(20) + str(round(cb,3)).ljust(20) + str(round(cb/tile*100,3)) + "%")
-        print_and_write(report_file, "  Switch block".ljust(20) + str(round(sb,3)).ljust(20) + str(round(sb/tile*100,3)) + "%")
+        print_and_write(report_file, "  Block".ljust(FIRS_COL_WIDTH) + "Total Area (um^2)".ljust(MIDL_COL_WIDTH) + "Fraction of total tile area")
+        print_and_write(report_file, "  Tile".ljust(FIRS_COL_WIDTH) + str(round(tile,3)).ljust(MIDL_COL_WIDTH) + "100%")
+        print_and_write(report_file, "  LUT".ljust(FIRS_COL_WIDTH) + str(round(lut,3)).ljust(MIDL_COL_WIDTH) + str(round(lut/tile*100,3)) + "%")
+        print_and_write(report_file, "  FF".ljust(FIRS_COL_WIDTH) + str(round(ff,3)).ljust(MIDL_COL_WIDTH) + str(round(ff/tile*100,3)) + "%")
+        print_and_write(report_file, "  Carry Chain".ljust(FIRS_COL_WIDTH) + str(round(cc,3)).ljust(MIDL_COL_WIDTH) + str(round(cc/tile*100,3)) + "%")
+        print_and_write(report_file, "  BLE output".ljust(FIRS_COL_WIDTH) + str(round(ble_output,3)).ljust(MIDL_COL_WIDTH) + str(round(ble_output/tile*100,3)) + "%")
+        print_and_write(report_file, "  Local mux".ljust(FIRS_COL_WIDTH) + str(round(local_mux,3)).ljust(MIDL_COL_WIDTH) + str(round(local_mux/tile*100,3)) + "%")
+        print_and_write(report_file, "  Connection block".ljust(FIRS_COL_WIDTH) + str(round(cb,3)).ljust(MIDL_COL_WIDTH) + str(round(cb/tile*100,3)) + "%")
+        print_and_write(report_file, "  Switch block".ljust(FIRS_COL_WIDTH) + str(round(sb,3)).ljust(MIDL_COL_WIDTH) + str(round(sb/tile*100,3)) + "%")
         
-        print_and_write(report_file, "  Non-active".ljust(20) + str(round(empty_area,3)).ljust(20) + str(round(empty_area/tile*100,3)) + "%")
+        print_and_write(report_file, "  Non-active".ljust(FIRS_COL_WIDTH) + str(round(empty_area,3)).ljust(MIDL_COL_WIDTH) + str(round(empty_area/tile*100,3)) + "%")
         print_and_write(report_file, "")
         if fpga_inst.specs.enable_bram_block == 1:
             print_and_write(report_file, "  RAM AREA CONTRIBUTIONS")
             print_and_write(report_file, "  -----------------------")
-            print_and_write(report_file, "  Block".ljust(20) + "Total Area (um^2)".ljust(20) + "Fraction of RAM tile area")
-            print_and_write(report_file, "  RAM".ljust(20) + str(round(ram,3)).ljust(20) + str(round(ram/ram*100,3)) + "%")
-            print_and_write(report_file, "  RAM Local Mux".ljust(20) + str(round(ramlocalmux,3)).ljust(20) + str(round(ramlocalmux/ram*100,3)) + "%")
-            print_and_write(report_file, "  Level Shifters".ljust(20) + str(round(levels,3)).ljust(20) + str(round(levels/ram*100,3)) + "%")
-            print_and_write(report_file, "  Decoder".ljust(20) + str(round(decod,3)).ljust(20) + str(round(decod/ram*100,3)) + "%")
-            print_and_write(report_file, "  WL driver".ljust(20) + str(round(wordlinedrivera,3)).ljust(20) + str(round(wordlinedrivera/ram*100,3)) + "%"            )
-            print_and_write(report_file, "  Column Decoder".ljust(20) + str(round(ramcoldecode,3)).ljust(20) + str(round(ramcoldecode/ram*100,3)) + "%")
-            print_and_write(report_file, "  Configurable Dec".ljust(20) + str(round(ramconfdecode,3)).ljust(20) + str(round(ramconfdecode/ram*100,3)) + "%")
-            print_and_write(report_file, "  Output CrossBar".ljust(20) + str(round(ramoutputcbar,3)).ljust(20) + str(round(ramoutputcbar/ram*100,3)) + "%")
+            print_and_write(report_file, "  Block".ljust(FIRS_COL_WIDTH) + "Total Area (um^2)".ljust(MIDL_COL_WIDTH) + "Fraction of RAM tile area")
+            print_and_write(report_file, "  RAM".ljust(FIRS_COL_WIDTH) + str(round(ram,3)).ljust(MIDL_COL_WIDTH) + str(round(ram/ram*100,3)) + "%")
+            print_and_write(report_file, "  RAM Local Mux".ljust(FIRS_COL_WIDTH) + str(round(ramlocalmux,3)).ljust(MIDL_COL_WIDTH) + str(round(ramlocalmux/ram*100,3)) + "%")
+            print_and_write(report_file, "  Level Shifters".ljust(FIRS_COL_WIDTH) + str(round(levels,3)).ljust(MIDL_COL_WIDTH) + str(round(levels/ram*100,3)) + "%")
+            print_and_write(report_file, "  Decoder".ljust(FIRS_COL_WIDTH) + str(round(decod,3)).ljust(MIDL_COL_WIDTH) + str(round(decod/ram*100,3)) + "%")
+            print_and_write(report_file, "  WL driver".ljust(FIRS_COL_WIDTH) + str(round(wordlinedrivera,3)).ljust(MIDL_COL_WIDTH) + str(round(wordlinedrivera/ram*100,3)) + "%"            )
+            print_and_write(report_file, "  Column Decoder".ljust(FIRS_COL_WIDTH) + str(round(ramcoldecode,3)).ljust(MIDL_COL_WIDTH) + str(round(ramcoldecode/ram*100,3)) + "%")
+            print_and_write(report_file, "  Configurable Dec".ljust(FIRS_COL_WIDTH) + str(round(ramconfdecode,3)).ljust(MIDL_COL_WIDTH) + str(round(ramconfdecode/ram*100,3)) + "%")
+            print_and_write(report_file, "  Output CrossBar".ljust(FIRS_COL_WIDTH) + str(round(ramoutputcbar,3)).ljust(MIDL_COL_WIDTH) + str(round(ramoutputcbar/ram*100,3)) + "%")
             if fpga_inst.RAM.memory_technology == "SRAM":
-                print_and_write(report_file, "  Precharge Total".ljust(20) + str(round(prechargetotal,3)).ljust(20) + str(round(prechargetotal/ram*100,3)) + "%")
-                print_and_write(report_file, "  Write Drivers".ljust(20) + str(round(writedrivertotal,3)).ljust(20) + str(round(writedrivertotal/ram*100,3)) + "%")
-                print_and_write(report_file, "  Sense Amp Total ".ljust(20) + str(round(samptotal,3)).ljust(20) + str(round(samptotal/ram*100,3)) + "%")
+                print_and_write(report_file, "  Precharge Total".ljust(FIRS_COL_WIDTH) + str(round(prechargetotal,3)).ljust(MIDL_COL_WIDTH) + str(round(prechargetotal/ram*100,3)) + "%")
+                print_and_write(report_file, "  Write Drivers".ljust(FIRS_COL_WIDTH) + str(round(writedrivertotal,3)).ljust(MIDL_COL_WIDTH) + str(round(writedrivertotal/ram*100,3)) + "%")
+                print_and_write(report_file, "  Sense Amp Total ".ljust(FIRS_COL_WIDTH) + str(round(samptotal,3)).ljust(MIDL_COL_WIDTH) + str(round(samptotal/ram*100,3)) + "%")
             else:
-                print_and_write(report_file, "  Column selectors".ljust(20) + str(round(cstotal,3)).ljust(20) + str(round(cstotal/ram*100,3)) + "%")
-                print_and_write(report_file, "  Write Drivers".ljust(20) + str(round(writedrivertotal,3)).ljust(20) + str(round(writedrivertotal/ram*100,3)) + "%")
-                print_and_write(report_file, "  Sense Amp Total ".ljust(20) + str(round(samptotal,3)).ljust(20) + str(round(samptotal/ram*100,3)) + "%")
+                print_and_write(report_file, "  Column selectors".ljust(FIRS_COL_WIDTH) + str(round(cstotal,3)).ljust(MIDL_COL_WIDTH) + str(round(cstotal/ram*100,3)) + "%")
+                print_and_write(report_file, "  Write Drivers".ljust(FIRS_COL_WIDTH) + str(round(writedrivertotal,3)).ljust(MIDL_COL_WIDTH) + str(round(writedrivertotal/ram*100,3)) + "%")
+                print_and_write(report_file, "  Sense Amp Total ".ljust(FIRS_COL_WIDTH) + str(round(samptotal,3)).ljust(MIDL_COL_WIDTH) + str(round(samptotal/ram*100,3)) + "%")
 
-            print_and_write(report_file, "  Memory Cells ".ljust(20) + str(round(memcells,3)).ljust(20) + str(round(memcells/ram*100,3)) + "%")
-            print_and_write(report_file, "  RAM Routing".ljust(20) + str(round(ram_routing,3)).ljust(20) + str(round(ram_routing/ram*100,3)) + "%")
-            print_and_write(report_file, "  RAM CB".ljust(20) + str(round(RAM_CB_TOTAL,3)).ljust(20) + str(round(RAM_CB_TOTAL/ram*100,3)) + "%")
-            print_and_write(report_file, "  RAM SB".ljust(20) + str(round(RAM_SB_TOTAL,3)).ljust(20) + str(round(RAM_SB_TOTAL/ram*100,3)) + "%")
+            print_and_write(report_file, "  Memory Cells ".ljust(FIRS_COL_WIDTH) + str(round(memcells,3)).ljust(MIDL_COL_WIDTH) + str(round(memcells/ram*100,3)) + "%")
+            print_and_write(report_file, "  RAM Routing".ljust(FIRS_COL_WIDTH) + str(round(ram_routing,3)).ljust(MIDL_COL_WIDTH) + str(round(ram_routing/ram*100,3)) + "%")
+            print_and_write(report_file, "  RAM CB".ljust(FIRS_COL_WIDTH) + str(round(RAM_CB_TOTAL,3)).ljust(MIDL_COL_WIDTH) + str(round(RAM_CB_TOTAL/ram*100,3)) + "%")
+            print_and_write(report_file, "  RAM SB".ljust(FIRS_COL_WIDTH) + str(round(RAM_SB_TOTAL,3)).ljust(MIDL_COL_WIDTH) + str(round(RAM_SB_TOTAL/ram*100,3)) + "%")
             print_and_write(report_file, "")
      
 
@@ -493,23 +493,23 @@ def print_vpr_delays(report_file, fpga_inst):
 
     print_and_write(report_file, "  VPR DELAYS")
     print_and_write(report_file, "  ----------")
-    print_and_write(report_file, "  Path".ljust(50) + "Delay (ps)")
+    print_and_write(report_file, "  Path".ljust(VPR_DEL_COL_WIDTH) + "Delay (ps)")
 
-    sb_mux_delays = [ f" {sb_mux.sp_name} Tdel (routing switch)".ljust(50) + f"{sb_mux.delay}" for sb_mux in fpga_inst.sb_muxes]
+    sb_mux_delays = [ f" {sb_mux.sp_name} Tdel (routing switch)".ljust(VPR_DEL_COL_WIDTH) + f"{sb_mux.delay}" for sb_mux in fpga_inst.sb_muxes]
     for sb_mux_delay in sb_mux_delays:
         print_and_write(report_file, sb_mux_delay)
     # print_and_write(report_file, "  Tdel (routing switch)".ljust(50) + str(fpga_inst.sb_mux.delay))
 
-    cb_mux_delays = [ f" {cb_mux.sp_name} T_ipin_cblock (connection block mux)".ljust(50) + f"{cb_mux.delay}" for cb_mux in fpga_inst.cb_muxes]
+    cb_mux_delays = [ f" {cb_mux.sp_name} T_ipin_cblock (connection block mux)".ljust(VPR_DEL_COL_WIDTH) + f"{cb_mux.delay}" for cb_mux in fpga_inst.cb_muxes]
     for cb_mux_delay in cb_mux_delays:
         print_and_write(report_file, cb_mux_delay)
-    local_mux_delays = [ f" {local_mux.sp_name} CLB input -> BLE input (local CLB routing)".ljust(50) + f"{local_mux.delay}" for local_mux in fpga_inst.local_muxes]
+    local_mux_delays = [ f" {local_mux.sp_name} CLB input -> BLE input (local CLB routing)".ljust(VPR_DEL_COL_WIDTH) + f"{local_mux.delay}" for local_mux in fpga_inst.local_muxes]
     for local_mux_delay in local_mux_delays:
         print_and_write(report_file, local_mux_delay)
-    ble_local_output_delays = [ f" {ble_local_output.sp_name} LUT output -> BLE input (local feedback)".ljust(50) + f"{ble_local_output.delay}" for ble_local_output in fpga_inst.local_ble_outputs]
+    ble_local_output_delays = [ f" {ble_local_output.sp_name} LUT output -> BLE input (local feedback)".ljust(VPR_DEL_COL_WIDTH) + f"{ble_local_output.delay}" for ble_local_output in fpga_inst.local_ble_outputs]
     for ble_local_output_delay in ble_local_output_delays:
         print_and_write(report_file, ble_local_output_delay)
-    ble_gen_output_delays = [ f" {ble_gen_output.sp_name} LUT output -> CLB output (logic block output)".ljust(50) + f"{ble_gen_output.delay}" for ble_gen_output in fpga_inst.general_ble_outputs]
+    ble_gen_output_delays = [ f" {ble_gen_output.sp_name} LUT output -> CLB output (logic block output)".ljust(VPR_DEL_COL_WIDTH) + f"{ble_gen_output.delay}" for ble_gen_output in fpga_inst.general_ble_outputs]
     for ble_gen_output_delay in ble_gen_output_delays:
         print_and_write(report_file, ble_gen_output_delay)
     
@@ -520,10 +520,10 @@ def print_vpr_delays(report_file, fpga_inst):
         lut_input = fpga_inst.lut_inputs[input_name][0] #TODO add multi ckt support
         driver_delay = max(lut_input.driver.delay, lut_input.not_driver.delay)
         path_delay = lut_input.delay
-        print_and_write(report_file, ("  lut_" + input_name).ljust(50) + str(driver_delay + path_delay))
+        print_and_write(report_file, ("  lut_" + input_name).ljust(VPR_DEL_COL_WIDTH) + str(driver_delay + path_delay))
     
     if fpga_inst.specs.enable_bram_block == 1:
-        print_and_write(report_file, "  RAM block frequency".ljust(50) + str(fpga_inst.RAM.frequency))
+        print_and_write(report_file, "  RAM block frequency".ljust(VPR_DEL_COL_WIDTH) + str(fpga_inst.RAM.frequency))
         
     print_and_write(report_file, "")
  
@@ -533,9 +533,15 @@ def print_vpr_areas(report_file, fpga_inst):
     print_and_write(report_file, "  VPR AREAS")
     print_and_write(report_file, "  ----------")
     print_and_write(report_file, "  grid_logic_tile_area".ljust(50) + str(fpga_inst.area_dict["logic_cluster"] / fpga_inst.specs.min_width_tran_area))
-    print_and_write(report_file, "  ipin_mux_trans_size (connection block mux)".ljust(50) + str(fpga_inst.area_dict["ipin_mux_trans_size"]/fpga_inst.specs.min_width_tran_area))
-    print_and_write(report_file, "  mux_trans_size (routing switch)".ljust(50) + str(fpga_inst.area_dict["switch_mux_trans_size"]/fpga_inst.specs.min_width_tran_area))
-    print_and_write(report_file, "  buf_size (routing switch)".ljust(50) + str(fpga_inst.area_dict["switch_buf_size"]/fpga_inst.specs.min_width_tran_area))
+    ipin_mux_size_keys = [key for key in list(fpga_inst.area_dict.keys()) if "ipin_mux_trans_size" in key]
+    for ipin_mux_size_key in ipin_mux_size_keys:
+        print_and_write(report_file, f"  {ipin_mux_size_key} (connection block mux)".ljust(50) + str(fpga_inst.area_dict[ipin_mux_size_key] / fpga_inst.specs.min_width_tran_area))
+    switch_mux_size_keys = [key for key in list(fpga_inst.area_dict.keys()) if "switch_mux" in key]
+    for switch_mux_size_key in switch_mux_size_keys:
+        print_and_write(report_file, f"  {switch_mux_size_key} (routing switch)".ljust(50) + str(fpga_inst.area_dict[switch_mux_size_key] / fpga_inst.specs.min_width_tran_area))
+    switch_buf_size_keys = [key for key in list(fpga_inst.area_dict.keys()) if "switch_buf" in key]
+    for switch_buf_size_key in switch_buf_size_keys:
+        print_and_write(report_file, f"  {switch_buf_size_key} (routing switch)".ljust(50) + str(fpga_inst.area_dict[switch_buf_size_key] / fpga_inst.specs.min_width_tran_area))
     print_and_write(report_file, "")
 
     
