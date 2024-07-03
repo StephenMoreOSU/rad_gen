@@ -3,9 +3,14 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
+.. api/asic_dse/index
+   api/ic_3d/index
+   api/coffe/index
 
-Introduction to RAD-Gen
-=============================
+
+======================================
+Welcome to RAD-Gen's Documentation
+======================================
 
 
 RAD-Gen is a tool for silicon area/timing/power implementation results of hard (ASIC) components, FPGA fabric circuitry, and circuit modeling of 3D devices/packaging. It is part of the greater
@@ -15,6 +20,33 @@ Hard blocks may be network on chips (NoCs), tensor accelerators, or memory macro
 RAD-Gen is made up of three subtools: ASIC-DSE, COFFE, and IC-3D.
 
 RAD-Gen is under heavy development.
+
+
++++++++++++++++++++++++++++++++++++
+Quick Start
++++++++++++++++++++++++++++++++++++
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Quick Start
+
+   quickstart/index
+
++++++++++++++++++++++++++++++++++++
+API Reference
++++++++++++++++++++++++++++++++++++
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Subtools
+   
+   api/index
+
+* tb - testbench - Some logic defined to inject expected inputs to a hardware module,
+  capture outputs and compare with some expected results to verify functionality.
+
+
+
 
 +++++++++++++++++++++++++++++++++++
 RAD-Gen Use Cases
@@ -69,6 +101,25 @@ The following paper may be used as a general citation for RAD-Gen:
       publisher={IEEE}
    }
 
+.. toctree::
+   :caption: Contents:
+   :maxdepth: 4
+   :numbered:
+
+   asic_dse/index
+
+   ic_3d/index
+
+   coffe/index
+
+Indices and tables
+==================
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`
+
+
 
 .. - **RAD-Sim:** A SystemC simulator for rapid design space exploration and architecture-application co-design
 
@@ -78,23 +129,10 @@ The following paper may be used as a general citation for RAD-Gen:
   :width: 1000
   :alt: RAD Flow Overview
 
-.. toctree::
-   :caption: Contents:
-   :maxdepth: 3
-   :numbered:
 
-   Quickstart/index
+.. .. automodule:: asic_dse.hammer_flow
+..    :members:
+..    :undoc-members:
+..    :show-inheritance:
 
-   ASIC-DSE/index
-
-   IC-3D/index
-
-   COFFE/index
-
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+.. quickstart/index

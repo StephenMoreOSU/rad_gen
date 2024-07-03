@@ -335,21 +335,21 @@ class SwitchBlockMuxTB(c_ds.SimTB):
 
 
 
-@dataclass
-class SwitchBlockMuxModel(c_ds.Model):
-    # Some way to represent which peripherial circuits are instantiated in the simulation test bench 
-    # param_hash: Any     
-    # basename: str = None
-    ckt_def: SwitchBlockMux = None
-    drv_wire: c_ds.GenRoutingWire = None   # Routing wire being driven by this mux
+# @dataclass
+# class SwitchBlockMuxModel(c_ds.Model):
+#     # Some way to represent which peripherial circuits are instantiated in the simulation test bench 
+#     # param_hash: Any     
+#     # basename: str = None
+#     ckt_def: SwitchBlockMux = None
+#     drv_wire: c_ds.GenRoutingWire = None   # Routing wire being driven by this mux
 
-    # Parameters which determine some higher level behaviors
-    #    or information about the circuit in the larger FPGA that may be cumbersome to store in circuit definition
+#     # Parameters which determine some higher level behaviors
+#     #    or information about the circuit in the larger FPGA that may be cumbersome to store in circuit definition
 
-@dataclass
-class SwitchBlockModel():
-    # Way to describe the actual switch block in the device
-    #   As the device may have different switch blocks in reality this just represents our estimation of the switch block
-    # name: str                                   # Name of the model, will be used to generate the "base" subckt names of insts, the inst name will be the model name + the inst uid
-                                                #       Ex. "sb"
-    mux_models: List[SwitchBlockMuxModel]       # List of each unique SwitchBlockMux in device
+# @dataclass
+# class SwitchBlockModel():
+#     # Way to describe the actual switch block in the device
+#     #   As the device may have different switch blocks in reality this just represents our estimation of the switch block
+#     # name: str                                   # Name of the model, will be used to generate the "base" subckt names of insts, the inst name will be the model name + the inst uid
+#                                                 #       Ex. "sb"
+#     mux_models: List[SwitchBlockMuxModel]       # List of each unique SwitchBlockMux in device

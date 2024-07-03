@@ -39,46 +39,136 @@ import src.common.spice_parser as sp_parser
 
 @dataclass
 class LoadCircuit():
-    id: int                                       = None                                   # Unique identifier for this sizeable circuit
-    name: str = None
-    sp_name: str = None
-    wire_names: List[str]                          = field(default_factory= lambda: []) 
-    # SizeableCircuits that are dependancies to create this loading circuit
-    dep_ckts: List[Type[SizeableCircuit]]           = field(default_factory= lambda: [])
+    """
+        Base class for a circuit representing a load in the FPGA. 
+        Used across the transistor sizing flow for various loads.
+
+        These are spice subckts which include another subckt and have (at least) the following port definition:
+        IN, OUT, VDD, GND
+        or in spice syntax::
+
+            .subckt load_circuit IN OUT GATE N_GATE VDD GND
+
+        All Objects of this type will represent a subckt that has a superset of the above (defined) ports
+
+        Attributes:
+            id: (int) Unique identifier for each load circuit of this type, used to generate the spice subckt name
+            name: (str) Base name of the load circuit, used to generate the spice subckt name
+            sp_name: (str) The actual spice name for this subckt, generated from the `name` and `id` attributes
+            wire_names: (List[str]) List of wire names, typically returned by the `generate` function,
+                that are used to represent wires in the load circuit. The RC values for these wires, the actual spice params, 
+                are derived from the `wire_lengths` and `wire_layers` dictionaries,
+                and will return a spice param in the following format for a particular wire. 
+                Ex. wire_name: "wire_gen_routing_id_0" -> "wire_gen_routing_id_0_res" | "wire_gen_routing_id_0_cap" 
+    
+        Todo:
+            * Uncomment dep_ckts and implement it s.t. it contains all circuit objects instantiated inside of this one
+                and therefore dependancies between sizing iterations of circuits can be more easily managed
+    """
+    id: int | None          = None   # Unique identifier for this sizeable circuit
+    name: str | None        = None
+    sp_name: str | None     = None
+    wire_names: List[str]   = field(default_factory= lambda: []) 
+    # SizeableCircuit / LoadCircuit objects that are dependancies to create this loading circuit
+    # dep_ckts: List[Type[SizeableCircuit]]           = field(default_factory= lambda: [])
 
     def __post_init__(self):
+        """
+            Post init function to set the sp_name attribute of the object
+        """
         self.sp_name = self.get_sp_name()    
 
     def __hash__(self) -> int:
+        """
+            Simple hash function that returns the id (memory address reference) of the object. 
+            To the best of my knowledge these ids are unique even if there are two identical classes instantiated
+        
+            Returns:
+                A unique id of the object
+        """
         return id(self)
 
-    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
-        msg = "Function 'update_wires' must be overridden in class _SizableCircuit."
-        raise NotImplementedError(msg)
-
-    def generate(self):
-        """ Generate SPICE subcircuits.
-            Generate method for base class must be overridden by child. """
-        msg = "Function 'generate' must be overridden in class _SizableCircuit."
-        raise NotImplementedError(msg)
-
-    def get_sp_name(self) -> str:
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]) -> None:
         """ 
-            Get the string used in spice for this subckt name
+            Calculate and update wire lengths and wire layers based on the width of things, 
+                for keys relative to this circuit, obtained from `width_dict`. 
+            Dummy function which must be implemented / overridden by child classes    
+
+            Raises:
+                NotImplementedError: Must be implemented by child classes
         """
-        return f"{self.name}_id_{self.id}"
+        msg = "Function 'update_wires' must be overridden child classes of LoadCircuit."
+        raise NotImplementedError(msg)
+
+    def generate(self) -> None:
+        """ 
+            Generate SPICE subcircuits, write out the circuits to the output architecture directory in subcircuits.l file
+            Dummy function which must be implemented / overridden by child classes    
+            
+            Raises:
+                NotImplementedError: Must be implemented by child classes
+        """
+        
+        msg = "Function 'generate' must be overridden in child classes of LoadCircuit."
+        raise NotImplementedError(msg)
 
     def get_param_str(self) -> str:
         """ 
             Get the spice string for this subckt parameter
-            Ex. "gen_routing_wire_L4" | "intra_tile_ble_2_sb"
+
+            Returns:
+                A key string for parameterized subckt 
         """
         return f"id_{self.id}"
+
+    def get_sp_name(self) -> str:
+        """ 
+            Get the string used in spice for this subckt name
+
+            Returns:
+                The spice string for this subckt name
+        """
+        return f"{self.name}_{self.get_param_str()}"
 
 
 @dataclass
 class SizeableCircuit():
+    """
+        Base class for a circuit in the FPGA that can be sized.
+
+        tfall / trise / delay / power are all set to 1 by default,
+        to represent a extremely high value which will cause a cost function to be higher than any valid result
+
+        Attributes: 
+            transistor_names: (List[str]) List of spice parameter names for each tx size in component circuit
+            wire_names: (List[str]) List of wire names, typically returned by the `generate` function,
+                that are used to represent wires in the sizeable circuit. 
+                The RC values for these wires, the actual spice params, 
+                are derived from the `wire_lengths` and `wire_layers` dictionaries,
+                and will return a spice param in the following format for a particular wire. 
+                Ex. wire_name: "wire_gen_routing_id_0" -> "wire_gen_routing_id_0_res" | "wire_gen_routing_id_0_cap"
+            initial_transistor_sizes: (Dict[str, int | float]) Initial transistor sizes for each transistor in the sizeable circuit
+                These are used at the beginning of transistor sizing to get our starting delay / area values
+            tfall: (int | float) Fall time on critical path for this subcircuit.
+            trise: (int | float) Rise time on critical path for this subcircuit.
+            delay: (int | float) Delay on critical path for this subcircuit, `max(tfall, trise)`
+            delay_weight: (int | float) Delay weight in a representative critical path -> specific to a type of circuit CB mux, SB mux etc
+            inst_delay_weight: (int | float) Delay weight in a repr crit path, but for a specific instance of a subckt.
+                e.g. L4 driving SB mux may be on 90% of critical paths so we would have its inst weight be 90% 
+            power: (int | float) Dynamic power for this subcircuit
+
+            id: (int) Unique identifier for each load circuit of this type, used to generate the spice subckt name
+            name: (str) Base name of the load circuit, used to generate the spice subckt name
+            sp_name: (str) The actual spice name for this subckt, generated from the `name` and `id` attributes
+
+            num_per_tile: (int) Number of this circuit in an FPGA tile
+
+        Todo:
+            * Integrate or remove the `circuit` object commented out. 
+                Its a SpSubCkt which are typically used for interacting with low level spice related fields
+        
+
+    """
     # Hopefully replacable to '_SizableCircuit' and '_CompoundCircuit' classes
     # List of spice parameters for each tx size in component circuit TODO change to SpParam rather than str
     transistor_names: List[str]                        = field(default_factory= lambda: [])     
@@ -97,129 +187,192 @@ class SizeableCircuit():
                                                                 #   e.g. L4 driving SB mux may be on 90% of critical paths so we would have its inst weight be 90% 
     power: int | float                                 = 1      # Dynamic power for this subcircuit
 
+    id: int                                            = None   # Unique identifier for this sizeable circuit
     name: str                                          = None
     sp_name: str                                       = None
-    id: int                                            = None   # Unique identifier for this sizeable circuit
 
     num_per_tile: int                                  = None   # Number of this circuit in a tile
-    circuit: rg_ds.SpSubCkt                            = None   # SpCircuit for this particular sizeable circuit
-    # circuit: SwitchBlockMux(_SizeableCircuit) <
-    #     child of _SizableCircuit or _CompoundCircuit or whatever class we use to represent
-    #     a circuit having a .subckt, top_level, update_area/wires, (generate_top?) and works with transistor sizing function
-    # >
-
     def __post_init__(self):
+        """
+            Post init function to set the sp_name attribute of the object
+        """
         self.sp_name = self.get_sp_name()
 
     def __hash__(self) -> int:
+        """
+            Simple hash function that returns the id (memory address reference) of the object. 
+            To the best of my knowledge these ids are unique even if there are two identical classes instantiated
+        
+            Returns:
+                A unique id of the object
+        """
         return id(self)
 
     def get_param_str(self) -> str:
         """ 
             Get the spice string for this subckt parameter
-            Ex. "gen_routing_wire_L4" | "intra_tile_ble_2_sb"
+
+            Returns:
+                A key string for parameterized subckt 
         """
         return f"id_{self.id}"
 
     def get_sp_name(self) -> str:
         """ 
             Get the string used in spice for this subckt name
-        """
-        return f"{self.name}_id_{self.id}"
 
-    def set_fields(self, fields: Dict[str, Any]):
+            Returns:
+                The spice string for this subckt name
+        """
+        return f"{self.name}_{self.get_param_str()}"
+
+    # def set_fields(self, fields: Dict[str, Any]) -> None:
+    #     """ 
+    #         Set the fields of this sizeable circuit from a dictionary
+    #     """
+    #     for field_name, field_val in fields.items():
+    #         setattr(self, field_name, field_val)
+
+    def generate(self) -> Dict[str, int | float]:
         """ 
-            Set the fields of this sizeable circuit from a dictionary
-        """
-        for field_name, field_val in fields.items():
-            setattr(self, field_name, field_val)
+            Generate SPICE subcircuits, write out the circuits to the output architecture directory in subcircuits.l file
+            Dummy function which must be implemented / overridden by child classes    
+            
+            Raises:
+                NotImplementedError: Must be implemented by child classes
 
-    def generate(self):
-        """ Generate SPICE subcircuits.
-            Generate method for base class must be overridden by child. """
-        msg = "Function 'generate' must be overridden in class _SizableCircuit."
+            Returns:
+                A dictionary of the initial transistor sizes for this sizeable circuit, values could be float or int depending on if FINFET or BULK tx
+        """
+        msg = "Function 'generate' must be overridden in class SizeableCircuit."
         raise NotImplementedError(msg)
        
-    # def generate_top(self):
-    #     """ Generate top-level SPICE circuit.
-    #         Generate method for base class must be overridden by child. """
-    #     msg = "Function 'generate_top' must be overridden in class _SizableCircuit."
-    #     raise NotImplementedError(msg)
-     
     def update_area(self, area_dict: Dict[str, float], width_dict: Dict[str, float]):
-        """ Calculate area of circuit.
-            Update area method for base class must be overridden by child. """
-        msg = "Function 'update_area' must be overridden in class _SizableCircuit."
+        """ 
+            Calculate and update the area values in `area_dict` for keys relevant to this sizeable circuit.
+            Dummy function which must be implemented / overridden by child classes    
+
+            Raises:
+                NotImplementedError: Must be implemented by child classes
+        """
+        msg = "Function 'update_area' must be overridden in class SizeableCircuit."
         raise NotImplementedError(msg)
         
         
     def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, float]):
-        """ Update wire lengths and wire layers based on the width of things, obtained from width_dict. """
-        msg = "Function 'update_wires' must be overridden in class _SizableCircuit."
+        """ 
+            Calculate and update wire lengths and wire layers based on the width of things, 
+                for keys relative to this circuit, obtained from `width_dict`. 
+            Dummy function which must be implemented / overridden by child classes    
+
+            Raises:
+                NotImplementedError: Must be implemented by child classes
+        """
+        msg = "Function 'update_wires' must be overridden in class SizeableCircuit."
         raise NotImplementedError(msg)
     
 
 @dataclass
 class CompoundCircuit():
     """
-        Non sizable circuit containing sizeable circuits, has update_area + update_wire functions, however, they simlply call those functions for each sizeable circuit
+        Non sizable circuit containing sizeable circuits, has update_area + update_wire functions, 
+            however, they simlply call those functions for each sizeable circuit
+    
+        Attributes:
+            id: (int) Unique identifier for each load circuit of this type, used to generate the spice subckt name
+            name: (str) Base name of the load circuit, used to generate the spice subckt name
+            sp_name: (str) The actual spice name for this subckt, generated from the `name` and `id` attributes
     """
     
+    id: int                                       = None                                   # Unique identifier for this sizeable circuit
     name: str = None
     sp_name: str = None
-    id: int                                       = None                                   # Unique identifier for this sizeable circuit
     
     def __post_init__(self):
+        """
+            Post init function to set the sp_name attribute of the object
+        """
         self.sp_name = self.get_sp_name() 
 
     def __hash__(self) -> int:
+        """
+            Simple hash function that returns the id (memory address reference) of the object. 
+            To the best of my knowledge these ids are unique even if there are two identical classes instantiated
+        
+            Returns:
+                A unique id of the object
+        """
         return id(self)
 
-    def set_fields(self, fields: Dict[str, Any]):
-        """ 
-            Set the fields of this sizeable circuit from a dictionary
-        """
-        for field_name, field_val in fields.items():
-            setattr(self, field_name, field_val)
+    # def set_fields(self, fields: Dict[str, Any]):
+    #     """ 
+    #         Set the fields of this sizeable circuit from a dictionary
+    #     """
+    #     for field_name, field_val in fields.items():
+    #         setattr(self, field_name, field_val)
 
     def get_sp_name(self) -> str:
         """ 
             Get the string used in spice for this subckt name
+
+            Returns:
+                The spice string for this subckt name
         """
-        return f"{self.name}_id_{self.id}"
-    
+        return f"{self.name}_{self.get_param_str()}"
+
     def get_param_str(self) -> str:
         """ 
             Get the spice string for this subckt parameter
-            Ex. "gen_routing_wire_L4" | "intra_tile_ble_2_sb"
+
+            Returns:
+                A key string for parameterized subckt 
         """
         return f"id_{self.id}"
 
-    def generate(self):
-        """ Generate SPICE subcircuits.
-            Generate method for base class must be overridden by child. """
-        msg = "Function 'generate' must be overridden in class _SizableCircuit."
+    def generate(self) -> Dict[str, int | float]:
+        """ 
+            Generate SPICE subcircuits, write out the circuits to the output architecture directory in subcircuits.l file
+            Dummy function which must be implemented / overridden by child classes    
+            
+            Raises:
+                NotImplementedError: Must be implemented by child classes
+
+            Returns:
+                A dictionary of the initial transistor sizes for this sizeable circuit, values could be float or int depending on if FINFET or BULK tx
+        """
+        msg = "Function 'generate' must be overridden in class SizeableCircuit."
         raise NotImplementedError(msg)
-
-
-
 
 
 @dataclass
 class Units:
+    """
+        Struct for representing units in the context of spice simulation
+
+        Attributes:
+            type: (str) Name of the type of units being represented Ex. "time" | "voltage" | "current"   
+            type_suffix: (str) Ex. "S" = seconds, "V" = volts, "A" = amps, "NFINS" | "NWIRE" | "NSHEET" = Discrete Tx Size  
+            factor: (int | float) Factor to multiply the value by to get it into the base unit Ex. for nano = 1e-12
+            factor_suffix: (str) For stdout or value conversion Ex. "n" = 1e-12, "p" = 1e-15, "m" = 1e-3, "u" = 1e-6
+            type_2_suff_lookup: (Dict[str, str]) type -> suffix lookup table
+            suff_2_type_lookup: (Dict[str, str]) suffix -> type lookup table
+            suff_2_fac_lookup: (Dict[str, float]) suffix -> factor lookup table
+            fac_2_suff_lookup: (Dict[float, str]) factor -> suffix lookup table
+
+    """
     # Represents a unit of a particular type
     type: str                       = None # Name of the type of units being represented Ex. "time" | "voltage" | "current"   
     type_suffix: str                = None # Ex. "S" = seconds, "V" = volts, "A" = amps, "NFINS" | "NWIRE" | "NSHEET" = Discrete Tx Size  
     factor: int | float             = None # Factor to multiply the value by to get it into the base unit Ex. for nano = 1e-12
     factor_suffix: str              = None # For stdout or value conversion Ex. "n" = 1e-12, "p" = 1e-15, "m" = 1e-3, "u" = 1e-6
     # Dict of unit lookups for this unit type
-    type_2_suff_lookup: dict      = field(default_factory = lambda: {
+    type_2_suff_lookup: Dict[str, str]      = field(default_factory = lambda: {
         # type -> suffix lookups
         'time': 's',
         'voltage': 'V',
         'current': 'A',
     }) 
-    suff_2_type_lookup: dict      = field(default_factory = lambda: {
+    suff_2_type_lookup: Dict[str, str]      = field(default_factory = lambda: {
         # suffix -> type lookups
         's': 'time',
         'V': 'voltage',
@@ -227,7 +380,7 @@ class Units:
     })
     # These factor lookups are for spice write out
     # TODO verif write out functionality for each tool being used for
-    suff_2_fac_lookup: dict           = field(default_factory = lambda: {
+    suff_2_fac_lookup: Dict[str, float]     = field(default_factory = lambda: {
         '' : 1,
         'm': 1e-3,
         'u': 1e-6,
@@ -236,7 +389,7 @@ class Units:
         'f': 1e-15,
         'a': 1e-18,
     })
-    fac_2_suff_lookup: dict    = field(default_factory = lambda: {
+    fac_2_suff_lookup: Dict[float, str]     = field(default_factory = lambda: {
         # suffix -> factor lookups
         1: '',
         1e-3: 'm',
@@ -248,6 +401,17 @@ class Units:
     })
 
     def __post_init__(self):
+        """
+            Post init function to perform field setting + initialization based on other field values from `__init__`
+            For example one can define the `type` field or the `type_suffix` field and the unset field will be derived from its counterpart
+            This is also the case for the `factor` and `factor_suffix` fields
+
+            Todo:
+                * Uncomment the struct verification checks or remove them. 
+                    SM: I remember that I commented them for some case in which we needed to define the struct yet
+                    possible some of the required fields for assertions had to remain unset for desired functionality 
+
+        """
         ## Struct verif checks
         # assert self.factor != None or self.factor_suffix != None, "factor or factor_suffix must be set"
         # assert self.type != None or self.type_suffix != None, "type or type_suffix must be set"
@@ -262,8 +426,22 @@ class Units:
         elif self.factor_suffix:
             self.factor = self.suff_2_fac_lookup[self.factor_suffix]
 
-    def update_factor(self, new_factor: int | float = None, new_suffix = None):
-        if new_factor:
+    def update_factor(self, new_factor: int | float | None = None, new_suffix: str | None = None):
+        """
+            Used when a value associated with the units requires updating and a new more reasonable suffix should be used (for human readability)
+            or when a new factor is set and other fields should be set to reflect the new state
+
+            Args:
+                new_factor: (int | float) New factor to use for units 
+                new_suffix: (str) New suffix to set for units
+
+            Raises:
+                ValueError: Either new_factor or new_suffix must be set but not both or either
+        """
+
+        if new_factor is not None and new_suffix is not None:
+            raise ValueError("Only one of new_factor or new_suffix must be set")
+        elif new_factor:
             # Update the factor and factor_suffix based on the new factor
             self.factor = new_factor
             self.factor_suffix = self.fac_2_suff_lookup[self.factor]
@@ -276,6 +454,19 @@ class Units:
 
 @dataclass
 class Value:
+    """
+        Used to store value information for some number in a spice simulation (or could be used for more than just spice)
+            i.e. a voltage, current, time, etc. At time of writing this is mainly representing spice simulation 
+            values used in things like Voltage sources & simulation time / precision specifications.
+            
+            Yet some fields could be useful for things beyond simple spice simulation
+
+        Attributes:
+            value: (int | float) Base value, if units are set this value is multiplied by the unit.factor to get the true value
+            name: (str) Name of the parameter Ex. "mux_type" or "meas_
+            units: (Units) Units of the value Ex. "time" | "voltage" | "current"
+            abs_val_flag: (bool) If true, we assume the value is absolute and we decode it into the factors that exist in units
+    """
     # Params used to affect generation of a subckt or netlist. Ex. for a mux params could be "mux_type" : "on" | "off" | "partial"
     # Key used to hash this struct and find it in other data structs & write out the "parameter" name to various tools
     value: int | float              = None # Base value, if units are set this value is multiplied by the unit.factor to get the true value
@@ -285,6 +476,15 @@ class Value:
     abs_val_flag: InitVar[bool]      = None
 
     def __post_init__(self, abs_val_flag: bool):
+        """
+            Initialize the value struct if abs_val_flag is specified asserted
+
+            Args:
+                abs_val_flag: If true, we assume the value is absolute and we decode it into the factors that exist in units
+
+            Todo:
+                * Uncomment & integrate or delete the initialization of the units field if not provided by __init__
+        """
         # if we get the abs_val_flag, we assume the value is absolute and we decode it into the factors that exist in units
         # if not self.units:
         #     self.units = Units()
@@ -295,6 +495,13 @@ class Value:
         """ 
             Set the value of this value struct to an absolute value
             Ex. abs_val = 0.1 -> self.value = 0.1, self.units = "n"
+
+            Example:
+                >>> self.set_value(abs_val = self.value)
+            
+            Args:
+                abs_val: Absolute value to set the value to
+
         """
         # Find the closest factor to our inputted self.value 
         suffix, _ = self.find_closest_factor()
@@ -304,6 +511,13 @@ class Value:
         self.value = abs_val * self.units.factor if self.units.factor > 1 else abs_val / self.units.factor
 
     def find_closest_factor(self) -> Tuple[str, float]:
+        """
+            Finds the closest factor defined in self.units.suff_2_fac_lookup to the absolute value defined in self.value
+            Then sets appropriate value based on newly found suffix/factor 
+
+            Returns:
+                Tuple of the suffix and factor that is closest to the value in this value struct
+        """
         min_difference = float('inf')
 
         ret_fac_combo: Tuple[str, float] = None
@@ -314,8 +528,22 @@ class Value:
                 ret_fac_combo = (suffix, factor)
         return ret_fac_combo
 
-
     def get_sp_val(self) -> str:
+        """
+            Get the string for this value which is in spice syntax
+
+            Returns:
+                A string for this value in syntax parsable by HSPICE (or hopefully other spice simulators)
+                This value could be for a spice parameter (if `self.name` is set) or an numerical value (if `self.value` and `self.units`) is set
+
+            Raises:
+                ValueError: Either `self.name` or `self.value` and `self.units` must be set
+
+            Todo:
+                * Make sure that this format is valid for all spice simulators desired to be used (parameter or numerical value)
+                * Move verification of `self.value` to `__post_init__` if possible as it seems that the lack of
+                    such fields should raise an error at construction
+        """
         # Get the value for use in spice
         if self.name:
             sp_str: str = self.name
@@ -327,8 +555,21 @@ class Value:
 
     def get_sp_val_w_suffix(self) -> str:
         """ 
-            Get the spice string for this value with suffix
-            Ex. "0.1n" | "1.0u" | "0.5m"
+            Get the spice string for this value with its corresponding suffix
+            
+            Examples:
+                >>> sp_str: str = self.get_sp_val_w_suffix() 
+                >>> print(sp_str)
+                "0.1n"
+            
+            Returns:
+                A string for this value in syntax parsable by HSPICE (or hopefully other spice simulators)
+            
+            Todo:
+                * Make sure that this format is valid for all spice simulators desired to be used (parameter or numerical value)
+
+            Raises:
+                ValueError: if `self.units.factor_suffix` is not set
         """
         if self.units.factor_suffix is not None:
             ret_val: str = f"{self.value}{self.units.factor_suffix}"
@@ -336,20 +577,34 @@ class Value:
             raise ValueError("Units must have a factor_suffix set")
         return ret_val
 
+    # SM: This function is unreferenced yet it could be useful
     def get_abs_val(self) -> float:
         """ 
-            Get the absolute value of this value
+            Get the absolute numerical value from struct
             Ex. returns 0.1 | 1.0 | 0.5
+
+            Returns:
+                The absolute value of the value in this struct
+            
         """
         return self.value * self.units.factor
 
-
-
 @dataclass
 class SpNodeProbe:
+    """
+        Represents a probe on a single node in circuit in a spice simulation testbench
+        
+        Attributes:
+            node: (str) Name of node being evaluated 
+                Ex. "n_1_1" or "x_top_inst.x_sub_inst.n_1_1"
+            type: (str) The type of evaluation being done, we could be looking for I or V on this node 
+                Ex. 'voltage' | 'current'
+            type_2_sp_lookup: (Dict[str, str]) lookup to convert `self.type` to a spice compatable syntax understandable by a spice simulator
+
+    """
     # Information to create an evaluation of a spice node used in .MEAS, .PRINT, etc statements
-    node: str  = None # Name of node being evaluated Ex. "n_1_1" or "x_top_inst.x_sub_inst.n_1_1"
-    type: str  = None # 'voltage' | 'current'
+    node: str | None = None # Name of node being evaluated Ex. "n_1_1" or "x_top_inst.x_sub_inst.n_1_1"
+    type: str | None = None # 'voltage' | 'current'
 
     # Lookup to convert "unit type" to something spiec can understand Ex. "voltage" -> "V"
     type_2_sp_lookup: Dict[str, str] = field(
@@ -361,17 +616,54 @@ class SpNodeProbe:
     def get_sp_str(self) -> str:
         """ 
             Get the spice string for this node evaluation
-            Ex. "v(node_name)" | "i(node_name)"
+            
+            Examples:
+                >>> node_probe_sp_str: str = self.get_sp_str()
+                >>> print(node_probe_sp_str)
+                "v(n_1_1)"
+
+            Returns:
+                A string for this node probe in syntax parsable by HSPICE (or hopefully other spice simulators)
+                Ex. "v(node_name)" | "i(node_name)"
+
+            Todo:
+                * Make sure that this format is valid for all spice simulators desired to be used                
         """
         return f"{self.type_2_sp_lookup[self.type]}({self.node})"
 
 @dataclass
 class SpEvalFn:
-    # Represents a function to be evaluted in spice. TODO implement assertions and checks to make sure they are valid
+    """
+        Represents a function to be evaluated in a spice simulation testbench.
+        Could be used for a `.MEAS` statement or a `.PARAM` statement 
+
+        Attributes:
+            fn: (str) The spice function to be evaluated 
+                Ex. "max(abs(rising_prop_delay_0),abs(falling_prop_delay_0))"
+        
+        Todo:
+            * Have some form of data validation which tests to see if the input string is a valid spice function for HSPICE or other simulators
+    """
+    # Represents a function to be evaluted in spice. 
+    # TODO implement assertions and checks to make sure they are valid
     fn: str  = None # Ex. "max(abs(rising_prop_delay_0),abs(falling_prop_delay_0))"
 
 @dataclass
 class SpDelayBound:
+    """
+        Used to represent a delay bound in a spice sim tb `.MEAS` statement. 
+        This is used in `.MEAS` delay statements to define a point at which a delay begins to be measured or a point at which it stops
+
+        Attributes:
+            probe: (SpNodeProbe) Node probe measured, compared to eval_cond to trigger
+            eval_cond: (SpEvalFn) Evaluation condition to trigger
+                Ex. "0.2*supply_v"
+            td: (str) Optional Time delay bound can be specified. Equal to HSPICE `.MEAS` TD parameter
+            rise: (bool) If true, we are measuring a rising edge, if false, falling edge
+            fall: (bool) If true, we are measuring a falling edge, if false, rising edge
+            num_trans: (int) Number of transitions to measure
+                i.e. if we are looking for a rising edge, how many rising edges do we wait for before measuring the delay (inclusive)
+    """
     # Information to create a "TRIG" or "TARG" portion of delay measure statement
     probe: SpNodeProbe  = None        # Node probe measured, compared to eval_cond to trigger bound
     eval_cond: SpEvalFn = None       # Evaluation condition to trigger bound                         Ex. "0.2*supply_v"
@@ -380,17 +672,32 @@ class SpDelayBound:
     fall: bool = None                # If true, we are measuring a falling edge, if false, rising edge
     num_trans: int = 1         # Number of transitions to measure
     def __post_init__(self):
+        """
+            Post init function to set the rise / fall flags based on the absence of the other
+
+            Todo:
+                * Determine if commented assertions can be included or deleted
+            
+        """
         if not self.rise:
             self.fall = True
         if not self.fall:
             self.rise = True
-    #     # Struct verif checks
-    #     assert self.rise != self.fall and (self.rise or self.fall), "Both rise and fall cannot be true or false at the same time"
+        # Struct verif checks
+        # assert self.rise != self.fall and (self.rise or self.fall), "Both rise and fall cannot be true or false at the same time"
 
     def get_sp_str(self) -> str:
         """ 
             Get the spice string for this delay bound
-            Ex. "v(n_1) VAL="supply_v/2" RISE=1"
+            Examples:
+                >>> print(self.get_sp_str())
+                "v(n_1) VAL='supply_v/2' RISE=1"
+            
+            Returns:
+                A string for this delay bound in syntax parsable by HSPICE (or hopefully other spice simulators)
+            
+            Todo:
+                * Make sure that this format is valid for all spice simulators desired to be used
         """
         # Get the type of edge we are measuring
         edge_type: str = "RISE" if self.rise else "FALL"
@@ -403,18 +710,41 @@ class SpDelayBound:
 
 @dataclass
 class SpMeasure:
-    # name : str # The string which is assigned to this measure statement
+    """
+        Represents a `.MEAS` statement in a spice simulation testbench
+        SM: I believe this is only used in `TRAN` style tbs and 
+        
+        Attributes:
+            type: (str) Type of measure statement 
+                Ex. "DC" | "AC" | "TRAN"
+            value: (Value) Variable to store the value of the measure statement
+            trig: (SpDelayBound) On what evaluation condition do we start trig
+            targ: (SpDelayBound) On what evaluation condition do we stop trig
+            eval_fn: (SpEvalFn) Raw spice which is evaluated to get meas statement value 
+                Ex. "max(abs(rising_prop_delay_0),abs(falling_prop_delay_0))"
+        
+        Todo:
+            * Implement additional fields capable of representing & verifying `.MEAS` statements for the following conditions
+                simulations:        DC | AC
+                operating modes:    FIND | INTEGRAL | PARAM        
+    """
+
     # Contains information to generate a measure statement in a SPICE simulation
     type: str               = "TRAN"             # "DC" / "AC" / "TRAN"
-    # TODO verify this spice expr exists
-    # expr: SpNodeProbe               = None               # Ex. "FIND" | "INTEGRAL" | "PARAM" (None if using targ / trig)
-    # probe: str              = None               # Node probe measured, in place to delay bound  
     value: Value            = None               # Variable to store the value of the measure statement
     trig: SpDelayBound      = None               # On what evaluation condition do we start trig
     targ: SpDelayBound      = None               # On what evaluation condition do we stop trig
     eval_fn: SpEvalFn       = None               # Raw spice which is evaluated to get meas statement value Ex. "max(abs(rising_prop_delay_0),abs(falling_prop_delay_0))"
 
     def __post_init__(self):
+        """
+            Used to initialize the `self.type` field to upper case.
+
+            Raises:
+                AssertionError: If the type is not one of "DC", "AC", "TRAN"
+                AssertionError: If the eval_fn is not set and trig and targ are not set
+                AssertionError: If the trig and targ are not set and eval_fn is set
+        """
         # Struct verif checks
         # Make sure type is upper case
         self.type = self.type.upper()
@@ -428,13 +758,17 @@ class SpMeasure:
     def get_sp_lines(self) -> List[str]:
         """ 
             Get the spice lines for this measure statement
-            Ex. returns [".MEAS TRAN delay_0 TRIG v(n_1_1) VAL=0.2*supply_v TARG v(n_1_1) VAL=0.8*supply_v"]
+            
+            Raises:
+                AssertionError: If the value name is not in lower case
+
+            Returns:
+                A list of strings each representing a line in the `.MEAS` statement in syntax parsable by HSPICE (or hopefully other spice simulators)
+                    Ex. returns [".MEAS TRAN delay_0 TRIG v(n_1_1) VAL=0.2*supply_v TARG v(n_1_1) VAL=0.8*supply_v"]
         """
-        # head_line += f" {self.eval_fn.fn}"
         
         # We need to assert that the name stored in value is in lower case, 
         #   this is because in hspice the .lis / .mt0 measurement files will be generated with all lower case
-
         assert self.value.name.islower(), "The name of the value in a measure statement must be in lower case to prevent future key errors"
 
         meas_lines: List[str] = [
@@ -458,24 +792,64 @@ class SpMeasure:
 
 @dataclass
 class SpLib:
+    """
+        Represents a `.LIB` statement in a spice simulation testbench
+        Which loads all libraries defined as elements in `self.inc_libs` from the `self.path` attribute 
+
+        Attributes:
+            path: Relative path to the spice library file
+    """
     # Contains information to generate an include statement in a SPICE simulation
     path: str     = None                       # Path to the library file
     inc_libs: List[str] = None                       # Name of library to include from the file
     def get_sp_str(self) -> str:
         """ 
-            Get the spice line for this include statement
-            Ex. returns .LIB \"/path/to/file\" LIB_NAME
+            Get the spice line for this library include statement
+            Returns:
+                A string for this library include statement in syntax parsable by HSPICE (or hopefully other spice simulators)
+                    Ex. returns .LIB \"/path/to/file\" LIB_NAME
         """
         return f".LIB \"{self.path}\" {' '.join(self.inc_libs)}"
 @dataclass
 class SpSimMode:
+    """
+        Represents a `.TRAN` statement in a spice simulation testbench
+        This sets the simulation mode for the testbench
+        
+        Attributes:
+            analysis: (str) Mode of simulation 
+                Ex. "TRAN" | "AC" | "DC"
+            sim_prec: (Value) Precision of simulation
+            sim_time: (Value) Duration of simulation
+            args: (Dict[str, str]) Additional Options following analysis directive
+
+        Examples:
+            This defines a transient simulation mode with a precision of 1ps and a duration of 8ns
+                Additionally providing the "SWEEP" and "DATA=sweep_data" arguments
+            >>> base_sim_mode = c_ds.SpSimMode(
+                    analysis = "TRAN",
+                    sim_prec = c_ds.Value(1), # ps
+                    sim_time = c_ds.Value(8), # ns
+                    args = {
+                        "SWEEP": None,
+                        "DATA" : "sweep_data",
+                    }
+                )
+            
+        Todo:
+            * Support "DC" | "AC" `self.analysis` values
+            * Add validation checks for `self.analysis` and `self.args` values
+    """
     # TODO support DC | AC
     analysis: str = None # TRAN | AC | DC
     sim_prec: Value = None # Precision of simulation
     sim_time: Value = None # Duration of simulation
     # TODO define legal options for each analysis type
-    args: Dict[str, str] = None # Additional Options following analysis directive
+    args: Dict[str, str] = None # Additional options following analysis directive
     def __post_init__(self):
+        """
+            If the units are not set, set them to the default units for sim duration + precision
+        """
         if not self.sim_prec.units:
             self.sim_prec.units = Units(type="time", factor_suffix='p')
         if not self.sim_time.units:
@@ -483,22 +857,38 @@ class SpSimMode:
     def get_sp_str(self) -> str:
         """ 
             Get the spice line for this analysis statement
-            Ex. returns [".TRAN 0.1ns 10ns"]
+            Returns:
+                A string for this analysis statement in syntax parsable by HSPICE (or hopefully other spice simulators)
+                    Ex. returns ".TRAN 1p 4n SWEEP DATA=sweep_data"
         """
         opt_str: str = ' '.join([f"{k}={v}" if v else f"{k}" for k, v in self.args.items()])
         return f".{self.analysis} {self.sim_prec.get_sp_val()} {self.sim_time.get_sp_val()} {opt_str}"
 
-
-# @dataclass
-# class SpVoltageSrcFactory:
-#     # Contains information to generate a voltage source in a SPICE simulation
-#     def get_pulse(self, nam)
-
 @dataclass
 class SpVoltageSrc:
     """
-        Data structure for specifying a voltage source 
-        Only supportive of a pulse voltage source
+        For representing a spice voltage source 
+        Currently only tested with `self.type` set to "PULSE" or "DC"
+
+        Attributes:
+            name: (str) Name of voltage source
+            sp_name: (str) Name of voltage source written to spice file
+                Ex. if name = "IN" -> will be written out "VIN"
+            out_node: (str) Node connecting to output of voltage source
+            gnd_node: (str) Node connected to gnd
+            type: (str) Type of voltage source 
+                Ex. "PULSE" | "SINE" | "PWL" | "DC"
+            init_volt: (Value) Initial voltage OR constant voltage for DC voltage src
+            peak_volt: (Value) Peak voltage for pulse voltage src
+            delay_time: (Value) Delay time for pulse voltage src
+            rise_time: (Value) Rise time for pulse voltage src
+            fall_time: (Value) Fall time for pulse voltage src
+            pulse_width: (Value) Pulse width for pulse voltage src
+            period: (Value) Period for pulse voltage src
+
+        Todo:
+            * Add validation checks for appropriate fields
+
     """
     name: str = None # name of voltage source, ex. if name = "IN" -> will be written as "VIN"
     sp_name: str = None # name of voltage source written to spice file
@@ -547,6 +937,12 @@ class SpVoltageSrc:
         )
     )
     def __post_init__(self):
+        """
+            Initializes `sp_name` attribute
+            If not set, sets
+                * `gnd_node` to global gnd if not set
+                * default units for all `Value` fields
+        """
         # Struct verif checks
         # assert self.type in ["PULSE", "SINE", "PWL", "DC"], "type must be one of 'PULSE', 'SINE', 'PWL', 'DC'"
         self.sp_name = self.get_sp_name()
@@ -569,7 +965,9 @@ class SpVoltageSrc:
     def get_sp_str(self) -> str:
         """ 
             Get the spice line for this voltage source
-            Ex. returns "VIN n_1_1 0 PULSE(0 1 0 0 0 0.1 0.2)"
+            Returns:
+                A string for this voltage source in syntax parsable by HSPICE (or hopefully other spice simulators)
+                    Ex. returns "VIN n_1_1 0 PULSE(0 1 0 0 0 0.1 0.2)"
         """
         if self.type:
             # This is literal string concat (just another way to concat strings)
@@ -589,51 +987,103 @@ class SpVoltageSrc:
     def get_sp_name(self) -> str:
         """ 
             Get the spice string for this voltage source name
-            Ex. "VIN" | "VDD" | "VSS"
+            Returns:
+                A string for this voltage source name in syntax parsable by HSPICE (or hopefully other spice simulators)
+                    Ex. "VIN" | "VDD" | "VSS"
         """
         return f"V{self.name}"
 
 
 @dataclass
 class SimTB():
+    """
+        Represents a complete spice simulation testbench
+
+        Attributes:
+            subckt_lib: (Dict[str, Type[SizeableCircuit]]) used to store spice subckt objects hashed by thier `sp_name`
+            id: (int) Unique TB identifier, required because sometimes we simulate the same subckt in a different testbench environment
+            inc_libs: (List[SpLib]) Libraries to include in the simulation
+            mode: (SpSimMode) Spice Simulation mode settings
+            options: (Dict[str, str]) Additional options for the simulation
+                Written out as the following:
+                    Ex. ".OPTIONS BRIEF=1 POST=1 INGOLD=1 NODE=1 LIST=1"
+            voltage_srcs: (List[SpVoltageSrc]) Voltage sources used in the simulation
+            stim_vsrc: (SpVoltageSrc) The voltage source we use as an input to our DUT subckt
+            dut_dc_vsrc: (SpVoltageSrc) The voltage source we use to power the DUT subckt
+                defined as a seperate source due to requirement to measure power in HSPICE
+            meas_points: (List[SpMeasure]) Structs to generate `.MEAS` statements
+            node_prints: (List[SpNodeProbe]) Node probes to observe in spice sim which print 
+                thier values at the `self.mode` defined simulation precision intervals
+            dut_ckt: (Type[SizeableCircuit]) The Sizeable Circuit obj which is acting as our DUT which we want to simulate
+                and extract PPA information from via this tb
+            top_insts: (List[rg_ds.SpSubCktInst]) List of spice instantiation objects used in the DUT
+            delay_weight: (int | float) If there are multiple testbenches for the same circuit, this is the weight of each one on that circuits crit path delay contribution
+            
+            tb_fname: (str) Name of the testbench file, typically set in format `f"{self.dut_ckt.sp_name}_tb_{self.id}"` yet can be set manually for edge cases
+            sp_fpath: (str) Path to the spice file, always set in `generate_top` function
+
+            power_weight: (int | float) If there are multiple testbenches for the same circuit, this is the weight of each one on that circuits power consumption contribution
+            pwr_meas_interval: (Value) Interval of time to be measuring the power consumption of the DUT
+
+            vdd_node: (str) Global node name for VDD
+            gnd_node: (str) Global node name for GND
+            sram_vdd_node: Global node name for SRAM VDD
+            sram_vss_node: Global node name for SRAM VSS
+            supply_v_param: (str) Global parameter name for supply voltage in spice 
+
+            meas_val_prefix: (str) Prefix that is prepended to each measure statement capture variable
+            inc_hdr_lines: (List[str]) Header lines for the spice simulation which are common to all simulations
+            setup_hdr_lines: (List[str]) Header lines for the spice simulation which are common to all simulations
+            meas_hdr_lines: (List[str]) Header lines for the spice simulation which are common to all simulations
+            ckt_hdr_lines: (List[str]) Header lines for the spice simulation which are common to all simulations
+
+            delay_eval_cond: (SpEvalFn) The condition to trigger trise / tfall eval shared across all `.MEAS` statements
+            
+        Todo:
+            * For the spice node and parameter fields move them into a data structure that can contain / express Spice nodes rather than just strings
+              * Also determine if they are globally defined and used elsewhere in codebase put them into unified struct
+            * Figure out all edge cases for COFFE circuits using this data structure, refactor accordingly
+            
+    """
     # SubcktLib, used to initialize SpSubCkts from sp_names
-    subckt_lib: Dict[str, Type[SizeableCircuit]] = None
+    subckt_lib: Dict[str, Type[SizeableCircuit]] | None                = None
 
     # Unique TB identifier, required because sometimes we simulate the same CB in a different TB environment
-    id: int = None
+    id: int | None                                                     = None
     # Data required to perform a top level simulation of a particular component
-    inc_libs: List[SpLib]                                       = None
-    mode: SpSimMode                                             = None 
-    options: Dict[str, str]                                     = None 
+    inc_libs: List[SpLib] | None                                       = None
+    mode: SpSimMode | None                                             = None 
+    options: Dict[str, str] | None                                     = None 
     # Voltage sources used in the top level simulation
-    voltage_srcs: List[SpVoltageSrc]                            = None
-    stim_vsrc: SpVoltageSrc                                     = None
-    dut_dc_vsrc: SpVoltageSrc                                   = None
+    voltage_srcs: List[SpVoltageSrc] | None                            = None
+    dut_dc_vsrc: SpVoltageSrc | None                                   = None
     # Structs to generate .MEAS statements
-    meas_points: List[SpMeasure]                                = None 
-    node_prints: List[SpNodeProbe]                              = None
+    meas_points: List[SpMeasure] | None                                = None 
+    node_prints: List[SpNodeProbe] | None                              = None
 
-    # sizing_ckt: Type[SizeableCircuit]                                # The Sizeable Circuit which we are simulating
     # SpInsts used in the top_level sim
-    dut_ckt: Type[SizeableCircuit]                              = None
-    top_insts: List[rg_ds.SpSubCktInst]                         = None
+    dut_ckt: Type[SizeableCircuit] | None                              = None
+    top_insts: List[rg_ds.SpSubCktInst]  | None                        = None
+
     # Could possibly get these from SpSubCkts themselves
-    tb_fname: str = None 
-    sp_fpath: str = None
+    tb_fname: str | None = None
+    sp_fpath: str | None = None
+
+    # TODO integrate or delete below commented fields
     # List of sizable circuits require definitions to be used in this simulation
     # ckt_def_deps: List[Type[SizeableCircuit]]                   = field(default_factory= lambda: [])
     # Header lines for the spice simulation which are common to all simulations
     # sp_sim_setup_lines: List[str]                               = None
 
     # Instead of a list of ckt dependancies I'd rather just have pure definitions of the circuit objects in child clases
-    # dep_wire_names: List[str] = []
-    # dep_tx_names: List[str] = []
-    # dep_ckt_basenames: List[str] = []           # basename of subckt definitions that 
+    # dep_wire_names: List[str] = []                # List of wire names (SpParams) Which are dependancies for this simulation
+    # dep_tx_names: List[str] = []                  # List of transistor names (SpParams) Which are dependancies for this simulation
+    # dep_ckt_basenames: List[str] = []             # basename of subckt definitions that 
 
     delay_weight: int | float = 1   # If there are multiple testbenches for the same circuit, this is the weight of each one on that circuits crit path delay contribution
-    power_weight: int | float = 1
+    power_weight: int | float = 1   # If there are multiple testbenches for the same circuit, this is the weight of each one on that circuits power consumption contribution
 
-    pwr_meas_clk_period: Value = field(
+    pwr_meas_interval: Value = field(
         default_factory = lambda: Value(
             value = 4,
             units = Units(type="time", factor_suffix='n'),
@@ -681,6 +1131,9 @@ class SimTB():
     delay_eval_cond: SpEvalFn = None # The condition to trigger trise / tfall eval on delay
 
     def __post_init__(self):
+        """
+            Sets `delay_eval_cond` and `stim_vsrc` fields (regardless of if they are set)
+        """
         self.delay_eval_cond: SpEvalFn = SpEvalFn(
             fn = f"{self.supply_v_param}/2"
         )
@@ -696,50 +1149,80 @@ class SimTB():
             period = Value(4), # ns
         )
     
-    def __hash__(self):
+    def __hash__(self) -> int:
+        """
+            Simple hash function that returns the id (memory address reference) of the object. 
+            To the best of my knowledge these ids are unique even if there are two identical classes instantiated
+        
+            Returns:
+                A unique id of the object
+        """
         return id(self)
     
     def get_node_prints_line(self) -> str:
         """ 
-            Get the spice line for this node probe
-            Ex. returns ".PRINT V(n_1_1)"
+            Get the spice line to print the value of a node in testbench
+            
+            Examples:
+                >>> print(self.get_node_prints_line())
+                ".PRINT V(n_1_1)"
         """
         return ".PRINT " + " ".join([node_probe.get_sp_str() for node_probe in self.node_prints])
 
-    # def __post_init__(self):
-    #     dep_wire_names: List[str] = []                      # List of wire names (SpParams) Which are dependancies for this simulation
-    #     dep_tx_names: List[str] = []                        # List of transistor names (SpParams) Which are dependancies for this simulation
-    #     dep_ckt_basenames: List[str] = []
+    def generate_top(
+        self, 
+        delay_names: List[str], 
+        targ_nodes: List[str],
+        low_v_node: str, 
+        trig_node: str,
+        # These two args used for edge cases (lut driver w lut load)
+        tb_fname: str | None = None,
+        pwr_meas_lines: List[str] | None = None,
+        # arg to describe if measurements are associated with a new inverter TODO clean up
+        #   basically if we're doing new measurement but its only going across a load then we don't need to invert the meas statements
+        meas_inv_list: List[bool] | None = None,
+        init_inv_idx: int = 0,
+        # Custom meas points for edge case (lut driver w lut load requires RISE=2) on trig of tfall
+        # The below argument is only used in local_ble_output, but should probably be used for other edge cases in the number of inverters in a chain
+        rise_fall_states: List[Tuple[bool]] | None = None,
+    ) -> str:
+        """
+            Common functionality for generation of SPICE Testbenches
 
-    # def __post_init__(self):
-    def generate_top(self, 
-            delay_names: List[str], 
-            targ_nodes: List[str],
-            low_v_node: str, 
-            trig_node: str,
-            # These two args used for edge cases (lut driver w lut load)
-            tb_fname: str = None,
-            pwr_meas_lines: List[str] = None,
-            # arg to describe if measurements are associated with a new inverter TODO clean up
-            #   basically if we're doing new measurement but its only going across a load then we don't need to invert the meas statements
-            meas_inv_list: List[bool] = None,
-            init_inv_idx: int = 0,
-            # Custom meas points for edge case (lut driver w lut load requires RISE=2) on trig of tfall
-            # The below argument is only used in local_ble_output, but should probably be used for other edge cases in the number of inverters in a chain
-            rise_fall_states: List[Tuple[bool]] = None,
-        ) -> str:
+            Args: 
+                delay_names: list of variable names used to store delays in `.MEAS` statements
+                    for each of these delay names there will be a pair of trise and tfall measurements. 
+                    It is also standard for the last delay name to be "total" which is the total delay we want to measure for the DUT circuit.
+                targ_nodes: list of nodes which we are measuring to, from `self.trig_node`
+                trig_node: node which we are measuring from
+                low_v_node: node which we measure a low voltage value from, this value is what is used to verify correct functionality of a DUT in testbench
+                tb_fname: Name of the testbench file
+                    used for edge case of lut driver w lut load. 
+                pwr_meas_lines: Raw spice strs lines to measure power consumption, if not set will use the default
+                meas_inv_list: List of bools which determine if we increment the number of driver stages used in the measurement
+                    basically, often the path we are measuring is a chain of inverters. If we want to measure an even number 
+                    of inverter stages vs. odd, the edges we have to look for will be opposite of one another i.e. rising vs falling edge. 
+                init_inv_idx: Initial index of driver stages used in the measurement
+                rise_fall_states: List of bool pairs that manually determine if we are using a rising / falling edge for measurement triggers
+            
+            Returns:
+                * A string to the relative path of the spice testbench generated by this function
+                
+            Todo:
+                * Refactor to make the testbench less hacky, hopefully remove or clean up following args:
+                    * tb_fname
+                    * pwr_meas_lines
+                    * meas_inv_list
+                    * init_inv_idx
+                    * rise_fall_states
         """
-            Common functionality for child generation of SPICE Testbenches
-            #TODO this function needs to be reworked, 
-            it's too complex and is trying to squeeze too many different things at once
-        """
+        # Delay names + targ nodes must have the same number of elements
         assert len(delay_names) == len(targ_nodes) 
         if not tb_fname:
             self.tb_fname: str = f"{self.dut_ckt.sp_name}_tb_{self.id}"
         else:
             self.tb_fname = tb_fname
         os.makedirs(f"{self.tb_fname}", exist_ok=True)
-        # self.sim_dpath = os.path.join(os.getcwd(), self.tb_fname)
         dut_sp_name: str = self.dut_ckt.sp_name
         
         # Probe nodes
@@ -811,15 +1294,10 @@ class SimTB():
                         targ = delay_bounds["targ"],
                     )
                     self.meas_points.append(measurement)
+        # Start by copying the period of the stimulus VSRC
         low_volt_time: Value = copy.deepcopy(self.stim_vsrc.period)
         # Seems like the low voltage measure is always 1n less than period
         low_volt_time.value = low_volt_time.value - 1
-        # Kinda hacky but we need to get the unit lookups
-        # low_volt_time = Value(
-        #     value = low_volt_abs_time,
-        #     units = Units(),
-        #     abs_val_flag = True
-        # )
 
         # For every node in measure points create a probe
         if not pwr_meas_lines:
@@ -827,8 +1305,8 @@ class SimTB():
                 f".MEASURE TRAN meas_logic_low_voltage FIND V({low_v_node}) AT={low_volt_time.get_sp_val()}",
                 f"",
                 f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz",
-                f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO={self.pwr_meas_clk_period.get_sp_val()}",
-                f".MEASURE TRAN meas_avg_power PARAM = '-(meas_current/{self.pwr_meas_clk_period.get_sp_val()})*{self.supply_v_param}'",
+                f".MEASURE TRAN meas_current INTEGRAL I({self.dut_dc_vsrc.get_sp_name()}) FROM=0ns TO={self.pwr_meas_interval.get_sp_val()}",
+                f".MEASURE TRAN meas_avg_power PARAM = '-(meas_current/{self.pwr_meas_interval.get_sp_val()})*{self.supply_v_param}'",
             ]
 
         # if voltage src list not defined
@@ -876,23 +1354,45 @@ class SimTB():
     def get_option_str(self) -> str:
         """ 
             Get the spice string for this option statement
-            Ex. ".OPTION BRIEF=1"
+            
+            Returns:
+                A string for the `.OPTION` statement in syntax parsable by HSPICE (or hopefully other spice simulators)
+            
+            Example:
+                >>> print(self.get_option_str())
+                ".OPTIONS BRIEF=1 POST=1 INGOLD=1 NODE=1 LIST=1"
         """
         opt_str: str = ' '.join([f"{k}={v}" if v else f"{k}" for k, v in self.options.items()])
         return f".OPTIONS {opt_str}"
 
-
-
-# @dataclass
-# class Tile:
-
 @dataclass
 class Block:
     """
-        Block refers to a type of subcircuit in the FPGA which is parameterized
+        Block refers to a 'block' in an FPGA tile made up of a single type of subcircuit in the FPGA.
         Contains information relevant to all subcircuits used in the FPGA of this 'block_type' 
-        Examples of blocks are switch blocks, connection blocks, local interconnect
+        Examples of blocks are switch blocks (containing multiple sb_muxes), connection blocks, local interconnect, etc
         Should only be created for non load circuits with multiple instantiations in a tile, load circuits don't need this information
+
+        Attributes:
+            total_num_per_tile: The total number of all instances of this circuit in an FPGA tile
+            ckt_defs: List of sizeable circuit definitions which are used in this tile block
+            perc_dist: Percentage of each circuit type in a block
+                set in `__post_init__`
+            freq_dist: What is the frequency of each of these circuit types in a block
+                set in `__post_init__`
+            block_area: Area of the block in nm^2. set in `set_block_tile_area`
+            block_area_sram: Area of the block with SRAM in nm^2. set in `set_block_tile_area`
+            block_area_no_sram: Area of the block without SRAM in nm^2. set in `set_block_tile_area`
+            block_avg_area: Avg Area of the block in nm^2. set in `set_block_tile_area`
+            block_avg_area_no_sram: Avg Area of the block without SRAM in nm^2. set in `set_block_tile_area`. 
+            
+            num_stripes: Number of layout stripes this block type has in a tile
+            stripe_widths: Dict hashed by a parameterized circuit in this block,
+                containing width of each layout stripe of this in the block in nm, excluding SRAMs
+            stripe_avg_width: Average width of layout stripes in the block in nm
+            stripe_sram_widths: Dict hashed by a parameterized circuit in this block, 
+                For the SRAMs that exist in this block type. Width of each layout stripe Only SRAMs
+            stripe_avg_sram_width: Average width of SRAM stripes in the block in nm
     """
 
     total_num_per_tile: int = None # The total number of all instances of this circuit in a tile
@@ -907,11 +1407,11 @@ class Block:
     freq_dist: Dict[Type[SizeableCircuit], int] = field(
         default_factory = lambda: {}
     ) 
-    block_area: float = 0 # Area of the block in nm^2 TODO implement in flexible units
-    block_area_sram: float = 0 # Area of the block with SRAM in nm^2 TODO implement in flexible units
-    block_area_no_sram: float = 0 # Area of the block without SRAM in nm^2 TODO implement in flexible units
-    block_avg_area: float = 0
-    block_avg_area_no_sram: float = 0 # Avg Area of the block without SRAM in nm^2 TODO implement in flexible units
+    block_area: float = 0 # Area of the block in nm^2 TODO implement in `Value` struct (to not have them be tied to nm^2)
+    block_area_sram: float = 0 # Area of the block with SRAM in nm^2 TODO implement in `Value` struct (to not have them be tied to nm^2)
+    block_area_no_sram: float = 0 # Area of the block without SRAM in nm^2 TODO implement in `Value` struct (to not have them be tied to nm^2)
+    block_avg_area: float = 0 # Avg Area of the block in nm^2 TODO implement in `Value` struct (to not have them be tied to nm^2)
+    block_avg_area_no_sram: float = 0 # Avg Area of the block without SRAM in nm^2 TODO implement in `Value` struct (to not have them be tied to nm^2)
 
     # Block Stripe Widths
     num_stripes: int = None 
@@ -925,8 +1425,15 @@ class Block:
     stripe_avg_sram_width: float = 0
 
     def __post_init__(self):
-        # self.freq_dist = {ckt: 0 for ckt in self.ckt_defs}
+        """
+            Sets the `perc_dist` and `freq_dist` fields
+            Validates some baseline assumptions from calculations of set fields
 
+            Raises:
+                AssertionError: If the sum of the freq_dist values does not equal total_num_per_tile
+                AssertionError: If the keys of `perc_dist` and `freq_dist` are not equal to `ckt_defs`
+                AssertionError: If the name of all `ckt_defs` are not the same
+        """
         for ckt in self.ckt_defs:
             self.freq_dist[ckt] = ckt.num_per_tile
 
@@ -939,7 +1446,23 @@ class Block:
         assert all([set(self.ckt_defs) == set(list(ckt_info.keys())) for ckt_info in [self.perc_dist, self.freq_dist]]), f"perc_dist and freq_dist keys must be == ckt_defs"
         assert len(set([ckt.name for ckt in self.ckt_defs])) == 1, "All ckt_defs must have the same name"
 
-    def set_block_tile_area(self, area_dict: Dict[str, float | int], width_dict: Dict[str, float | int]):
+    def set_block_tile_area(
+        self, 
+        area_dict: Dict[str, float | int], 
+        width_dict: Dict[str, float | int],
+    ) -> None:
+        """
+            Sets the various tile area fields for this block. Based on existing values in `area_dict`. 
+            Sets 'block' fields in the `area_dict` and `width_dict`
+            
+            Args:
+                area_dict: Dict of area values for subcircuits, blocks, and totals across the FPGA
+                width_dict: Dict of width values for subcircuits, blocks, and totals across the FPGA
+
+            Raises:
+                AssertionError: If the block area or block area without SRAM is 0
+                AssertionError: If the block average area is 0
+        """
         # Init block areas to 0
         self.block_area = 0
         self.block_area_no_sram = 0
@@ -966,7 +1489,22 @@ class Block:
         area_dict[f"{self.ckt_defs[0].name}_total"] = self.block_area
         width_dict[f"{self.ckt_defs[0].name}_total"] = math.sqrt(self.block_area)
 
-    def set_block_widths(self, area_dict: Dict[str, float | int], num_stripes: int, num_stripes_sram: int, lb_height: float):
+    def set_block_widths(
+        self, 
+        area_dict: Dict[str, float | int],
+        num_stripes: int, 
+        num_stripes_sram: int, 
+        lb_height: float
+    ) -> None:
+        """
+            Sets the stripe widths for this block for each unique type of the sizeable circuit in the block
+
+            Args:
+                area_dict: Dict of area values for subcircuits, blocks, and totals across the FPGA
+                num_stripes: Number of layout stripes this block type has in a tile
+                num_stripes_sram: Number of layout stripes this block type has in a tile for SRAMs
+                lb_height: Height of a layout stripe in nm
+        """
         self.stripe_avg_width = 0
         self.stripe_avg_sram_width = 0
         # Just set in this struct in case we need later
@@ -979,39 +1517,21 @@ class Block:
             self.stripe_avg_sram_width += self.stripe_sram_widths[ckt] * self.perc_dist[ckt]
 
 
-
-        
-
-
-
-@dataclass
-class Model:
-
-    # Models wrap around a list of SizeableCircuit objects which can exist on the FPGA
-    #   and contain an update_XXX methods to condense the area of different parameterized instances of a circuit
-    #   into a single value which can be used for cost functions or esitimation of area / delay / etc when considering many types for this circuit value is inconvient
-    # name: str                                   # Name of the model, will be used to generate the "base" subckt names of insts, the inst name will be the model name + the inst uid
-                                                #       Ex. "sb"
-    # num_per_tile: int                           # Number of subckt instances per tile in the FPGA
-    
-    sim_tb: Type[SimTB]                  = None   # Test Bench to be created to simulate this model with a set of parameters
-    ckt_def: Type[SizeableCircuit] = None   # The Sizeable Circuit which we are modeling
-    # Fields that should apply to all circuits globally on a device for a particular run
-    # use_tgate: bool # Use tgate or pass transistor
-    
-    
-    def __post_init__(self):
-        # Struct verif checks
-        # Assert that the ckt_def is in the isnts of SimTB.top_insts
-        pass
-
-
-
 # RRG data structures are taken from csvs generated via the rr_parse script
 @dataclass
 class SegmentRRG():
     """ 
         This class describes a segment in the routing resource graph (RRG). 
+        Segments are general programmable routing in FPGAs.
+
+        All fields are directly from VTR definitions
+
+        Attributes:
+            name: Name of the segment
+            id: Unique identifier for the segment
+            length: Length of the segment in number of tiles
+            C_per_meter: Capacitance per meter of the segment
+            R_per_meter: Resistance per meter of the segment
     """
     # Required fields
     name: str            # Name of the segment
@@ -1022,6 +1542,19 @@ class SegmentRRG():
 
 @dataclass
 class SwitchRRG():
+    """
+        This class describes a switch in the routing resource graph (RRG).
+        Switches connect segments in the RRG and are implemented as Muxes in hardware.
+
+        Attributes:
+            name: Name of the switch
+            id: Unique identifier for the switch
+            type: Type of the switch ('mux' has been only value seen for this)
+            R: Resistance of the switch (Ohms)
+            Cin: Input capacitance of the switch (Farads)
+            Cout: Output capacitance of the switch (Farads)
+            Tdel: Delay of the switch (Seconds)
+    """
     name: str
     id: int
     type: str
@@ -1030,29 +1563,60 @@ class SwitchRRG():
     Cout: float     = None 
     Tdel: float     = None 
 
-
+# TODO remove one of these Mux RRG data structures, they contain the same information
 @dataclass
 class MuxLoadRRG():
-    wire_type: str  # What is the wire type being driven by this mux load?
+    """
+        Represents the load of a single mux type on a wire type from the RRG
+
+        Attributes:
+            wire_type: What is the wire type being driven, attached to this mux load?
+            mux_type: What loading mux are we referring to?
+            freq: How many of these muxes are attached?
+    """
+    wire_type: str  # What is the wire type being driven, attached this mux load?
     mux_type: str   # What loading mux are we referring to?
     freq: int       # How many of these muxes are attached?
 
 @dataclass
 class MuxIPIN():
+    """
+        Represents the load of a single mux type on a wire type from the RRG
+
+        Attributes:
+            wire_type: What is the wire type going into this mux IPIN?
+            drv_type: What is the driver type of the wire going into this mux IPIN?
+            freq: How many of these muxes are attached?
+    """
     wire_type: str      # What is the wire type going into this mux IPIN?
     drv_type: str       # What is the driver type of the wire going into this mux IPIN?
-    freq: int          # How many of these muxes are attached?
+    freq: int           # How many of these muxes are attached?
 
 @dataclass
 class MuxWireStatRRG():
+    """
+        Represents the statistics of general programmable wire in the RRG
+        Each wire is assumed to be associated with a single type of driving mux, also represented in this structure
+        Used to calculate and generate accurate loading circuitry for a modern FPGA based on the parsing of a VPR generated RRG
+        
+        Attributes:
+            wire_type: What wire are we referring to?
+            drv_type: What mux is driving this wire?
+            mux_ipins: What are the mux types / frequency attached to this wire
+            mux_loads: What are mux types / frequency attached to this wire?
+            total_mux_inputs: How many mux inputs for mux driving this wire?
+            total_wire_loads: How many wires are loading this mux in total of all types?
+            num_mux_per_tile: How many of these muxes are in a tile?
+            num_mux_per_device: How many of these muxes are in a device?
+    """
     wire_type: str                # What wire are we referring to?
     drv_type: str                 # What mux is driving this wire?
     mux_ipins: List[MuxIPIN]      # What are the mux types / frequency attached to this wire?
     mux_loads: List[MuxLoadRRG]   # What are mux types / frequency attached to this wire?
-    total_mux_inputs: int         = None  # How many mux inputs for mux driving this wire?
-    total_wire_loads: int         = None  # How many wires are loading this mux in total of all types?
-    num_mux_per_tile: int         = None # How many of these muxes are in a tile?
-    num_mux_per_device: int       = None # How many of these muxes are in a device?
+    total_mux_inputs: int | None       = None  # How many mux inputs for mux driving this wire?
+    total_wire_loads: int | None       = None  # How many wires are loading this mux in total of all types?
+    num_mux_per_tile: int | None       = None # How many of these muxes are in a tile?
+    num_mux_per_device: int | None       = None # How many of these muxes are in a device?
     def __post_init__(self):
         self.total_mux_inputs = sum([mux_ipin.freq for mux_ipin in self.mux_ipins])
         self.total_wire_loads = sum([mux_load.freq for mux_load in self.mux_loads])
@@ -1060,9 +1624,9 @@ class MuxWireStatRRG():
 @dataclass
 class Wire:
     # Describes a wire type in the FPGA
-    name: str           = None            # Name of the wire type, used for the SpParameter globally across circuits Ex. "gen_routing_wire_L4", "intra_tile_ble_2_sb"    
-    layer: int          = None            # What RC index do we use for this wire (what metal layer does this corresond to?)
-    id: int             = None            # Unique identifier for this wire type, used to generate the wire name Ex. "gen_routing_wire_L4_0", "intra_tile_ble_2_sb_0"
+    name: str | None          = None            # Name of the wire type, used for the SpParameter globally across circuits Ex. "gen_routing_wire_L4", "intra_tile_ble_2_sb"    
+    layer: int | None         = None            # What RC index do we use for this wire (what metal layer does this corresond to?)
+    id: int | None            = None            # Unique identifier for this wire type, used to generate the wire name Ex. "gen_routing_wire_L4_0", "intra_tile_ble_2_sb_0"
     def __post_init__(self):
         # Struct verif checks
         assert self.id >= 0, "uid must be a non-negative integer"
@@ -1075,7 +1639,13 @@ class Wire:
         return f"{self.name}_id_{self.id}"
     
     def __hash__(self):
-        # Returns a unique id for this class, easier to think of like a pointer or reference
+        """
+            Simple hash function that returns the id (memory address reference) of the object. 
+            To the best of my knowledge these ids are unique even if there are two identical classes instantiated
+        
+            Returns:
+                A unique id of the object
+        """
         return id(self)
 
 
@@ -1083,20 +1653,38 @@ class Wire:
 class GenRoutingWire(Wire):
     """ 
         This class describes a general routing wire in an FPGA. 
+
+        Attributes:
+            name: Name of the wire type, used for the name of a spice parameter    
+            type: The string associated with "WIRE_TYPE" column in rr_parse.py output rr_wire_stats.csv
+            layer: What RC index do we use for this wire (what metal layer does this corresond to?)
+            id: Unique identifier for this wire type, used to generate the wire name Ex. "gen_routing_wire_L4_0", "intra_tile_ble_2_sb_0"
+            length: Length of the general routing wire in number of tiles
+        
     """
-    name: str                = "wire_gen_routing"
-    type: str                = None # The string associated with "WIRE_TYPE" column in rr_parse.py output rr_wire_stats.csv
-    num_starting_per_tile: int  = None # Avg number of these wires starting in a tile, from RRG
-    freq: int                = None # How many of these wires are in a channel?
+    name: str                           = "wire_gen_routing"
+    type: str | None                    = None # The string associated with "WIRE_TYPE" column in rr_parse.py output rr_wire_stats.csv
+    num_starting_per_tile: int | None   = None # Avg number of these wires starting in a tile, from RRG
+    freq: int | None                    = None # How many of these wires are in a channel?
     # Required fields
-    length: int              = None # Length of the general routing wire in number of tiles
+    length: int | None                  = None # Length of the general routing wire in number of tiles
 
     def __hash__(self):
+        """
+            Simple hash function that returns the id (memory address reference) of the object. 
+            To the best of my knowledge these ids are unique even if there are two identical classes instantiated
+        
+            Returns:
+                A unique id of the object
+        """
         return id(self)
 
 
 @dataclass
 class COFFETelemetry():
+    """
+        Contains telemetry information for COFFE
+    """
     # Telemetry info for coffe
     logger: logging.Logger
     update_area_cnt: int = 0
@@ -1115,7 +1703,11 @@ class COFFETelemetry():
 class Specs:
     """ General FPGA specs. """
  
-    def __init__(self, arch_params_dict, quick_mode_threshold):
+    def __init__(
+        self, 
+        arch_params_dict, 
+        quick_mode_threshold
+    ):
         
         # FPGA architecture specs
         self.N                       = arch_params_dict['N']
@@ -1211,3 +1803,26 @@ class Specs:
                 wire["num_tracks"] = num_tracks
                 wire["id"] = i
 
+
+# TODO Deletion candidates
+
+# @dataclass
+# class Model:
+
+#     # Models wrap around a list of SizeableCircuit objects which can exist on the FPGA
+#     #   and contain an update_XXX methods to condense the area of different parameterized instances of a circuit
+#     #   into a single value which can be used for cost functions or esitimation of area / delay / etc when considering many types for this circuit value is inconvient
+#     # name: str                                   # Name of the model, will be used to generate the "base" subckt names of insts, the inst name will be the model name + the inst uid
+#                                                 #       Ex. "sb"
+#     # num_per_tile: int                           # Number of subckt instances per tile in the FPGA
+    
+#     sim_tb: Type[SimTB]                  = None   # Test Bench to be created to simulate this model with a set of parameters
+#     ckt_def: Type[SizeableCircuit] = None   # The Sizeable Circuit which we are modeling
+#     # Fields that should apply to all circuits globally on a device for a particular run
+#     # use_tgate: bool # Use tgate or pass transistor
+    
+    
+#     def __post_init__(self):
+#         # Struct verif checks
+#         # Assert that the ckt_def is in the isnts of SimTB.top_insts
+#         pass

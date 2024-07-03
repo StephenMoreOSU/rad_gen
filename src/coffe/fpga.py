@@ -251,7 +251,7 @@ def sim_tbs(
                 if tb.meas_val_prefix in key:
                     # Our total trise / tfall delays will be checked for validity and set to 1 if invalid (high cost function value)
                     if key in [f"{tb.meas_val_prefix}_total_trise", f"{tb.meas_val_prefix}_total_tfall"]:
-                        new_valid_delays: List[bool] = [ val != "failed" or float(val) > 0 for val in spice_meas[key] ]
+                        new_valid_delays: List[bool] = [ val != "failed" and float(val) > 0 for val in spice_meas[key] ]
                         if valid_delays is not None:
                             # Do element wise AND with prev valid delays and new ones to get updated delay validity
                             valid_delays = [ 
@@ -286,13 +286,6 @@ def sim_tbs(
                     tb_meas[tb]['trise']
                 )
         ]
-
-
-        # tb_meas[tb]["trise"] = trise
-        # tb_meas[tb]["tfall"] = tfall
-        # tb_meas[tb]["power"] = float(spice_meas["meas_avg_power"][0])
-        # tb_meas[tb]["delay"] = max(tfall, trise)
-        # tb_meas[tb]["valid"] = valid_delay # bool
     return tb_meas
 
 def merge_tb_meas(
@@ -416,6 +409,18 @@ class FPGA:
     """ 
         This class describes an FPGA. 
         It contains all the subcircuits (SwitchBlock, ConnectionBlock, LogicCluster, etc.)
+
+
+        Attributes:
+            coffe_info (rg_ds.Coffe): The data structure initialiizes all functionality and user parameters passed to COFFE
+            run_options (NamedTuple): The run options for COFFE, i.e. a convience data struct for storing the various modes which COFFE can be run in 
+                (ideally seperating these from other input data that could have cascading effects on different data structure fields)
+            spice_interface (spice.SpiceInterface): The interface to the HSPICE (or other SPICE) simulator(s)
+            subckt_lib (Dict[str, rg_ds.SpSubCkt]): A dictionary of all subcircuits in the FPGA, hashed by their SPICE subckt name (defined by .subckt statement in spice files)
+            gen_r_wires (List[c_ds.GenRoutingWire]): A list of all general routing wires in the FPGA
+
+
+
     """
     
     # Init only fields
@@ -839,8 +844,8 @@ class FPGA:
             # Seperate the input wire statistics into wire types
             for wire_stat in rr_wire_stats:
                 # Create a WireStatRRG object for each combination of DRV and WIRE types (Assumpion only one drv type per wire type)
-                stat_type: str = (wire_stat["COL_TYPE"]).lower()
-                wire_drv_type: str = (wire_stat["DRV_TYPE"]).lower()
+                stat_type = str(wire_stat["COL_TYPE"]).lower()
+                wire_drv_type = str(wire_stat["DRV_TYPE"]).lower()
                 wire_type: str = (wire_stat["WIRE_TYPE"]) # Not lowered as its matching name in config.yml
                 # Check if this is component or total fanout
                 drv_wire_pairs.add((wire_drv_type, wire_type))
@@ -849,9 +854,9 @@ class FPGA:
                     drv_type = stat_type.replace("fanout_","").lower()
                     if drv_type in stat_type and "total" not in drv_type:
                         # this is component fanout
-                        mux_load: c_ds.MuxLoadRRG = c_ds.MuxLoadRRG(
-                            wire_type=wire_type,
-                            mux_type=drv_type,
+                        mux_load = c_ds.MuxLoadRRG(
+                            wire_type = wire_type,
+                            mux_type = drv_type,
                             freq=int(round(float(wire_stat["mean"])))
                         )
                         mux_loads[wire_type].append(mux_load)
@@ -3190,19 +3195,11 @@ class FPGA:
         # After getting the delays across subckts and tesbenches we need to combine them for each subckt and assign it trise / tfall / delay / power values.
 
         # Update Delays logging
-        fpga_state_to_csv(self, "VERIF", "delay")
+        if consts.VERBOSITY == consts.DEBUG:
+            fpga_state_to_csv(self, "VERIF", "delay")
 
         self.update_delays_cnt += 1
             
-
-
-        
-
-
-
-        
-        
-
 
     def print_specs(self):
 

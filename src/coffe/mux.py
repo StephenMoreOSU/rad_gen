@@ -393,7 +393,7 @@ class Mux2to1(c_ds.SizeableCircuit):
         
         return tran_names_list, wire_names_list  
 
-    def generate(self, subcircuit_filename: str):
+    def generate(self, subcircuit_filename: str) -> Dict[str, int | float]:
         # Write out the spice netlist for this SubCkt definition        
         if not self.use_tgate :
             self.transistor_names, self.wire_names = self.generate_ptran_2_to_1_mux(subcircuit_filename)

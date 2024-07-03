@@ -47,8 +47,6 @@ ERF_ERROR_TOLERANCE = 0.1
 # Maximum number of times the algorithm will try to meet ERF_ERROR_TOLERANCE before quitting.
 ERF_MAX_ITERATIONS = 4
 
-PASSTHROUGH_DEBUG_FLAG = 1
-
 
 # def log_fpga_telemetry(fpga_inst: fpga.FPGA, *args):
 #     """ Log the FPGA telemetry to the fpga_inst logger output"""
@@ -85,7 +83,7 @@ def ckt_get_meas(
     """
         Convience function to allow for quick simulation and measurement from a list of testbenches with a single circuit
 
-        if PASSTHROUGH_DEBUG_FLAG is set then this function will NOT run spice simulation but will just pass back the 
+        if consts.PASSTHROUGH_DEBUG_FLAG is set then this function will NOT run spice simulation but will just pass back the 
     """
     unique_ckts = set([tb.dut_ckt for tb in tbs])
     assert len(unique_ckts) == 1, "All testbenches must have the same circuit"
@@ -642,12 +640,6 @@ def get_final_delay(
         assert path_delay > 0, f"ERROR: path delay: {path_delay} is negative"        
         return path_delay
         
-    
-# def cost_function(area, delay, area_opt_weight, delay_opt_weight):
-
-#     return pow(area,area_opt_weight) * pow(delay,delay_opt_weight)
-    
-
 def erf_inverter_balance_trise_tfall(
         tbs: List[Type[c_ds.SimTB]],
         inv_name: str,
@@ -1566,10 +1558,8 @@ def search_ranges(
             wire_rc_list.append(wire_rc)
             # Debug statement
             if consts.VERBOSITY == consts.DEBUG:
-                # os.makedirs(os.path.join("debug", "hspice_sweeps"), exist_ok=True)
-                # write_sp_sweep_data_from_fpga(fpga_inst, os.path.join("debug", "hspice_sweeps", f"{iteration_key}_sweep_data.l"))
-                write_sp_sweep_data_from_fpga(fpga_inst, "sweep_data.l")
-            # pass 
+                os.makedirs(os.path.join("debug", "hspice_sweeps"), exist_ok=True)
+                write_sp_sweep_data_from_fpga(fpga_inst, os.path.join("debug", "hspice_sweeps", f"{iteration_key}_sweep_data.l"))
 
         sz_it_info: Dict[str, int] = {
             "sizing_subckt": sp_name,

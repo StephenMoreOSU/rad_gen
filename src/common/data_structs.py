@@ -39,6 +39,10 @@ STRUCT_HIER_KEY = "__"
 # ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝        ╚═════╝ ╚══════╝╚═╝  ╚═══╝
 
 class Dataclass(Protocol):
+    """
+        Idea from `https://stackoverflow.com/questions/54668000/type-hint-for-an-instance-of-a-non-specific-dataclass`
+        Used as a way to type hint a dataclass instance without knowing the specific dataclass
+    """
     # as already noted in comments, checking for this attribute is currently
     # the most reliable way to ascertain that something is a dataclass
     __dataclass_fields__: ClassVar[Dict[str, Any]] 
@@ -46,11 +50,18 @@ class Dataclass(Protocol):
 def create_timestamp(fmt_only_flag: bool = False) -> str:
     """
         Creates a timestamp string in below format
+
+        Args:
+            fmt_only_flag : If true will return the format string instead of the formatted timestamp
+                Used for comparing timestamps when asserted
+        
+        Return:
+            timestamp string in format "YYYY--MM--DD--HH--MM--SS--fff"
     """
     now = datetime.now()
 
     # Format timestamp
-    timestamp_format = "{year:04}--{month:02}--{day:02}--{hour:02}--{minute:02}--{second:02}--{milliseconds:03}" #--{microseconds:03}"
+    timestamp_format = "{year:04}--{month:02}--{day:02}--{hour:02}--{minute:02}--{second:02}--{milliseconds:03}"
     formatted_timestamp = timestamp_format.format(
         year=now.year,
         month=now.month,
@@ -59,9 +70,8 @@ def create_timestamp(fmt_only_flag: bool = False) -> str:
         minute=now.minute,
         second=now.second,
         milliseconds=int(now.microsecond // 1e3),
-        # microseconds=int(now.microsecond % 1e3),
     )
-    dt_format = "%Y--%m--%d--%H--%M--%S--%f"#--%f"
+    dt_format = "%Y--%m--%d--%H--%M--%S--%f"
 
     retval = dt_format if fmt_only_flag else formatted_timestamp
     return retval
