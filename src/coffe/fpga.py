@@ -4029,3 +4029,208 @@ class FPGA:
             self.RAM.wordlinedriver.power *=2
 
         return valid_delay
+
+
+    def update_power(self, spice_interface: spice.SpiceInterface):
+        """This funciton measures RAM core power once sizing has finished.
+        It also sums up power consumed by the peripheral circuitry and converts it to energy per bit"""
+        # Several timing parameters need to be updated before power can be measured accurately
+        # The following will compute and store the current values for these delays
+        # Create parameter dict of all current transistor sizes and wire rc
+
+        parameter_dict = {}
+        for tran_name, tran_size in self.transistor_sizes.items():
+            if not self.specs.use_finfet:
+                parameter_dict[tran_name] = [1e-9*tran_size*self.specs.min_tran_width]
+            else :
+                parameter_dict[tran_name] = [tran_size]
+
+        for wire_name, rc_data in self.wire_rc_dict.items():
+            parameter_dict[wire_name + "_res"] = [rc_data[0]]
+            parameter_dict[wire_name + "_cap"] = [rc_data[1]*1e-15]
+
+        # Update the file
+        ram_decoder_stage1_delay = 0
+        if self.RAM.valid_row_dec_size2 == 1:
+            ram_decoder_stage1_delay = max(ram_decoder_stage1_delay, self.RAM.rowdecoder_stage1_size2.delay)
+        if self.RAM.valid_row_dec_size3 == 1:
+            ram_decoder_stage1_delay = max(self.RAM.rowdecoder_stage1_size3.delay, ram_decoder_stage1_delay)
+        self.RAM.estimated_rowdecoder_delay = ram_decoder_stage1_delay    
+        self.RAM.estimated_rowdecoder_delay += self.RAM.rowdecoder_stage3.delay
+        ram_decoder_stage0_delay = self.RAM.rowdecoder_stage0.delay
+        self.RAM.estimated_rowdecoder_delay += ram_decoder_stage0_delay
+
+        # Measure the configurable decoder delay:
+        configurable_decoder_delay = 0.0
+        if self.RAM.cvalidobj1 == 1:
+            configurable_decoder_delay = max(self.RAM.configurabledecoder3ii.delay, configurable_decoder_delay)
+        if self.RAM.cvalidobj2 == 1:
+            configurable_decoder_delay = max(self.RAM.configurabledecoder2ii.delay, configurable_decoder_delay)
+        configurable_decoder_delay += self.RAM.configurabledecoderi.delay
+        # This is the driving part of the configurable decoder.
+        configurable_decoder_drive = self.RAM.configurabledecoderiii.delay
+
+        # ###############################################
+        # Overall frequency calculation of the RAM
+        # ###############################################
+        # Ref [1]: "High Density, Low Energy, Magnetic Tunnel Junction Based Block RAMs for Memory-rich FPGAs",
+        # Tatsumara et al, FPT'16
+        # Ref [2]: "Don't Forget the Memory: Automatic Block RAM Modelling, Optimization, and Architecture Exploration",
+        # Yazdanshenas et al, FPGA'17
+        # 
+        # -----------------------------------------------
+        # For SRAM
+        # -----------------------------------------------
+        # From [1]:
+        # Delay of the RAM read path is a sum of 3 delays:
+        # Tread = T1 + T2 + T3
+        # = max (row decoder, pre-charge time) + (wordline driver + bit line delay) + (sense amp + output crossbar)
+        # For an output registered SRAM (assumed here), the cycle time of the RAM is limited by:
+        # Tread' = Tread + Tmicro_reg_setup
+        # The write path delay (Twrite) is always faster than Tread so it doesn't affect the cycle time.
+        #
+        # The formulae below use a slightly different terminology/notation:
+        # 1. They include configurable decoder related delays as well, which are required because RAM blocks on FPGAs
+        #    have configurable decoders for providing configurable depths and widths.
+        # 2. Instead of breaking down the delay into 3 components,the delay is broken down into 2 components (T1 and T2).
+        # 3. Bit line delay (a part of T2 from the paper) is self.RAM.samp.delay in the code below.
+        # 4. Sense amp delay (a part of T3 from the paper) is self.RAM.samp_part2.delay in the code below.
+        # 5. The Tmicro_reg_setup value is hardcoded as 2e-11
+
+        if self.RAM.memory_technology == "SRAM":
+            self.RAM.T1 = max(self.RAM.estimated_rowdecoder_delay, configurable_decoder_delay, self.RAM.precharge.delay)
+            self.RAM.T2 = self.RAM.wordlinedriver.delay + self.RAM.samp.delay + self.RAM.samp_part2.delay  
+            self.RAM.frequency = max(self.RAM.T1 + self.RAM.T2 , configurable_decoder_delay + configurable_decoder_drive)
+            self.RAM.frequency += self.RAM.pgateoutputcrossbar.delay + 2e-11
+
+        # -----------------------------------------------
+        # For MTJ
+        # -----------------------------------------------
+        # From [1]:
+        # The write operation consists of precharge (T1) and cell-write (T2) phases. 
+        # T1 is the maximum of BL-discharging time and the row decoder delay. 
+        # T2 is the sum of word line delay and the MTJ cell writing time. 
+        # Twrite = T1 + T2.
+        #
+        # The read operation consists of precharge (T1), stabilize (T3), sense (T4) and latch (T5) phases. 
+        # T1 is the same as the write operation.
+        # T3 is the sum of wordline delay and the BL-charging time.
+        # T4 is the sense amp delay.
+        # T5 is the sum of crossbar delay and Tmicro_reg_setup.
+        # Tread = T1 + T3 + T4 + T5
+        #
+        # Overall frequency = max(Tread, Twrite)
+        # 
+        # The formulae below use a different terminology/notation:
+        # 1. They include confgurable decoder related delays as well, which are required because RAM blocks on FPGAs
+        #    have configurable decoders for providing configurable depths and widths.
+        # 2. There is no separation of Tread and Twrite and the T1/T2/etc components are not the same.
+        # 3. The Tmicro_reg_setup value is hardcoded as 3e-9
+
+        elif self.RAM.memory_technology == "MTJ":
+
+            self.RAM.T1 = max(self.RAM.estimated_rowdecoder_delay, configurable_decoder_delay, self.RAM.bldischarging.delay)
+            self.RAM.T2 = self.RAM.T1 +  max(self.RAM.wordlinedriver.delay , configurable_decoder_drive) + self.RAM.blcharging.delay
+            self.RAM.T3 = self.RAM.T2 + self.RAM.mtjsamp.delay
+            self.RAM.frequency = self.RAM.T2 - self.RAM.blcharging.delay + 3e-9
+
+        self.RAM._update_process_data()
+
+        if self.RAM.memory_technology == "SRAM":
+            print("Measuring SRAM power " + self.RAM.power_sram_read.name)
+            spice_meas = spice_interface.run(self.RAM.power_sram_read.top_spice_path, parameter_dict) 
+            self.RAM.power_sram_read.power_selected = float(spice_meas["meas_avg_power_selected"][0])
+            self.RAM.power_sram_read.power_unselected = float(spice_meas["meas_avg_power_unselected"][0])
+
+            spice_meas = spice_interface.run(self.RAM.power_sram_writelh.top_spice_path, parameter_dict) 
+            self.RAM.power_sram_writelh.power_selected_writelh = float(spice_meas["meas_avg_power_selected"][0])
+
+            spice_meas = spice_interface.run(self.RAM.power_sram_writehh.top_spice_path, parameter_dict) 
+            self.RAM.power_sram_writehh.power_selected_writehh = float(spice_meas["meas_avg_power_selected"][0])
+
+            spice_meas = spice_interface.run(self.RAM.power_sram_writep.top_spice_path, parameter_dict) 
+            self.RAM.power_sram_writep.power_selected_writep = float(spice_meas["meas_avg_power_selected"][0])
+
+            # can be used to help with debugging:
+            #print "T1: " +str(self.RAM.T1)
+            #print "T2: " + str(self.RAM.T2)
+            #print "freq " + str(self.RAM.frequency)
+            #print "selected " + str(self.RAM.power_sram_read.power_selected)
+            #print "unselected " + str(self.RAM.power_sram_read.power_unselected)
+
+            #print "selected_writelh " + str(self.RAM.power_sram_writelh.power_selected_writelh)
+            #print "selected_writehh " + str(self.RAM.power_sram_writehh.power_selected_writehh)
+            #print "selected_writep " + str(self.RAM.power_sram_writep.power_selected_writep)
+
+            #print "power per bit read SRAM: " + str(self.RAM.power_sram_read.power_selected + self.RAM.power_sram_read.power_unselected)
+            #print "Energy " + str((self.RAM.power_sram_read.power_selected + self.RAM.power_sram_read.power_unselected) * self.RAM.frequency)
+            #print "Energy Writelh " + str(self.RAM.power_sram_writelh.power_selected_writelh * self.RAM.frequency)
+            #print "Energy Writehh " + str(self.RAM.power_sram_writehh.power_selected_writehh * self.RAM.frequency)
+            print("Energy Writep " + str(self.RAM.power_sram_writep.power_selected_writep * self.RAM.frequency))
+
+            read_energy = (self.RAM.power_sram_read.power_selected + self.RAM.power_sram_read.power_unselected) * self.RAM.frequency
+            write_energy = ((self.RAM.power_sram_writelh.power_selected_writelh + self.RAM.power_sram_writehh.power_selected_writehh)/2 + self.RAM.power_sram_read.power_unselected) * self.RAM.frequency
+
+            self.RAM.core_energy = (self.RAM.read_to_write_ratio * read_energy + write_energy) /(1 + self.RAM.read_to_write_ratio)
+
+        else:
+            print("Measuring MTJ power ")
+            spice_meas = spice_interface.run(self.RAM.power_mtj_write.top_spice_path, parameter_dict) 
+            self.RAM.power_mtj_write.powerpl = float(spice_meas["meas_avg_power_selected"][0])
+            self.RAM.power_mtj_write.powernl = float(spice_meas["meas_avg_power_selectedn"][0])
+            self.RAM.power_mtj_write.powerph = float(spice_meas["meas_avg_power_selectedh"][0])
+            self.RAM.power_mtj_write.powernh = float(spice_meas["meas_avg_power_selectedhn"][0])
+
+            # can be used to help with debugging:
+            #print "Energy Negative Low " + str(self.RAM.power_mtj_write.powernl * self.RAM.frequency)
+            #print "Energy Positive Low " + str(self.RAM.power_mtj_write.powerpl * self.RAM.frequency)
+            #print "Energy Negative High " + str(self.RAM.power_mtj_write.powernh * self.RAM.frequency)
+            #print "Energy Positive High " + str(self.RAM.power_mtj_write.powerph * self.RAM.frequency)
+            #print "Energy " + str(((self.RAM.power_mtj_write.powerph - self.RAM.power_mtj_write.powernh + self.RAM.power_mtj_write.powerpl - self.RAM.power_mtj_write.powernl) * self.RAM.frequency)/4)
+
+            spice_meas = spice_interface.run(self.RAM.power_mtj_read.top_spice_path, parameter_dict) 
+            self.RAM.power_mtj_read.powerl = float(spice_meas["meas_avg_power_readl"][0])
+            self.RAM.power_mtj_read.powerh = float(spice_meas["meas_avg_power_readh"][0])
+
+            # can be used to help with debugging:
+            #print "Energy Low Read " + str(self.RAM.power_mtj_read.powerl * self.RAM.frequency)
+            #print "Energy High Read " + str(self.RAM.power_mtj_read.powerh * self.RAM.frequency)
+            #print "Energy Read " + str(((self.RAM.power_mtj_read.powerl + self.RAM.power_mtj_read.powerh) * self.RAM.frequency))
+
+            read_energy = ((self.RAM.power_mtj_read.powerl + self.RAM.power_mtj_read.powerh) * self.RAM.frequency)
+            write_energy = ((self.RAM.power_mtj_write.powerph - self.RAM.power_mtj_write.powernh + self.RAM.power_mtj_write.powerpl - self.RAM.power_mtj_write.powernl) * self.RAM.frequency)/4
+            self.RAM.core_energy = (self.RAM.read_to_write_ratio * read_energy + write_energy) /(1 + self.RAM.read_to_write_ratio)
+
+
+        # Peripherals are not technology-specific
+        # Different components powers are multiplied by the number of active components for each toggle:
+        peripheral_energy = self.RAM.row_decoder_bits / 2 * self.RAM.rowdecoder_stage0.power * self.RAM.number_of_banks
+        if self.RAM.valid_row_dec_size2 == 1 and self.RAM.valid_row_dec_size3 == 1:
+            peripheral_energy += (self.RAM.rowdecoder_stage1_size3.power + self.RAM.rowdecoder_stage1_size2.power)/2
+        elif self.RAM.valid_row_dec_size3 == 1:
+            peripheral_energy += self.RAM.rowdecoder_stage1_size3.power
+        else:
+            peripheral_energy += self.RAM.rowdecoder_stage1_size2.power
+
+        peripheral_energy += self.RAM.wordlinedriver.power + self.RAM.columndecoder.power
+
+        peripheral_energy += self.RAM.configurabledecoderi.power * self.RAM.conf_decoder_bits / 2 * self.RAM.number_of_banks
+        peripheral_energy += self.RAM.configurabledecoderiii.power * (1 + 2**self.RAM.conf_decoder_bits)/2
+
+        # Convert to energy
+        peripheral_energy = peripheral_energy * self.RAM.frequency
+
+        # Add read-specific components
+        self.RAM.peripheral_energy_read = peripheral_energy + self.RAM.pgateoutputcrossbar.power * (1 + 2**self.RAM.conf_decoder_bits)/2 * self.RAM.frequency
+        # We need energy PER BIT. Hence:
+        self.RAM.peripheral_energy_read /= 2** self.RAM.conf_decoder_bits
+        # Add write-specific components (input FF to WD)
+        self.RAM.peripheral_energy_write = peripheral_energy + (2** self.RAM.conf_decoder_bits * self.RAM.configurabledecoderiii.power /2) * self.RAM.frequency
+        # Add write-specific components (Write enable wires)
+        self.RAM.peripheral_energy_write += ((1 + 2** self.RAM.conf_decoder_bits) * self.RAM.configurabledecoderiii.power) * self.RAM.frequency
+        # We want energy per bit per OP:
+        self.RAM.peripheral_energy_write /= 2** self.RAM.conf_decoder_bits
+
+        print("Core read and write energy: " +str(read_energy) + " and " +str(write_energy))
+        print("Core energy per bit: " + str(self.RAM.core_energy))
+        print("Peripheral energy per bit: " + str((self.RAM.peripheral_energy_read * self.RAM.read_to_write_ratio + self.RAM.peripheral_energy_write)/ (1 + self.RAM.read_to_write_ratio)))

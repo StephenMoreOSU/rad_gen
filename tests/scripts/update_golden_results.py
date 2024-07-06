@@ -9,7 +9,7 @@ import argparse
 import importlib
 import json
 
-from typing import List, Tuple, Dict, Any, Callable
+from typing import List, Tuple, Dict, Any, Callable, Sequence
 
 import pytest
 import inspect
@@ -217,8 +217,48 @@ def run_pytest(*args):
     print("-vv","-s", *args)
     pytest.main(["-vv","-s", *args])
 
+def parse_args(arguments: Sequence | None = None) -> dict:
+    parser = argparse.ArgumentParser(description="Update golden results for tests")
+    parser.add_argument(
+        "--asic_flow",
+        action="store_true",
+        help="Update golden results for ASIC flow tests"
+    )
+    parser.add_argument(
+        "--struct_init",
+        action="store_true",
+        help="Update golden results for struct initialization tests",
+        default = True
+    )
+    parser.add_argument(
+        "--clean_fixtures",
+        action="store_true",
+        help="Clean up all fixture json files"
+    )
+    parser.add_argument(
+        "-m",
+        "--markers_or",
+        type=str,
+        nargs="*",
+        help="List of markers to pass to pytest to select"
+    )
 
-def main():
+    parsed_args: dict
+    if arguments is None:
+        parsed_args = vars(parser.parse_args())
+    else:
+        parsed_args = vars(parser.parse_args(arguments))
+    return parsed_args
+
+def main(*args, **kwargs):
+    parsed_args: dict
+    if args and isinstance(args[0], list):
+        # If called with a list of arguments
+        parsed_args = parse_args(args[0])
+    else:
+        # If called with keyword arguments
+        parsed_args = kwargs
+
     # Only works for ASIC tests atm TODO update
     rg_home = os.environ.get("RAD_GEN_HOME")
     tests_dpath = os.path.join(rg_home, "tests")
@@ -242,13 +282,24 @@ def main():
                 )
             )
     # For generating golden results for ASIC flow tests
-    asic_flow_gen(test_data_dpaths, pytest_fpaths)
+    if parsed_args.get("asic_flow"):
+        asic_flow_gen(test_data_dpaths, pytest_fpaths)
     
+
     # For generating struct initialization golden results
-    conf_init_gen(tests_dpath)
+    if parsed_args.get("struct_init"):
+        conf_init_gen(tests_dpath, init_markers = parsed_args.get("markers_or"))
     
     # Full cleanup of test + fixture outputs
-    # clean_fixtures(tests_dpath)
+    if parsed_args.get("clean_fixtures"):
+        clean_fixtures(tests_dpath)
+
+    # "tests/test_alu_vlsi_sweep.py::test_alu_sw_pt_asic_flow"
+    # "tests/test_stratix_iv.py"
+    # "tests/test_noc_rtl_sweep.py::test_noc_sw_pt_asic_flow"
+    # "tests/test_noc_rtl_sweep.py::test_noc_sw_pt_parse"
+
+    # run_pytest("tests/test_noc_rtl_sweep.py::test_noc_sw_pt_parse")
     
 
 
@@ -259,4 +310,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Called from cmd line
+    arguments: dict = parse_args()
+    main(**arguments)

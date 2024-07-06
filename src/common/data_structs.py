@@ -197,10 +197,13 @@ class DisplayablePath(object):
         displayable_path = cls(path, parent, is_last)
         yield displayable_path
 
-        children = sorted(list(path
-                               for path in path.iterdir()
-                               if criteria(path)),
-                          key=lambda s: str(s).lower())
+        children = sorted(
+            [ 
+                path for path in path.iterdir()
+                    if criteria(path)
+            ],
+            key=lambda s: str(s).lower()
+        )
         count = 1
         for path in children:
             is_last = count == len(children)
