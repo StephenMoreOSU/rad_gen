@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, make_dataclass, MISSING
+from dataclasses import dataclass, field, fields, make_dataclass, MISSING, InitVar
 import os, sys
 
 import re
@@ -122,6 +122,10 @@ class Regexes:
     signed_dec_re: Pattern = re.compile(r"\-{0,1}\d+\.{0,1}\d*", re.MULTILINE)
     sci_not_dec_re: Pattern = re.compile(r"\-{0,1}\d+\.{0,1}\d*[eE]{0,1}\-{0,1}\d+", re.MULTILINE)
 
+    # Innovus command editing
+    # looking for the '-stdcell_density_size' string and then grabbing the 6 floats after it (surrounded by curly braces)
+    # inn_fp_script_edit_re: Pattern = re.compile(r"(?<=\-stdcell_density_size)\s+{(\d+\.{0,1}\d*)\s+(\d+\.{0,1}\d*)\s+(\d+\.{0,1}\d*)\s+(\d+\.{0,1}\d*)\s+(\d+\.{0,1}\d*)\s+(\d+\.{0,1}\d*)}")
+    inn_fp_grab_stdcell_density_re: Pattern = re.compile(r"(?<=\-stdcell_density_size\s){(\d+\.{0,1}\d*\s)+(\d+\.{0,1}\d*)}")
     # IC 3D
     int_re : re.Pattern = re.compile(r"[0-9]+", re.MULTILINE)
     sp_del_grab_info_re: re.Pattern = re.compile(r"^.(?:(?P<var1>[^\s=]+)=\s*(?P<val1>-?[\d.]+)(?P<unit1>[a-z]+))?\s*(?:(?P<var2>[^\s=]+)=\s*(?P<val2>-?[\d.]+)(?P<unit2>[a-z]+))?\s*(?:(?P<var3>[^\s=]+)=\s*(?P<val3>-?[\d.]+)(?P<unit3>[a-z]+))?",re.MULTILINE)
@@ -481,7 +485,7 @@ class Common:
 
     # Args 
     # top_config_fpath: str = None
-    # just_config_init: bool = None
+    just_config_init: bool = None
     override_outputs: bool = False # If true will override any files which already exist in the output directory
     manual_obj_dir: str = None # If set will use this as the object directory for the current run
 
@@ -751,7 +755,9 @@ class AsicDseCLI(ParentCLI):
         GeneralCLI(key = "sweep_conf_fpath", shortcut = "-s", datatype = str, help_msg = "Path to config file describing sweep tasks and containing design parameters to sweep"),
         GeneralCLI(key = "flow_conf_fpaths", shortcut = "-p", datatype = str, nargs = "*", help_msg = "Paths to flow config files, these can be either custom or hammer format"),
         GeneralCLI(key = "compile_results", shortcut = "-c", datatype = bool, action = "store_true", help_msg = "Flag to compile results related a specific asic flow or sweep depending on additional provided configs"),
-        
+        GeneralCLI(key = "top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
+        GeneralCLI(key = "hdl_dpath", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
+
         # AsicDSE TOP LEVEL FIELDS
         # TODO rename with fpath convension
         GeneralCLI(key = "result_search_path", datatype = str, help_msg = "Path to config file describing sweep tasks and containing design parameters to sweep"),
@@ -773,8 +779,8 @@ class AsicDseCLI(ParentCLI):
         GeneralCLI(key = "scripts.gds_to_area_fname", datatype = str, help_msg = "Filename for converting GDS to area and of output .csv file"),
         
         # COMMON ASIC FLOW
-        GeneralCLI(key = "common_asic_flow.top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
-        GeneralCLI(key = "common_asic_flow.hdl_path", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
+        # GeneralCLI(key = "common_asic_flow.top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
+        # GeneralCLI(key = "common_asic_flow.hdl_path", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
         GeneralCLI(key = "common_asic_flow.db_libs", datatype = str, nargs = "*", help_msg = "db libs used in synopsys tool interactions, directory names not paths"),
         
         # FLOW STAGES
@@ -926,13 +932,14 @@ class StdCellLib:
             f"hammer.technology.{self.pdk_name}.sram_compiler.memories",
             is_hier_tag=True
         )[0].path
+        
 
 
 
     
 
 @dataclass 
-class SRAMSweepInfo:
+class SRAMSweepParams:
     sram_rtl_template_fpath: str = None # path to RTL file which will be modified by SRAM scripts to generate SRAMs, its an SRAM instantiation (supporting dual and single ports with ifdefs) wrapped in registers
     """
         List of dicts each of which contain the following elements:
@@ -947,14 +954,52 @@ class SRAMSweepInfo:
     depths: List[int] = None
 
 
+# @dataclass
+# class ParamSweepInfo:
+#     params: dict
+
+
+@dataclass 
+class VLSICustomMap():
+    """
+        Info about how to map "indirectly" defined VLSI parameters to the values which affect them in hammer
+    """
+    period: List[str] = None # In format of "2 ns"
+    core_util: List[float] = None # Target core utilization
+    effort: List[str] = None # Target effort level for par tool in flow (as it takes the longest)
+
+    def __post_init__(self):
+        # Validation
+        if self.effort:
+            legal_vals = ["express", "standard", "extreme"]
+            assert all(e in legal_vals for e in self.effort)
+        
+    # TODO implement these for hammer (already exist in custom_flow)
+    # wire_selection: List[str] = None
+    # metal_layers: List[int] = None
+
 @dataclass
-class ParamSweepInfo:
-    params: dict
+class VLSISweepParams(): #(ParamSweepInfo):
+    # Parameters which have a 1:1 mapping to those found in `hammer/config/default_types.yml`
+    # This means that if the parameter desired to sweep is a list[dict] (as it is with vlsi.inputs.clocks)
+    #   then the data structure required as the input would be a list[list[dict]]
+
+    direct_map: dict = None
+    custom_map: VLSICustomMap = None
+    
+    # Clock ports of the top-level module.
+    # Is a list of lists to support freq sweep for multiple clocks
+    # clocks: List[CLKPort]
+
+    # def __post_init__(self):
+        # Assert that all clock period sweep lists are of equal length
+        # assert len(set([ len(clock.periods) for clock in self.clocks ])) == 1
+    
+
+
+
 @dataclass
-class VLSISweepInfo(ParamSweepInfo):
-    pass
-@dataclass
-class RTLSweepInfo(ParamSweepInfo):
+class RTLSweepParams():
     """
         Contains information for sweeping designs
 
@@ -965,8 +1010,8 @@ class RTLSweepInfo(ParamSweepInfo):
             - <arbirary_additional_param_values> -> sweep values of same length of "vals" for any additional parameters which need to be swept at the same time
  
     """
-    base_header_path: str # path to  containing RTL header file for parameter sweeping
-
+    base_header_fpath: str # path to  containing RTL header file for parameter sweeping
+    sweep: dict 
 # TODO add validators
 @dataclass
 class DesignSweepInfo:
@@ -974,16 +1019,34 @@ class DesignSweepInfo:
         Information specific to a single sweep of design parameters, this corresponds to a single design in sweep config file
         Ex. If sweeping clock freq in terms of [0, 1, 2] this struct contains information about that sweep
     """
-    base_config_path: str # path to hammer config of design
+    base_config_path: str = None # path to hammer config of design
     top_lvl_module: str = None # top level module of design
     hdl_dpath: str = None # path to directory containing hdl files for design
-    # rtl_dir_path: str = None # path to directory containing rtl files for design, files can be in subdirectories
     type: str = None # options are "sram", "rtl_params" or "vlsi_params" TODO this could be instead determined by searching through parameters acceptable to hammer IR
     flow_threads: int = 1 # number of vlsi runs which will be executed in parallel (in terms of sweep parameters)
-    type_info: Any = None # contains either RTLSweepInfo or SRAMSweepInfo depending on sweep type
+    vlsi_params: VLSISweepParams = None # VLSI parameters to sweep
+    sram_params: SRAMSweepParams = None # Parameters to generate SRAM RTL + configs
+    rtl_params: RTLSweepParams = None
+    # type_info: Any = None # contains either RTLSweepInfo or SRAMSweepInfo depending on sweep type
     # Optional params for hammer env or hammer flow configs which are shared across design sweeps
     tool_env_conf_fpaths: List[str] = None # paths to hammer flow config files
     flow_conf_fpaths: List[str] = None # paths to hammer env config files
+
+    def init(self, base_config: dict, project_tree: Tree):
+        if self.type == "vlsi" or self.type == "rtl":
+            # Validation to ensure struct can operate in VLSI mode
+            base_conf_input_files = base_config.get("synthesis.inputs.input_files")
+            if not self.hdl_dpath:
+                assert base_conf_input_files, "hdl_dpath must be provided if base config does not contain synthesis.inputs.input_files"
+            if not self.top_lvl_module:
+                base_conf_top_lvl_mod = base_config.get("synthesis.inputs.top_module")
+                assert base_conf_top_lvl_mod, "top_lvl_module must be provided if base config does not contain synthesis.inputs.top_module"
+                self.top_lvl_module = base_conf_top_lvl_mod
+        elif self.type == "sram":
+            self.sram_params.sram_rtl_template_fpath = os.path.join( 
+                project_tree.search_subtrees("shared_resources.sram_lib.rtl.src", is_hier_tag = True)[0].path,
+                "sram_template.sv"
+            )
 
 
 @dataclass
@@ -1059,7 +1122,6 @@ class HammerFlow:
     cli_driver_bpath: str = None # path to hammer driver
     hammer_driver: HammerDriver = None # hammer settings
 
-
     def init(
             self,
             sweep_conf_fpath: str,
@@ -1108,7 +1170,7 @@ class HammerFlow:
 @dataclass
 class CommonAsicFlow:
     top_lvl_module: str = None # top level module of design
-    hdl_path: str       = None # path to directory containing hdl files
+    hdl_dpath: str       = None # path to directory containing hdl files
     flow_conf_fpaths: List[str] = None # paths to flow config files, these can be either custom or hammer format
     # Path to environment configuration file (used to specify industry tool paths + licenses)
     tool_env_conf_fpaths: List[str] = None # In hammer format but is general enough to be used across modes
@@ -1189,7 +1251,8 @@ class AsicDSE:
     common_asic_flow: CommonAsicFlow = None # common asic flow settings for all designs
     asic_flow_settings: HammerFlow = None # asic flow settings for single design
     custom_asic_flow_settings: Dict[str, Any] = None # custom asic flow settings
-    design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
+    design_sweep_info: DesignSweepInfo = None # sweep specific information for a single design
+    # design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
     sram_compiler_settings: SRAMCompilerSettings = None # paths related to SRAM compiler outputs
     # ASIC DSE dir structure collateral
     design_out_tree: Tree = None

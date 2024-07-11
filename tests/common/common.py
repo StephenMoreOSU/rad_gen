@@ -46,6 +46,12 @@ def get_test_info(stack_lvl: int = 2) -> Tuple[rg_ds.Tree, str, str, str, str]:
     tests_tree: rg_ds.Tree = init_tests_tree()
     # Get the name of file that called this function (above the current file)
     caller_file: str = get_caller_file(level = stack_lvl)
+
+    # START DEBUGGING, uncomment if you're having trouble finding the correct stack level to look for
+    # for i in range(10):
+        # print(get_caller_file(level = i))
+    # END DEBUGGING
+    
     test_grp_name: str = os.path.splitext( os.path.basename(caller_file).replace('test_',''))[0]
     # We call the fn which gets current function name with level = 2 to get the name of the function which calls this function
     test_name: str = get_current_function_name(level = stack_lvl).replace('test_', '')
@@ -125,8 +131,8 @@ def get_param_gen_fpaths(param_dict: OrderedDict, gen_dpath: str) -> Tuple[List[
     # Generate the formatted strings for each index
     param_strs = []
     for i in range(num_entries):
-        formatted_string = '_'.join(
-            f"{key}_{value[i]}" for key, value in param_dict.items()
+        formatted_string = '__'.join(
+            f"{key}_{str(value[i]).replace(' ','')}" for key, value in param_dict.items()
         )
         param_strs.append(formatted_string)
     
@@ -362,3 +368,5 @@ def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
 #     )
 #     subtool: str = rg_args.subtools[0]
 #     coffe_info = rg_info[subtool]
+
+# def run_verif_ic_3d(rg_args: rg_ds.RadGenArgs):

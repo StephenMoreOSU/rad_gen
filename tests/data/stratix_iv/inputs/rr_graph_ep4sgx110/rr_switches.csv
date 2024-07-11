@@ -1,0 +1,5 @@
+name,id,type,timing,Tdel,Cin,R,Cout
+__vpr_delayless_switch__,0,mux,,,,,
+ipin_cblock,1,mux,,,1.46999995e-15,2231.5,
+seg4_driver,2,mux,,5.89999993e-11,6.00000023e-16,450,4.81999991e-15
+seg16_driver,3,mux,,8.69999975e-11,1.80000007e-15,150,1.44999996e-14

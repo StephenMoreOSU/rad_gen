@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import List, Dict, Tuple, Set, Union, Any, Type, Callable, cast
+import typing
 import os, sys, yaml
 import argparse
 import datetime
@@ -281,6 +282,52 @@ def typecast_input_to_dataclass(input_value: dict, dataclass_type: Any) -> rg_ds
                 output[field_name] = None  # If typecasting fails, set to None
     
     return dataclass_type(**output)
+
+class EnhancedJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.asdict(obj)
+        return super().default(obj)
+
+def rec_convert_dataclass_to_dict(obj, key: str = None):
+    """
+        Converts a dict / dataclass of nested dicts / dataclasses into a dictionary object
+    """
+    # Checks if its a type we should skip
+    skip_tup = (
+        rg_ds.HammerDriver,
+    )
+    if isinstance(obj, skip_tup):
+        return None
+    elif dataclasses.is_dataclass(obj):
+        try:
+            # If there is a module that's not serializable we will convert manually instead
+            return {k: rec_convert_dataclass_to_dict(v, k) for k, v in dataclasses.asdict(obj).items()}
+        except: 
+            # manually traversing the dataclass fields
+            result = {}
+            for field in dataclasses.fields(obj):
+                field_val = getattr(obj, field.name)
+                result[field.name] = rec_convert_dataclass_to_dict(field_val, field.name)
+            return result
+
+    elif isinstance(obj, list):
+        return [rec_convert_dataclass_to_dict(i, key) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: rec_convert_dataclass_to_dict(v, k) for k, v in obj.items()}
+    # checks if instance is any primitive type, if its not then its a non dataclass class so we have to ignore for now
+    elif not isinstance(obj, (str, int, float, bool)) and obj is not None:
+        return None
+    # Case for exporting paths so tests can be non system specific
+    elif isinstance(obj, str) and key != None and 'path' in key:
+        return obj.replace(os.path.expanduser('~'), '~')
+    else:
+        return obj
+
+def dataclass_2_json(in_dataclass: Any, out_fpath: str):
+    json_text = json.dumps(rec_convert_dataclass_to_dict(in_dataclass), cls=EnhancedJSONEncoder, indent=4)
+    with open(out_fpath, "w") as f:
+        f.write(json_text)
 
 
 def format_csv_data(data: List[List[Any]]) -> List[List[str]]:
@@ -1056,7 +1103,7 @@ def sanitize_element(param: str, ele_val: Any, validate_paths: bool = True, *arg
     """
     # Here are the key matches which makes sanitizer think its a path
     # TODO there may be a better way to do but this way you just have to list all path related keys below
-    path_keys = ["path", "sram_parameters", "file", "dir", "home"]
+    path_keys = ["path", "sram_parameters", "file", "home"] # "dir" TODO check if removal breaks things
     # Even if path keys are in param if negative keys are in param then its not a path
     #   E.g. negative keys override positive keys 
     inv_path_keys = [
@@ -1194,7 +1241,63 @@ def find_common_root_dir(dpaths: List[str]) -> None | str:
             ret_val = common_root
     return ret_val
 
-def init_dataclass(dataclass_type: Type, in_config: dict, add_arg_config: dict = {}, module_lib: Any = None, validate_paths: bool = True) -> Any:
+
+
+
+def init_field(
+    in_config: dict,
+    field: dataclasses.Field,
+    field_type: Type,
+    validate: bool,
+) -> dict:
+    field_name: str = field.name
+    dataclass_inputs: dict = {}
+    hier_dict = {k: v for k, v in in_config.items() if k.startswith(f"{field_name}{rg_ds.CLI_HIER_KEY}")}
+    if field_name in in_config or hier_dict:
+        # Another path for a hierarchical dataclass definition is a list of dictionaries (which will not be flattened)
+        # This condition should be mutually exclusive with being a heirarchical key (as lists are not flattened)
+        if typing.get_origin(field_type) == list and in_config.get(field_name) and all(isinstance(i, dict) for i in in_config[field_name]):
+            # We should assert that all fields in the dataclass list are of the same type
+            assert len(set(typing.get_args(field_type))) == 1
+            # Field is a list of dictionaries
+            element_type = typing.get_args(field_type)[0] # Get the type of elements in the list
+            dataclass_inputs[field_name] = [
+                init_dataclass(
+                    dataclass_type = element_type, 
+                    in_config = item, 
+                    add_arg_config = {}, 
+                    # module_lib = module_lib, 
+                    validate_paths = validate
+                ) for item in in_config[field_name]
+            ]
+        elif field_name in in_config:
+            dataclass_inputs[field_name] = in_config[field_name]
+        else:
+            # Get a in config dict for the nested dataclass
+            nested_config: dict = strip_hier(in_config, field_name)
+            default_fac_config: dict
+            if field.default_factory != MISSING:
+                default_fac_config = dataclasses.asdict(field.default_factory())
+            else:
+                default_fac_config = {}
+
+            ## Initialize the nested dataclass
+            dataclass_inputs[field_name] = init_dataclass(
+                dataclass_type = field_type, 
+                in_config = nested_config, 
+                add_arg_config = default_fac_config, 
+                # module_lib = module_lib, 
+                validate_paths = validate
+            )
+    return dataclass_inputs
+
+def init_dataclass(
+    dataclass_type: Type, 
+    in_config: dict, 
+    add_arg_config: dict = {}, 
+    module_lib: Any = None, 
+    validate_paths: bool = True
+) -> Any:
     """
     Initializes a dataclass with values from the dataclasses internal initialization functions and input configuration dictionaries
     which have key value pairs mapped to dataclass fields. 
@@ -1215,6 +1318,7 @@ def init_dataclass(dataclass_type: Type, in_config: dict, add_arg_config: dict =
         module_lib: The module library which contains the dataclass (and subdataclasses if any) in the dataclass_type.
             This is used to recursively initialize the dataclass and its subdataclasses so a precondition is that dataclasses 
             and thier subdataclasses are in the same python module. 
+        hier_to_dicts: A boolean flag which determines if hierarchical keys in the input config dict should be converted to dictionaries
         validate_paths: A boolean flag which determines if paths in the dataclass should be validated to exist on the system
 
     Returns:
@@ -1227,32 +1331,103 @@ def init_dataclass(dataclass_type: Type, in_config: dict, add_arg_config: dict =
         * should add sanitization for all required fields in this function
         * replace __dataclass_fields__ with fields() and make sure it gets same result
     """
+    # For when a nested dataclass has an element of type `dict` we just return the input config
     dataclass_inputs = {}
+    if not hasattr(dataclass_type, "__dataclass_fields__"):
+        return in_config
+    type_hints: Dict[str, Type[Any]] = typing.get_type_hints(dataclass_type)
     field: dataclasses.Field
     for field in dataclass_type.__dataclass_fields__.values():
         field_name = field.name
-
-        # Start with the factory default if it exists
+        field_type = type_hints[field.name]
+        # Start with the factory default if it exists, will be overrided if higher priority assignment exists
         if field.default_factory != MISSING:
             dataclass_inputs[field_name] = field.default_factory()
 
-        # Hierarchical keys in the input config dict
-        hier_keys = {k: v for k, v in in_config.items() if k.startswith(f"{field_name}{rg_ds.CLI_HIER_KEY}")}
-        if hier_keys:
-            if not module_lib:
-                raise Exception("ERROR: module_lib must be provided if a nested dataclass is found")
-            # Get a in config dict for the nested dataclass
-            nested_config = {k.replace(f"{field_name}{rg_ds.CLI_HIER_KEY}",""): v for k, v in hier_keys.items()}
-            # Get the type from the input module lib
-            nested_dataclass_type = getattr(module_lib, field.type)
-            if field.default_factory != MISSING:
-                default_fac_config = dataclasses.asdict(field.default_factory())
-            ## Initialize the nested dataclass
-            dataclass_inputs[field_name] = init_dataclass(nested_dataclass_type, nested_config, default_fac_config, module_lib, validate_paths)
-        elif field_name in in_config:
-            dataclass_inputs[field_name] = in_config[field_name]
-        elif field_name in add_arg_config:
-            dataclass_inputs[field_name] = add_arg_config[field_name]
+        # Hierarchical keys in the input config dict, (we merge two input dicts in priority order)
+        # hier_keys = {k: v for k, v in {**add_arg_config, **in_config}.items() if k.startswith(f"{field_name}{rg_ds.CLI_HIER_KEY}")}
+        # If we find the field name hierarchically defined in either of the input configs
+        #   AND the Non-hier key is not defined in either of input configs
+        # if hier_keys and (field_name not in in_config and field_name not in add_arg_config):
+        #     if not module_lib:
+        #         raise Exception("ERROR: module_lib must be provided if a nested dataclass is found")
+        #     # Get a in config dict for the nested dataclass
+        #     nested_config: dict = {k.replace(f"{field_name}{rg_ds.CLI_HIER_KEY}",""): v for k, v in hier_keys.items()}
+        #     # Get the type from the input module lib
+        #     nested_dataclass_type = getattr(module_lib, field.type)
+        #     default_fac_config: dict
+        #     if field.default_factory != MISSING:
+        #         default_fac_config = dataclasses.asdict(field.default_factory())
+        #     else:
+        #         default_fac_config = {}
+
+        #     ## Initialize the nested dataclass
+        #     dataclass_inputs[field_name] = init_dataclass(
+        #         dataclass_type = nested_dataclass_type, 
+        #         in_config = nested_config, 
+        #         add_arg_config = default_fac_config, 
+        #         module_lib = module_lib, 
+        #         validate_paths = validate_paths
+        #     )
+
+
+        init_dict: dict = init_field(
+            in_config, 
+            field, 
+            field_type, 
+            validate_paths
+        )
+        # If the init dict is empty then there was no initialization done so we try again with the add_arg_config
+        if not init_dict:
+            init_dict = init_field(
+                add_arg_config, 
+                field, 
+                field_type, 
+                validate_paths
+            )
+        if init_dict.get(field_name):
+            dataclass_inputs[field_name] = init_dict[field_name]
+
+        # hier_keys_in_config = {k: v for k, v in in_config.items() if k.startswith(f"{field_name}{rg_ds.CLI_HIER_KEY}")}
+        # if field_name in in_config or hier_keys_in_config:
+        #     # Another path for a hierarchical dataclass definition is a list of dictionaries (which will not be flattened)
+        #     # This condition should be mutually exclusive with being a heirarchical key (as lists are not flattened)
+        #     if typing.get_origin(field_type) == list and in_config.get(field_name) and all(isinstance(i, dict) for i in in_config[field_name]):
+        #         # We should assert that all fields in the dataclass list are of the same type
+        #         assert len(set(typing.get_args(field_type))) == 1
+        #         # Field is a list of dictionaries
+        #         element_type = typing.get_args(field_type)[0] # Get the type of elements in the list
+        #         dataclass_inputs[field_name] = [
+        #             init_dataclass(
+        #                 dataclass_type = element_type, 
+        #                 in_config = item, 
+        #                 add_arg_config = {}, 
+        #                 module_lib = module_lib, 
+        #                 validate_paths = validate_paths
+        #             ) for item in in_config[field_name]
+        #         ]
+        #     elif field_name in in_config:
+        #         dataclass_inputs[field_name] = in_config[field_name]
+        #     else:
+        #         # Get a in config dict for the nested dataclass
+        #         nested_config: dict = strip_hier(in_config, field_name)
+        #         default_fac_config: dict
+        #         if field.default_factory != MISSING:
+        #             default_fac_config = dataclasses.asdict(field.default_factory())
+        #         else:
+        #             default_fac_config = {}
+
+        #         ## Initialize the nested dataclass
+        #         dataclass_inputs[field_name] = init_dataclass(
+        #             dataclass_type = field_type, 
+        #             in_config = nested_config, 
+        #             add_arg_config = default_fac_config, 
+        #             module_lib = module_lib, 
+        #             validate_paths = validate_paths
+        #         )
+
+        # elif field_name in add_arg_config:
+        #     dataclass_inputs[field_name] = add_arg_config[field_name]
         
         # Clean path and ensure it exists (if "path" keyword in field name)
         if "path" in field_name and field_name in dataclass_inputs:
@@ -1579,6 +1754,10 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
             # do the renaming of keys to take out the "<subtool>." portion of heirarchy, this is because by definition all keys that are passed in are only for the respective subtool
             # (subtools are independant of one another), and the common dataclass is passed through the "common" key
             rad_gen_info[subtool] = fn_to_call( {k.replace(f"{subtool}.","") : v for k,v in subtool_confs[subtool].items()}, common ) 
+
+            # Common assertions required for all subtools
+            assert os.path.exists(rad_gen_info[subtool].common.obj_dir)
+            
         else:
             raise ValueError(f"ERROR: {subtool} is not a valid subtool ('init_{subtool}_structs' is not a defined function)")
     return rad_gen_info
@@ -1695,13 +1874,13 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
                                 rg_ds.Tree("outputs", tag = "outputs"),
                             ], tag = f"{common_conf['project_name']}"
                         )
-                    ], tag = "projects"
+                    ],
                 ),
                 rg_ds.Tree("third_party", 
                     [  
                         rg_ds.Tree("hammer", scan_dir = True, tag = "hammer"),
                         rg_ds.Tree("pdks", scan_dir = True, tag = "pdks"),
-                    ], tag = "third_party"
+                    ],
                 ),
             ],
             tag = "top"
@@ -1719,7 +1898,7 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
                     [  
                         rg_ds.Tree("hammer", scan_dir = True, tag = "hammer"),
                         rg_ds.Tree("pdks", scan_dir = True, tag = "pdks"),
-                    ], tag = "third_party"
+                    ],
                 ),
             ],
             tag = "top"
@@ -1731,11 +1910,13 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
 
 def init_asic_obj_dir(
         common: rg_ds.Common,
-        top_lvl_module: str,
+        out_tree: rg_ds.Tree = None,
+        top_lvl_module: str = None,
+        sweep_flag: bool = False,
+        sram_gen_flag: bool = False,
 ) -> str:
     """
         Initializes and creates the asic output obj dpath based on options specified in `common` and `top_lvl_module`
-
         Args:
             common: The common data structure
             top_lvl_module: The top level module name
@@ -1743,29 +1924,40 @@ def init_asic_obj_dir(
         Returns:
             Path to the newly created obj directory
     """
-    # Create output directory for obj dirs to be created inside of
-    out_dir = common.project_tree.search_subtrees(f"outputs.{top_lvl_module}.obj_dirs", is_hier_tag = True)[0].path
-    #os.path.join(env_settings.design_output_path, hammer_flow_inputs["common_asic_flow.top_lvl_module"])
-    obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp()}" # Still putting top level mod naming convension on obj_dirs because who knows where they will end up
+    # Create output directory for obj dirs to be created inside
+    if not out_tree and top_lvl_module:
+        out_tree: rg_ds.Tree = common.project_tree.search_subtrees(f"outputs.{top_lvl_module}.obj_dirs", is_hier_tag = True)[0]
     
+    out_dir = out_tree.path
+    assert os.path.isdir(out_tree.path), f"ERROR: {out_tree.path} is not a valid directory"
+    if sweep_flag:    
+        obj_base_dname = f"{top_lvl_module}-sweep-{rg_ds.create_timestamp()}"
+        obj_dir_fmt = f"{top_lvl_module}-sweep-{rg_ds.create_timestamp(fmt_only_flag = True)}"
+    elif sram_gen_flag:
+        obj_base_dname =f"sram_gen-{rg_ds.create_timestamp()}"
+        obj_dir_fmt = f"sram_gen-{rg_ds.create_timestamp(fmt_only_flag = True)}"
+    else:
+        obj_base_dname = f"{top_lvl_module}-{rg_ds.create_timestamp()}" # Still putting top level mod naming convension on obj_dirs because who knows where they will end up
+        obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp(fmt_only_flag = True)}"
+        
     # Throw error if both obj_dir options are specified
     assert not (common.override_outputs and common.manual_obj_dir != None), "ERROR: cannot use both latest obj dir and manual obj dir arguments for ASIC-DSE subtool"
     
     obj_dir_path = None
     # Users can specify a specific obj directory
     if common.manual_obj_dir != None:
-        obj_dir_path = os.path.realpath(os.path.expanduser(common.manual_obj_dir))
+        obj_dir_path = os.path.abspath(os.path.expanduser(common.manual_obj_dir))
         # if this does not exist create it now
         os.makedirs(obj_dir_path, exist_ok = True)
     # Or they can use the latest created obj dir
     elif common.override_outputs:
         if os.path.isdir(out_dir):
-            obj_dir_path = find_newest_obj_dir(search_dir = out_dir, obj_dir_fmt = f"{top_lvl_module}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
+            obj_dir_path = find_newest_obj_dir(search_dir = out_dir, obj_dir_fmt = obj_dir_fmt)
         else:
-            print( f"WARNING: No latest obj dirs found in {out_dir} of format {top_lvl_module}-{rg_ds.create_timestamp(fmt_only_flag = True)}")
+            print( f"WARNING: No latest obj dirs found in {out_dir} of format {obj_dir_fmt}")
     # If no value given or no obj dir found, we will create a new one
     if obj_dir_path == None:
-        obj_dir_path = os.path.join(out_dir,obj_dir_fmt)
+        obj_dir_path = os.path.join(out_dir, obj_base_dname)
         print( f"WARNING: No obj dir specified or found, creating new one @: {obj_dir_path}")
 
     # This could be either at the same path as next variable or at manual specified location
@@ -1789,7 +1981,8 @@ def init_asic_obj_dir(
         tag = "cur_obj_dir" # NAMING CONVENTION FOR OUR ACTIVE OBJ DIRECTORY
     )
     common.project_tree.append_tagged_subtree(
-        f"{common.project_name}.outputs.{top_lvl_module}.obj_dirs",
+        # f"{common.project_name}.outputs.{top_lvl_module}.obj_dirs",
+        out_tree.heir_tag, 
         obj_tree,
         is_hier_tag = True,
         mkdirs = True,
@@ -1839,6 +2032,14 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
 
         Returns:
             Initialized AsicDSE data structure which can be used to legally execute any mode of operation in the asic_dse subtool.
+    
+        Todo:
+            * Get each `init` function for dataclasses to output a list of strings of all the fields that were set by inputs derived from `init` args or dataclass `self` values.
+                * Then use this list of stings to ensure that no non `None` set fields are being overridden by the `init` function 
+                    Or just print out a warning message that says they are being overridden.
+            * For all combinations of data structure values that are not valid, throw an error.
+                * Validation can be done after the final `AsicDSE` data structure is created to not get too confused by the 
+                    intermediate states that some data structure values can have during the course of `init_asic_dse_structs` function.
     """
     
     design_out_tree = rg_ds.Tree("top_lvl_module",
@@ -1876,7 +2077,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
             copy.deepcopy(configs_tree),
             copy.deepcopy(rtl_tree),
             rg_ds.Tree("scripts"),
-            rg_ds.Tree("macros"),
+            rg_ds.Tree("obj_dirs")
         ]
     )
 
@@ -1885,6 +2086,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
 
     # updating project tree from common
     if common.project_name != None:
+        # This would happen in the case of running in the rtl generation mode (i.e. sram compiler), as there isn't a single top lvl module name to use
         common.project_tree.append_tagged_subtree(f"{common.project_name}", copy.deepcopy(configs_tree), is_hier_tag = True) # append asic_dse specific conf tree to the project conf tree
         common.project_tree.append_tagged_subtree(f"{common.project_name}", rtl_tree, is_hier_tag = True) # add rtl to the project tree
     conf_tree_copy = copy.deepcopy(configs_tree)
@@ -1910,10 +2112,14 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
         strip_hier(asic_dse_conf, strip_tag="scripts")
     )
     compile_results_flag: bool = asic_dse_conf["compile_results"] # CTRL SIGNAL
-
+    
     common_asic_flow: rg_ds.CommonAsicFlow = init_dataclass(
         rg_ds.CommonAsicFlow, 
-        strip_hier(asic_dse_conf, strip_tag="common_asic_flow"),
+        {
+            **strip_hier(asic_dse_conf, strip_tag="common_asic_flow"),
+            "top_lvl_module" : asic_dse_conf.get("top_lvl_module"),
+            "hdl_dpath" : asic_dse_conf.get("hdl_dpath"),
+        },
         module_lib = rg_ds,
     )
     common_asic_flow.init(stdcell_lib.pdk_name)
@@ -1922,7 +2128,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
     # Control signals
     top_lvl_valid: bool = (
         common_asic_flow.top_lvl_module != None and 
-        common_asic_flow.hdl_path != None
+        common_asic_flow.hdl_dpath != None
     )
     sweep_conf_valid: bool = asic_dse_conf["sweep_conf_fpath"] != None
     flow_conf_valid: bool = asic_dse_conf["flow_conf_fpaths"] != None
@@ -1946,10 +2152,9 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
 
     # Assert valid combinations
     # Cannot run both sweep and flow confs at the same time
-    assert not (asic_dse_conf["sweep_conf_fpath"] == None and asic_dse_conf["flow_conf_fpaths"] == None), "ERROR: No task can be run from given user parameters"
+    assert not (asic_dse_conf.get("sweep_conf_fpath") == None and asic_dse_conf.get("flow_conf_fpaths") == None), "ERROR: No task can be run from given user parameters"
     # If not using sram compiler (doesn't need a project dir) make sure user provides a project directory
     assert not (common.project_name == None and not common_asic_flow.flow_stages.sram.run and flow_conf_valid), "ERROR: Project name must be specified if not running SRAM compiler" 
-        
         
     # assert not (common.project_name == None and not common_asic_flow.flow_stages.sram.run), "ERROR: Project name must be specified if not running SRAM compiler"
 
@@ -1961,71 +2166,196 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
     #  \__ \\ \/\/ /| _|| _||  _/ | (_ | _|| .` |
     #  |___/ \_/\_/ |___|___|_|    \___|___|_|\_|
 
-    # TODO this section needs refactoring and requires converting the format of sweep config files to allow for an easy nested init
-    if sweep_conf_valid:
-        asic_dse_inputs["sweep_conf_fpath"] = asic_dse_conf["sweep_conf_fpath"]
-        
-        sweep_config = parse_config(asic_dse_conf["sweep_conf_fpath"], validate_paths = True, sanitize = True)
-        
-        for design in sweep_config["design_sweeps"]:
-            sweep_type_inputs = {} # parameters for a specific type of sweep
-            if design["type"] == "sram":
-                # point the base_rtl_path to the default one in the project tree (will be overridden if another value provided in sweep config)
-                sweep_type_inputs["sram_rtl_template_fpath"] = os.path.join( 
-                    common.project_tree.search_subtrees("shared_resources.sram_lib.rtl.src", is_hier_tag = True)[0].path,
-                    "sram_template.sv"
-                )
-                sweep_type_info = init_dataclass(rg_ds.SRAMSweepInfo, design, sweep_type_inputs)
-            else:                
-                # If we are either doing RTL or VLSI sweep then we should copy over the source RTL to our project tree
-                # Check to see if the RTL was passed in via CLI params
-                # Priority of getting to RTL + HDL search Paths for RTL
-                # 1. Conglomerated CLI/Conf ( asic_dse_conf["flow_conf_fpath"] ) -> sweep_config["base_config_path"] 
-                if asic_dse_conf.get("flow_conf_fpaths") and len(asic_dse_conf["flow_conf_fpaths"]) == 1:
-                    base_config = parse_config(asic_dse_conf["flow_conf_fpaths"][0])
-                else:                
-                    base_config = parse_config(design["base_config_path"])
-
-                if common_asic_flow.hdl_path:
-                    exts = ['.v','.sv','.vhd',".vhdl", ".vh", ".svh"]
-                    _, hdl_search_paths = rec_get_flist_of_ext(common_asic_flow.hdl_path, exts)
-                else:
-                    hdl_search_paths = base_config.get("synthesis.inputs.hdl_search_paths")
-                # Priority of Copying RTL from user inputs to project tree
-                # 1. Search for RTL inside of user provided HDL search paths 
-                #   a. Priority order: CLI -> base_config["synthesis.inputs.hdl_search_paths"] -> base_config["synthesis.inputs.input_files"] if equivalent files we do a diff to make sure they are the same, if not equal we copy them over
-                # Priority of HDL search paths:
-                # 1. Conglom CLI/Conf (common_asic_flow.hdl_path) -> base_config["synthesis.inputs.hdl_search_paths"]
-                if hdl_search_paths:
-                    # Is assumed sanitized by the parse_config (ie path exists)
-                    rtl_src_dpath = find_common_root_dir(hdl_search_paths)
-                    rtl_dst_tree: rg_ds.Tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
-                    rtl_dst_tree.scan_dir = True
-                    rtl_dst_dpath = rtl_dst_tree.path
-                    # Copy tree recursivley to project tree, just including all files assuming they will be part of the RTL we want, possibly could filter for specific files in the future
-                    shutil.copytree(rtl_src_dpath, rtl_dst_dpath, dirs_exist_ok=True)
-                    rtl_dst_tree.update_tree()
-
-
-                # Now get RTL from the synthesis input files, will look through the current RTL src path and if the files already exist will not copy them over
-                rtl_src_fpaths = base_config.get("synthesis.inputs.input_files.input_file")
-                if rtl_src_fpaths:
-                    # Search for file recursivley
-                    rtl_dst_tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
-                    for fpath in rtl_src_fpaths:
-                        # If we don't find a matching file in our rtl.src dir we will copy what exists in our conf over
-                        if not rec_find_fpath(rtl_dst_tree.path, os.path.basename(fpath)):
-                            shutil.copy(fpath, rtl_dst_tree.path)
-
-                if design["type"] == "rtl_params":
-                    sweep_type_info = init_dataclass(rg_ds.RTLSweepInfo, design, sweep_type_inputs)
-                elif design["type"] == "vlsi_params":
-                    sweep_type_info = init_dataclass(rg_ds.VLSISweepInfo, design, sweep_type_inputs)
+    if asic_dse_mode.sweep_gen:
+        sweep_conf: dict = parse_config(
+            asic_dse_conf.get("sweep_conf_fpath"), 
+            validate_paths = True, 
+            sanitize = True
+        )
+    else:
+        sweep_conf = {}
+    
+    design_sweep_info: rg_ds.DesignSweepInfo = init_dataclass(
+        rg_ds.DesignSweepInfo, 
+        strip_hier(asic_dse_conf, strip_tag="design_sweep_info"),
+        sweep_conf,
+        module_lib = rg_ds,
+    )
+    # Only reason I'm passing this in rather than parsing from inside init function is to prevent circular import
+    # TODO change this
+    if asic_dse_mode.sweep_gen:
+        base_config = parse_config(design_sweep_info.base_config_path, validate_paths=True, sanitize=True)
+        design_sweep_info.init(
+            base_config,
+            common.project_tree,
+        )
+    if design_sweep_info.type == "rtl":
+        # If doing RTL sweep we have to unflatten the portion of the config describing RTL params
+        # TODO remove this + refactor and unify config file formats
+        procd_params = [] 
+        for rtl_param, sweep_vals in copy.deepcopy(design_sweep_info.rtl_params.sweep).items():
+            top_hier_key = str(rtl_param).split(".")[0]
+            if top_hier_key in procd_params:
+                del design_sweep_info.rtl_params.sweep[rtl_param]
+                continue
+            # if hierarchy is found (param is a dict originally)
+            if "." in rtl_param:
+                design_sweep_info.rtl_params.sweep[top_hier_key] = strip_hier(design_sweep_info.rtl_params.sweep, top_hier_key)
+                del design_sweep_info.rtl_params.sweep[rtl_param]
+                procd_params.append(top_hier_key)
             
-            design_inputs = {}
-            design_inputs["type_info"] = sweep_type_info
-            # Pass in the parsed sweep config and strip out the "shared" hierarchy tags
-            design_sweep_infos.append(init_dataclass(rg_ds.DesignSweepInfo, {**design, **strip_hier(sweep_config, strip_tag="shared")}, design_inputs))
+    # Logic to initialize project tree and copy over RTL files
+    if design_sweep_info.type != "sram":
+        if design_sweep_info.hdl_dpath:
+            exts = ['.v','.sv','.vhd',".vhdl", ".vh", ".svh"]
+            _, hdl_search_paths = rec_get_flist_of_ext(design_sweep_info.hdl_dpath, exts)
+            if hdl_search_paths:
+                # Is assumed sanitized by the parse_config (ie path exists)
+                rtl_src_dpath = find_common_root_dir(hdl_search_paths)
+                rtl_dst_tree: rg_ds.Tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
+                rtl_dst_tree.scan_dir = True
+                rtl_dst_dpath = rtl_dst_tree.path
+                # Copy tree recursivley to project tree, just including all files assuming they will be part of the RTL we want, possibly could filter for specific files in the future
+                shutil.copytree(rtl_src_dpath, rtl_dst_dpath, dirs_exist_ok=True)
+                rtl_dst_tree.update_tree()
+            else:
+                # Our RTL is coming from the base config input_files
+                rtl_dst_tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
+                for fpath in base_config.get("synthesis.inputs.input_files"):
+                    # If we don't find a matching file in our rtl.src dir we will copy what exists in our conf over
+                    if not rec_find_fpath(rtl_dst_tree.path, os.path.basename(fpath)):
+                        shutil.copy(fpath, rtl_dst_tree.path)
+
+    # For each design sweep info
+
+    # TODO this section needs refactoring and requires converting the format of sweep config files to allow for an easy nested init
+    # if asic_dse_mode.sweep_gen:
+    #     asic_dse_inputs["sweep_conf_fpath"] = asic_dse_conf["sweep_conf_fpath"]
+        
+    #     sweep_config = parse_config(asic_dse_conf["sweep_conf_fpath"], validate_paths = True, sanitize = True)
+    #     # For related functionality we need to assert that there is only 1 design in the sweep conf_fpath 
+    #     # assert len(sweep_config["design_sweeps"]) == 1, "ERROR: Only 1 design per sweep is supported at this time"
+
+    #     # Strip out any field that is not part of sweep
+    #     design = strip_hier(sweep_config, "sweep")
+    #     # Make the 'params' field a dictionary s.t. it won't be mistaken as 
+    #     sweep_type_inputs = {} # parameters for a specific type of sweep
+    #     if design.get("type") == "sram":
+    #         # point the base_rtl_path to the default one in the project tree (will be overridden if another value provided in sweep config)
+    #         sweep_type_inputs["sram_rtl_template_fpath"] = os.path.join( 
+    #             common.project_tree.search_subtrees("shared_resources.sram_lib.rtl.src", is_hier_tag = True)[0].path,
+    #             "sram_template.sv"
+    #         )
+    #         sweep_type_info = init_dataclass(rg_ds.SRAMSweepInfo, design, sweep_type_inputs)
+    #     else:
+    #         # If we are either doing RTL or VLSI sweep then we should copy over the source RTL to our project tree
+    #         # Check to see if the RTL was passed in via CLI params
+    #         # Priority of getting to RTL + HDL search Paths for RTL
+    #         # 1. Conglomerated CLI/Conf ( asic_dse_conf["flow_conf_fpath"] ) -> sweep_config["base_config_path"] 
+    #         if asic_dse_conf.get("flow_conf_fpaths") and len(asic_dse_conf["flow_conf_fpaths"]) == 1:
+    #             base_config = parse_config(asic_dse_conf.get("flow_conf_fpaths")[0])
+    #         else:                
+    #             base_config = parse_config(design.get("base_config_path"))
+            
+    #         # If any HDL files currently exist in base config they will be here
+    #         base_conf_input_files = base_config.get("synthesis.inputs.input_files")
+
+    #         #if HDL path coming from CLI
+    #         if common_asic_flow.hdl_path:
+    #             exts = ['.v','.sv','.vhd',".vhdl", ".vh", ".svh"]
+    #             _, hdl_search_paths = rec_get_flist_of_ext(common_asic_flow.hdl_path, exts)
+    #         else:
+    #             sw_conf_hdl_paths = design.get("hdl_dpath")
+    #             if sw_conf_hdl_paths:
+    #                 hdl_search_paths = sw_conf_hdl_paths
+    #             elif base_conf_input_files:
+    #                 hdl_search_paths = None
+    #             else:
+    #                 # <TAG> <VALIDATION>
+    #                 raise Exception("ERROR: No method of initializing source HDL files provided")
+            
+    #         # Priority of Copying RTL from user inputs to project tree
+    #         # 1. Search for RTL inside of user provided HDL search paths 
+    #         #   a. Priority order: CLI -> base_config["synthesis.inputs.hdl_search_paths"] -> base_config["synthesis.inputs.input_files"] if equivalent files we do a diff to make sure they are the same, if not equal we copy them over
+    #         # Priority of HDL search paths:
+    #         # 1. Conglom CLI/Conf (common_asic_flow.hdl_path) -> base_config["synthesis.inputs.hdl_search_paths"]
+    #         if hdl_search_paths:
+    #             # Is assumed sanitized by the parse_config (ie path exists)
+    #             rtl_src_dpath = find_common_root_dir(hdl_search_paths)
+    #             # update the common_asic_flow.hdl_path with newly found common root RTL directory
+    #             common_asic_flow.hdl_path = rtl_src_dpath
+
+    #             rtl_dst_tree: rg_ds.Tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
+    #             rtl_dst_tree.scan_dir = True
+    #             rtl_dst_dpath = rtl_dst_tree.path
+    #             # Copy tree recursivley to project tree, just including all files assuming they will be part of the RTL we want, possibly could filter for specific files in the future
+    #             shutil.copytree(rtl_src_dpath, rtl_dst_dpath, dirs_exist_ok=True)
+    #             rtl_dst_tree.update_tree()
+    #         else:
+    #             # Our RTL is coming from the base config input_files
+    #             rtl_dst_tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
+    #             for fpath in base_conf_input_files:
+    #                 # If we don't find a matching file in our rtl.src dir we will copy what exists in our conf over
+    #                 if not rec_find_fpath(rtl_dst_tree.path, os.path.basename(fpath)):
+    #                     shutil.copy(fpath, rtl_dst_tree.path)
+
+    #         # Setting Top Lvl if unset or invalid in common asic flow
+    #         if not common_asic_flow.top_lvl_module:
+    #             # update value in common to reflect correct top lvl
+    #             # First we try to get the top module from the base config file (if it exists)
+    #             # Try to get the top_lvl_module of design either from the base config file or the sweep config file (if either exist)
+    #             base_conf_top_lvl_mod: str = base_config.get("synthesis.inputs.top_module")
+    #             sweep_top_lvl_mod: str = design.get("top_lvl_module")
+    #             # If top_lvl_module is specified in both the base config and sweep config files we need to make sure they are the same
+    #             if base_conf_top_lvl_mod and sweep_top_lvl_mod:
+    #                 if base_conf_top_lvl_mod != sweep_top_lvl_mod:
+    #                     # <TAG> <VALIDATION>
+    #                     print("ERROR: Top level module mismatch between base config and sweep config, sweep top lvl module can only be specified from one of these locations")
+    #                     sys.exit(1)
+    #                 else:
+    #                     # If they are the same we can set the top_lvl_module to either one
+    #                     common_asic_flow.top_lvl_module = base_conf_top_lvl_mod
+    #             # If only the sweep config file has the top_lvl_module we set it to that
+    #             elif sweep_top_lvl_mod:
+    #                 common_asic_flow.top_lvl_module = sweep_top_lvl_mod
+    #             # If only the base config file has the top_lvl_module we set it to that
+    #             elif base_conf_top_lvl_mod:
+    #                 common_asic_flow.top_lvl_module = base_conf_top_lvl_mod
+    #             # If neither exist we throw an error
+    #             else:
+    #                 # <TAG> <VALIDATION>
+    #                 print("ERROR: Top level module not specified in either the base config or sweep config file")
+    #                 sys.exit(1)
+            
+    #         # if common_asic_flow.top_lvl_module and common_asic_flow.hdl_path:
+                
+
+    #         # If the base config does not have 'synthesis.inputs.top_module' or 'synthesis.inputs.input_files' set
+    #         #    we force the sweep file to specify them, ideally we could also specify them from cli args as well (but things get complicated)
+    #         # validate_keys: List[str] = ["synthesis.inputs.top_module", f"synthesis.inputs.input_files"]
+    #         # # If key is empty list | None | unspecified in conf file (shorthand)
+    #         # required_keys: List[str] = [ key for key in validate_keys if not base_config.get(key) ]
+    #         # for key in required_keys:
+    #         #     if getattr(design_sweep, key) == None:
+    #         #         raise ValueError(f"{key} must be set in either {design_sweep.base_config_path} or {asic_dse.sweep_conf_fpath}")
+
+    #         if design.get("type") == "rtl_params":
+    #             sweep_type_info = init_dataclass(rg_ds.RTLSweepInfo, design, sweep_type_inputs)
+    #         # elif design["type"] == "vlsi_params":
+    #         #     sweep_type_info = init_dataclass(rg_ds.VLSISweepInfo, design, sweep_type_inputs)
+            
+    #         design_inputs = {}
+    #         # design_inputs["type_info"] = sweep_type_info
+
+    #         # Pass in the parsed sweep config and strip out the "shared" hierarchy tags
+    #         design_sweep_infos.append(
+    #             init_dataclass(
+    #                 rg_ds.DesignSweepInfo, 
+    #                 {**design, **strip_hier(sweep_config, strip_tag="shared")},
+    #                 design_inputs,
+    #                 rg_ds
+    #             )
+    #         )
 
     #  __   ___    ___ ___   ___ _    _____      _____ 
     #  \ \ / / |  / __|_ _| | __| |  / _ \ \    / / __|
@@ -2071,44 +2401,89 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
         asic_dse_conf["flow_conf_fpaths"],
     )
 
+
+    # Vars that could come from different sources
+    out_tree_name: str = None
     # Top level module init
     if asic_dse_mode.vlsi.enable:
         if asic_dse_mode.vlsi.flow == "hammer":
-            if top_lvl_valid:
-                top_lvl_module: str = common_asic_flow.top_lvl_module
-            else:
-                top_lvl_module: str = hammer_flow.hammer_driver.database.get_setting("synthesis.inputs.top_module")
+            if not top_lvl_valid:
                 # update value in common asic flow to reflect the correct top lvl
-                common_asic_flow.top_lvl_module = top_lvl_module
+                common_asic_flow.top_lvl_module = hammer_flow.hammer_driver.database.get_setting("synthesis.inputs.top_module")
         elif asic_dse_mode.vlsi.flow == "custom":
-            if top_lvl_valid:
-                top_lvl_module: str = common_asic_flow.top_lvl_module
-            else:
+            if not top_lvl_valid:
                 print("ERROR: input top_lvl_module or hdl_path invalid for custom flow")
                 sys.exit(1)
-        # Assert that the top_lvl_module is not none
-        if top_lvl_module == None:
-            print("ERROR: derived top_lvl_module is None")
-            sys.exit(1)
 
-        # modify the project tree after top level module is found
+        # Assertions that have to be valid by this point
+        assert common_asic_flow.top_lvl_module != None, "ERROR: top_lvl_module is None"
+        out_tree_name = common_asic_flow.top_lvl_module
+    elif asic_dse_mode.sweep_gen:
+        if design_sweep_info.type != "sram":
+            assert design_sweep_info.top_lvl_module != None, "ERROR: top_lvl_module is None"
+            out_tree_name = design_sweep_info.top_lvl_module
+    
+    # Its ok for the common_asic_flow.hdl_path to be None if all files are already specified in the design config file
+    # modify the project tree after top level module is found
+    
+    # Design out tree init
+    if common.project_name != None and out_tree_name != None:
         design_out_tree_copy = copy.deepcopy(design_out_tree)
-        design_out_tree_copy.update_tree_top_path(new_path = top_lvl_module, new_tag = top_lvl_module)
+        design_out_tree_copy.update_tree_top_path(new_path = out_tree_name, new_tag = out_tree_name)
         # Append to project tree
         common.project_tree.append_tagged_subtree(f"{common.project_name}.outputs", design_out_tree_copy, is_hier_tag = True) # append our asic_dse outputs
+        asic_dse_inputs["design_out_tree"] = design_out_tree_copy
 
-    # Object dir init
+
+    # Object dir init (requires above project tree initialization)
     if asic_dse_mode.vlsi.enable:
-        obj_dir_path: str = init_asic_obj_dir(common, top_lvl_module)
+        obj_dir_path: str = init_asic_obj_dir(
+            common = common, 
+            top_lvl_module = common_asic_flow.top_lvl_module
+        )
         # update value in common to reflect correct obj dir
         common.obj_dir = obj_dir_path
         if asic_dse_mode.vlsi.flow == "hammer":
             hammer_flow.hammer_driver.obj_dir = obj_dir_path # TODO use the common.obj through flow instead of this 
+    elif asic_dse_mode.sweep_gen:
+        obj_dir_path: str
+        if design_sweep_info.type == "sram":
 
-    # Initializations common to all modes of asic flow
-    design_out_tree_copy = copy.deepcopy(design_out_tree) 
-    asic_dse_inputs["design_out_tree"] = design_out_tree_copy
-    
+            # TODO push this back into the init_asic_obj_dir function
+            # case in which we are generating srams, there is no output tree so we have some custom logic to determine obj directory
+            # out_dir = common.project_tree.search_subtrees("shared_resources.sram_lib.obj_dirs", is_hier_tag = True)[0].path
+            obj_dir_path: str = init_asic_obj_dir(
+                common = common,
+                out_tree = common.project_tree.search_subtrees(
+                    "shared_resources.sram_lib.obj_dirs", 
+                    is_hier_tag = True
+                )[0],
+                sram_gen_flag = True,
+            )
+            # if common.manual_obj_dir:
+            #     obj_dir_path = common.manual_obj_dir
+            # else:
+            #     obj_dir_path = os.path.join(out_dir, f"sram_gen-{rg_ds.create_timestamp()}")
+            #     os.makedirs(obj_dir_path, exist_ok = True)
+            
+            # obj_dname = os.path.basename(obj_dir_path)
+            # # This will always be at consistent project path
+            # project_obj_dpath = os.path.join(out_dir, obj_dname)
+            # if common.manual_obj_dir:
+            #     # Check to see if symlink already points to the correct location
+            #     if os.path.islink(project_obj_dpath) and os.readlink(project_obj_dpath) == obj_dir_path:
+            #         rad_gen_log(f"Symlink already exists @ {project_obj_dpath}", rad_gen_log_fd)
+            #     else:
+            #         os.symlink(obj_dir_path, project_obj_dpath)
+        else:
+            obj_dir_path: str = init_asic_obj_dir(
+                common = common, 
+                top_lvl_module = design_sweep_info.top_lvl_module, 
+                sweep_flag = True
+            )
+        # update value in common to reflect correct obj dir
+        common.obj_dir = obj_dir_path
+
     # By default set the result search path to the design output path, possibly could be changed in later functions if needed
     asic_dse_inputs["result_search_path"] = common.project_tree.search_subtrees(f'projects', is_hier_tag = True)[0].path
 
@@ -2120,7 +2495,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
         "mode": asic_dse_mode,
         "stdcell_lib": stdcell_lib,
         "scripts": scripts,
-        "design_sweep_infos": design_sweep_infos,
+        "design_sweep_info": design_sweep_info,
         "asic_flow_settings": hammer_flow,
         "custom_asic_flow_settings": custom_asic_flow_settings,
         "common_asic_flow": common_asic_flow, 
@@ -2148,6 +2523,8 @@ def init_coffe_structs(coffe_conf: Dict[str, Any], common: rg_ds.Common) -> rg_d
     param_dict = yaml.safe_load(fpga_arch_conf_str)
     fpga_arch_conf = load_arch_params(clean_path(coffe_conf["fpga_arch_conf_path"]), param_dict)
     
+    # Set common obj dir
+    common.obj_dir = clean_path(coffe_conf["fpga_arch_conf_path"])
 
     # coffe_conf["common"].project_tree.append_tagged_subtree("output", rg_ds.Tree(os.path.basename(os.path.splitext(fpga_arch_conf["arch_out_folder"])[0]), tag="coffe.output"))
     if "hb_flows_conf_path" in coffe_conf.keys() and coffe_conf["hb_flows_conf_path"] != None:
@@ -2188,7 +2565,6 @@ def init_coffe_structs(coffe_conf: Dict[str, Any], common: rg_ds.Common) -> rg_d
         "hardblocks": hardblocks,
         "common": common,
     }
-    # json.dump(coffe_conf, open("coffe_conf_test.json", "w"), indent=4)
     coffe_info = init_dataclass(rg_ds.Coffe, coffe_inputs, coffe_conf)
     return coffe_info
 
@@ -2206,7 +2582,6 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any], common: rg_ds.Common) -> rg_d
             Initialized IC3D data structure which can be used to legally execute any mode of operation in the ic_3d subtool.
 
     """
-
 
     # Add ic_3d specific trees to common
 
@@ -2455,11 +2830,14 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any], common: rg_ds.Common) -> rg_d
 
     # Directory structure info
     sp_info = rg_ds.SpInfo(
-        top_dir = ic_3d_conf["common"].rad_gen_home_path
+        top_dir = common.rad_gen_home_path
     )
 
+    # Set common object directory
+    common.obj_dir = sp_info.sp_dir
+
     ic3d_inputs = {
-        "common": ic_3d_conf["common"],
+        "common": common,
         "args": args,
         # BUFFER DSE STUFF
         "design_info": design_info,
@@ -2486,8 +2864,6 @@ def init_ic_3d_structs(ic_3d_conf: Dict[str, Any], common: rg_ds.Common) -> rg_d
         "pdn_sim_settings": pdn_sim_settings,
         "design_pdn": design_pdn,
     }
-
-
 
     ic_3d_info = init_dataclass(rg_ds.Ic3d, ic3d_inputs)
     return ic_3d_info

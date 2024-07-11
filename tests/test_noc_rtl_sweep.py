@@ -148,8 +148,8 @@ def noc_sw_pt_asic_flow_tb(
         is_hier_tag = True,
     )[0].path
     subtool_fields: dict = {
-        "common_asic_flow__hdl_path": noc_rtl_src_dpath,
-        "common_asic_flow__top_lvl_module": top_lvl_module,
+        "hdl_dpath": noc_rtl_src_dpath,
+        "top_lvl_module": top_lvl_module,
     } 
     rg_args = tests_common.gen_hammer_flow_rg_args(
         hammer_flow_template = hammer_flow_template,

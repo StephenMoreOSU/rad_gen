@@ -14,3 +14,5 @@ vlsi.core:
   #technology
   technology: asap7
   max_threads: 4
+
+vlsi.technology.placement_site: asap7sc7p5t

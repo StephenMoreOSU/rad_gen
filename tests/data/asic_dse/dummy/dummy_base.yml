@@ -11,7 +11,8 @@ synthesis:
 # place and route settings
 par.innovus:
   floorplan_mode: "manual"
-  floorplan_script_contents: "create_floorplan -core_margins_by die -flip f -die_size_by_io_height max -site asap7sc7p5t -stdcell_density_size {1.0 0.7 10 10 10 10}"
+  floorplan_script_contents: "create_floorplan -core_margins_by die -flip f -die_size_by_io_height max -site ${vlsi.technology.placement_site} -stdcell_density_size {1.0 0.7 10 10 10 10}"
+  floorplan_script_contents_meta: subst
   design_flow_effort: "express"
 
 vlsi.inputs:

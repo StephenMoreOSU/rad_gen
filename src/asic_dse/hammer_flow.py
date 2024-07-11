@@ -242,7 +242,18 @@ def write_pt_timing_script(asic_dse: rg_ds.AsicDSE):
     
     # report timing / power commands
     report_timing_cmds = [
-        "report_timing > " + os.path.join(report_path,"timing.rpt"),
+        "report_timing \
+        -crosstalk_delta \
+        -max_paths 100 \
+        -pba_mode exhaustive \
+        -delay max \
+        -nosplit \
+        -input \
+        -net \
+        -transition_time \
+        -path_type full_clock_expanded \
+        > " + os.path.join(report_path,"timing.rpt"), 
+        # "report_timing > " + os.path.join(report_path,"timing.rpt"),
         "report_global_timing > " + os.path.join(unparse_report_path, "global_timing.rpt"),
         "report_clock -skew -attribute > " + os.path.join(unparse_report_path, "clock_timing.rpt"),
         "report_analysis_coverage > " + os.path.join(unparse_report_path, "analysis_coverage.rpt"),
@@ -257,6 +268,22 @@ def write_pt_timing_script(asic_dse: rg_ds.AsicDSE):
     clk_pin = asic_dse.asic_flow_settings.hammer_driver.database.get_setting("vlsi.inputs.clocks")[0]["name"]
     verilog_netlists = " ".join(asic_dse.asic_flow_settings.hammer_driver.database.get_setting("timing.inputs.input_files"))
     #backannotate into primetime
+
+    period = asic_dse.asic_flow_settings.hammer_driver.database.get_setting("vlsi.inputs.clocks")[0]["period"]
+    clock_fac = 1.0
+    if "us" in period:
+        clock_fac = 1e6 * clock_fac
+    elif "ns" in period:
+        clock_fac = 1e3 * clock_fac
+    elif "ps" in period:
+        clock_fac = 1.0 * clock_fac
+    else:
+        raise ValueError("Clock period units not recognized: us, ns, ps are supported")
+    
+    clk_period_ps = float(asic_dse.common.res.decimal_re.search(period).group(0)) * clock_fac
+    if clk_period_ps == 0:
+        # Just make the clock period 1 ps if we are targeting fastest possible clk freq
+        clk_period_ps = 1
     #This part should be reported for all the modes in the design.
     file_lines = [
         "set sh_enable_page_mode true",
@@ -271,6 +298,10 @@ def write_pt_timing_script(asic_dse: rg_ds.AsicDSE):
         "link",
         #set clock constraints (this can be done by defining a clock or specifying an .sdc file)
         f"read_sdc -echo {pt_outpath}/pt.sdc",
+        # Sometimes there are clocks that are not tied to a clock we define in primetime (not sure why)
+        f"set timing_input_port_default_clock true", # This constrains input ports by the clk period
+        f"set clk_pins [get_pins */CLK]",
+        f"create_clock $clk_pins -period {clk_period_ps} -waveform {{0.0 {clk_period_ps/2.0}}}",
         "update_timing -full",
         "check_timing -verbose > " + os.path.join(unparse_report_path,'check_timing.rpt'),
         #read constraints file
@@ -362,11 +393,19 @@ def run_hammer_stage(asic_flow: rg_ds.HammerFlow, flow_stage: str, config_paths:
 # ██║  ██║██║  ██║██████╔╝    ╚██████╔╝███████╗██║ ╚████║    ╚██████╔╝   ██║   ██║███████╗███████║
 # ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝      ╚═════╝ ╚══════╝╚═╝  ╚═══╝     ╚═════╝    ╚═╝   ╚═╝╚══════╝╚══════╝
 
-def mod_n_write_template_config_file(hdl_dpath: str, top_lvl_module: str, mod_conf_out_fpath: str, template_conf_fpath: str = None, template_conf: dict = None):
+def mod_n_write_config_file(
+    hdl_dpath: str, 
+    top_lvl_module: str, 
+    mod_conf_out_fpath: str, 
+    template_conf_fpath: str = None, 
+    template_conf: dict = None
+) -> None:
     if template_conf_fpath != None and template_conf != None:
         raise ValueError("Both template_conf_fpath and template_conf cannot be specified")
     elif template_conf_fpath == None and template_conf == None:
         raise ValueError("Either template_conf_fpath or template_conf must be specified")
+    
+
     
     # recursively get all files matching extension in the design directory
     exts = ['.v','.sv','.vhd',".vhdl"]
@@ -417,7 +456,7 @@ def modify_config_file(asic_dse: rg_ds.AsicDSE) -> str:
     """
     # recursively get all files matching extension in the design directory
     exts = ['.v','.sv','.vhd',".vhdl"]
-    design_files, design_dirs = rg_utils.rec_get_flist_of_ext(asic_dse.common_asic_flow.hdl_path, exts)
+    design_files, design_dirs = rg_utils.rec_get_flist_of_ext(asic_dse.common_asic_flow.hdl_dpath, exts)
 
     # with open(asic_dse_settings.asic_flow_settings.config_path, 'r') as yml_file:
         # design_config = yaml.safe_load(yml_file)
@@ -554,7 +593,7 @@ def edit_rtl_proj_params(asic_dse: rg_ds.AsicDSE, rtl_params: Dict[str, Any], ba
     mod_config_paths = []
     # p_val is a list of parameter sweep values
     for p_name,p_vals in rtl_params.items():
-        # TODO FIXME this hacky conditional seperating print params vs edit params
+        # TODO FIXME this hacky conditional seperating printed params vs edited params
         if(len(p_vals) > 0 or isinstance(p_vals, dict) ):
             # print(p_name)
             if(isinstance(p_vals,dict)):
@@ -615,7 +654,7 @@ def read_in_rtl_proj_params(asic_dse: rg_ds.AsicDSE, rtl_params: Dict[str, Any],
     # Find all parameters which will be used in the design (ie find top level module rtl, parse include files top to bottom and get those values )
     """ FIND TOP LEVEL MODULE IN RTL FILES """
     # TODO fix this, if there are multiple instantiations of top level in same directory, there could be a problem
-    grep_out = sp.run(["grep","-R",top_level_mod,rtl_dir_path],stdout=sp.PIPE)
+    grep_out = sp.run(["grep", "-R", top_level_mod, rtl_dir_path], stdout=sp.PIPE)
     grep_stdout = grep_out.stdout.decode('utf-8')
     top_level_fpath = grep_stdout.split(":")[0]
     """ FIND PARAMS IN TOP LEVEL SEQUENTIALLY """
@@ -837,12 +876,12 @@ def modify_mem_params(mem_params: dict, width: int, depth: int, num_ports: int) 
         mem_params[0]["ports"][1]["address port name"] = "A2"
         mem_params[0]["ports"][1]["address port polarity"] = "active high"
 
-def gen_compiled_srams(asic_dse: rg_ds.AsicDSE, design_id: int, base_config: dict) -> List[ Type[rg_ds.MetaDataclass] ]:
+def gen_compiled_srams(asic_dse: rg_ds.AsicDSE, base_config: dict) -> List[ Type[rg_ds.MetaDataclass] ]:
     rg_sw_pt_drivers: list = []
-    cur_design = asic_dse.design_sweep_infos[design_id]
+    design_sweep_info = asic_dse.design_sweep_info
     mem_idx = 1
     mem_sweep_script_lines = []
-    for mem in cur_design.type_info.mems:
+    for mem in design_sweep_info.sram_params.mems:
         # The path in hammer to directory containing srams.txt file (describes the available macros in the pdk)
         hammer_tech_pdk_dpath =  asic_dse.common.project_tree.search_subtrees(f"hammer.hammer.technology.{asic_dse.stdcell_lib.pdk_name}", is_hier_tag=True)[0].path
         mapping = sram_compiler.compile(hammer_tech_pdk_dpath, mem["rw_ports"], mem["w"], mem["d"])
@@ -856,7 +895,7 @@ def gen_compiled_srams(asic_dse: rg_ds.AsicDSE, design_id: int, base_config: dic
                                             sram_map_info,
                                             rtl_outpath)
         
-        mem_cmd_lines, mem_idx, rg_args = get_hammer_flow_sweep_point_lines(asic_dse, design_id, mem_idx, config_fpath, sram_compiler=True)
+        mem_cmd_lines, mem_idx, rg_args = get_hammer_flow_sweep_point_lines(asic_dse, mem_idx, config_fpath, sram_compiler=True)
         if mem_cmd_lines is None:
             break
         else:
@@ -867,7 +906,17 @@ def gen_compiled_srams(asic_dse: rg_ds.AsicDSE, design_id: int, base_config: dic
     rg_utils.write_out_script(mem_sweep_script_lines, stiched_mem_script_fpath)
     return rg_sw_pt_drivers
 
-def get_hammer_flow_sweep_point_lines(asic_dse: rg_ds.AsicDSE, des_sweep_id: int, sweep_pt_idx: int, mod_flow_conf_fpath: str,  **kwargs) -> Tuple[ None | List[str], None | int, None | Type[rg_ds.MetaDataclass] ]:
+def get_hammer_flow_sweep_point_lines(
+    asic_dse: rg_ds.AsicDSE, 
+    # des_sweep_id: int, 
+    sweep_pt_idx: int, 
+    mod_flow_conf_fpath: str, 
+    **kwargs
+) -> Tuple[ 
+    None | List[str], 
+    None | int, 
+    None | Type[rg_ds.MetaDataclass] 
+]:
     """
         Returns a tuple of lines and (new) sweep_pt_idx to run RAD-Gen for a given sweep point with hammer flow, if no env config files are specified in the sweep config file then None is returned
         asic_dse: AsicDSE object
@@ -875,13 +924,13 @@ def get_hammer_flow_sweep_point_lines(asic_dse: rg_ds.AsicDSE, des_sweep_id: int
         mod_flow_conf_fpath: path to flow config file (possibly) modified in previous stages and used for this sweep point
         sweep_pt_idx: sweep point index for the current sweep (ie one of the points )
     """
-    if asic_dse.design_sweep_infos[des_sweep_id].tool_env_conf_fpaths == None:
+    if not asic_dse.design_sweep_info.tool_env_conf_fpaths:
         rg_utils.rad_gen_log(f"WARN: No tool environment config files specified in {asic_dse.sweep_conf_fpath}, cmd script won't be generated!",rad_gen_log_fd)
         return None, None, None
-    
+
     asic_dse_args = rg_ds.AsicDseArgs(
-        flow_conf_fpaths = asic_dse.design_sweep_infos[des_sweep_id].flow_conf_fpaths + [mod_flow_conf_fpath] if asic_dse.design_sweep_infos[des_sweep_id].flow_conf_fpaths != None else [mod_flow_conf_fpath],
-        tool_env_conf_fpaths = asic_dse.design_sweep_infos[des_sweep_id].tool_env_conf_fpaths,
+        flow_conf_fpaths = asic_dse.design_sweep_info.flow_conf_fpaths + [mod_flow_conf_fpath] if asic_dse.design_sweep_info.flow_conf_fpaths != None else [mod_flow_conf_fpath],
+        tool_env_conf_fpaths = asic_dse.design_sweep_info.tool_env_conf_fpaths,
         **kwargs
     )
     rad_gen_args = rg_ds.RadGenArgs(
@@ -894,7 +943,7 @@ def get_hammer_flow_sweep_point_lines(asic_dse: rg_ds.AsicDSE, des_sweep_id: int
         f"{rg_cmd} &", # Get the cmd then run in bg so we can run multiple sweeps in parallel
         "sleep 0.01", # Sleep for 0.01 seconds to make sure directories which are uniquified with a datetime tag are unique TODO fix
     ]
-    if sweep_pt_idx % asic_dse.design_sweep_infos[des_sweep_id].flow_threads == 0 and sweep_pt_idx != 0:
+    if sweep_pt_idx % asic_dse.design_sweep_info.flow_threads == 0 and sweep_pt_idx != 0:
         cmd_lines += ["wait"]
     sweep_pt_idx += 1
 
@@ -905,13 +954,13 @@ def get_hammer_flow_sweep_point_lines(asic_dse: rg_ds.AsicDSE, des_sweep_id: int
 
 
 
-def sram_sweep_gen(asic_dse: rg_ds.AsicDSE, design_id: int) -> List[ Type[rg_ds.MetaDataclass] ]:
+def sram_sweep_gen(asic_dse: rg_ds.AsicDSE) -> List[ Type[rg_ds.MetaDataclass] ]:
     
     rg_sw_pt_drivers: list = []
     # get current sweep, base config & RTL associated with it
-    cur_design = asic_dse.design_sweep_infos[design_id]
-    base_config = rg_utils.parse_config(cur_design.base_config_path)
-    rg_sw_pt_drivers += gen_compiled_srams(asic_dse, design_id, base_config) #,base_config, sanitized_design)
+    design_sweep_info = asic_dse.design_sweep_info
+    base_config = rg_utils.parse_config(design_sweep_info.base_config_path)
+    rg_sw_pt_drivers += gen_compiled_srams(asic_dse, base_config)
     mem_params = rg_utils.parse_json( base_config["vlsi.inputs.sram_parameters"] )
 
 
@@ -921,9 +970,9 @@ def sram_sweep_gen(asic_dse: rg_ds.AsicDSE, design_id: int) -> List[ Type[rg_ds.
     sweep_script_lines = []
     sweep_pt_idx = 1
     # Sweep over all widths and depths for SRAMs in the sweep config file  
-    for rw_port in cur_design.type_info.rw_ports:
-        for depth in cur_design.type_info.depths:
-            for width in cur_design.type_info.widths:
+    for rw_port in design_sweep_info.sram_params.rw_ports:
+        for depth in design_sweep_info.sram_params.depths:
+            for width in design_sweep_info.sram_params.widths:
                 """ MODIFIYING MEM CONFIG JSON FILES """
                 # If we want to iterate through and keep an original reference set of configs we need to use deepcopy on the dict
                 # This concept is very annoying as when assigning any variable to a dict you are actually just creating a reference to the dict (Very unlike C) :(
@@ -960,7 +1009,7 @@ def sram_sweep_gen(asic_dse: rg_ds.AsicDSE, design_id: int) -> List[ Type[rg_ds.
                 # Modify the parameters for SRAM_ADDR_W and SRAM_DATA_W and create a copy of the base sram 
                 # TODO find a better way to do this rather than just creating a ton of files, the only thing I'm changing are 2 parameters in rtl
                 # I/O RD Logging
-                with open(cur_design.type_info.sram_rtl_template_fpath, 'r') as fd:
+                with open(design_sweep_info.sram_params.sram_rtl_template_fpath, 'r') as fd:
                     base_rtl = fd.read()
                 mod_sram_rtl = copy.deepcopy(base_rtl)
                 # Modify the parameters in rtl and create new dir for the sram
@@ -1038,7 +1087,7 @@ def sram_sweep_gen(asic_dse: rg_ds.AsicDSE, design_id: int) -> List[ Type[rg_ds.
                 # Write the modified base_config file to a new file
                 mod_flow_conf_fpath = os.path.join(
                     asic_dse.common.project_tree.search_subtrees("shared_resources.sram_lib.configs.gen", is_hier_tag = True)[0].path,
-                    os.path.splitext(os.path.basename(cur_design.base_config_path))[0] + f'_{mod_mem_params[0]["name"]}.json'
+                    os.path.splitext(os.path.basename(design_sweep_info.base_config_path))[0] + f'_{mod_mem_params[0]["name"]}.json'
                 )
 
                 # I/O WR Logging
@@ -1050,7 +1099,7 @@ def sram_sweep_gen(asic_dse: rg_ds.AsicDSE, design_id: int) -> List[ Type[rg_ds.
                 #     yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
                 
                 # Create a script cmd to run this sram compiler generated config through the tool
-                cmd_lines, sweep_pt_idx, rg_args = get_hammer_flow_sweep_point_lines(asic_dse, design_id, sweep_pt_idx, mod_flow_conf_fpath, sram_compiler=True)
+                cmd_lines, sweep_pt_idx, rg_args = get_hammer_flow_sweep_point_lines(asic_dse, sweep_pt_idx, mod_flow_conf_fpath, sram_compiler=True)
                 if cmd_lines == None:
                     continue
                 rg_sw_pt_drivers.append(rg_args)
@@ -1265,6 +1314,7 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
             timing_path_text = timing_rpt_text
             while cadence_timing_grab_re.search(timing_rpt_text):
                 timing_dict = {}
+                clock_start_stop = None
                 timing_path_text = cadence_timing_grab_re.search(timing_rpt_text).group(0)
                 for line in timing_path_text.split("\n"):
                     if cadence_timing_setup_re.search(line):
@@ -1273,16 +1323,35 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
                         timing_dict["Arrival"] = float(asic_dse.common.res.decimal_re.findall(line)[0])
                     elif "Slack" in line:
                         timing_dict["Slack"] = float(asic_dse.common.res.signed_dec_re.findall(line)[0])
-                    if "Setup" in timing_dict and "Arrival" in timing_dict:
-                        timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
-
+                    elif "Data Path" in line:
+                        timing_dict["Data Path"] = float(asic_dse.common.res.decimal_re.findall(line)[0])
+                    elif "Clock Edge" in line:
+                        clock_start_stop = [float(clk_bnd) for clk_bnd in asic_dse.common.res.decimal_re.findall(line)]
+                    # Ready to set the delay for innovus
+                    if flow_stage.tag == "syn":
+                        if all(key in timing_dict for key in ["Setup", "Arrival"]):
+                            timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
+                    elif flow_stage.tag == "par":
+                        if all(key in timing_dict for key in ["Setup","Arrival","Data Path"]) and clock_start_stop:
+                            # If the clock start and stop are both 0 then we can use Data Path for delay 
+                            if all(clk_bnd == 0 for clk_bnd in clock_start_stop):
+                                timing_dict["Delay"] = timing_dict["Data Path"]
+                            # But its more accurate to add arrival and setup time so if we can we will
+                            else:
+                                timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
                 report_list.append(timing_dict)
                 if summarize:
                     break
                 timing_rpt_text = timing_rpt_text.replace(timing_path_text,"")
         elif flow_stage.tool == "synopsys":
             timing_dict = {}
+            start_flag = False
             for line in timing_rpt_text.split("\n"):
+                if "Startpoint" in line:
+                    start_flag = True
+                if not start_flag:
+                    continue
+
                 if "library setup time" in line:
                     timing_dict["Setup"] = float(asic_dse.common.res.decimal_re.findall(line)[0])
                 elif "data arrival time" in line:
@@ -1291,21 +1360,12 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
                     timing_dict["Slack"] = float(asic_dse.common.res.signed_dec_re.findall(line)[0])
                 elif "Setup" in timing_dict and "Arrival" in timing_dict:
                     timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
+                # If there are multiple paths break at the top as it will be the most critical
+                # TODO change this to parse all the paths like cadence currently does
+                if all(key in timing_dict for key in ["Setup","Arrival", "Slack", "Delay"]):
+                    break
                 # This indicates taht all lines have been read in and we can append the timing_dict
             report_list.append(timing_dict)
-        # elif flow_stage.tool == "synopsys":
-        #     timing_dict = {}
-        #     for line in timing_rpt_text.split("\n"):
-        #         if "library setup time" in line:
-        #             timing_dict["Setup"] = float(asic_dse.common.res.decimal_re.findall(line)[0])
-        #         elif "data arrival time" in line:
-        #             timing_dict["Arrival"] = float(asic_dse.common.res.decimal_re.findall(line)[0])
-        #         elif "slack" in line:
-        #             timing_dict["Slack"] = float(asic_dse.common.res.signed_dec_re.findall(line)[0])
-        #         elif "Setup" in timing_dict and "Arrival" in timing_dict:
-        #             timing_dict["Delay"] = timing_dict["Arrival"] + timing_dict["Setup"]
-        #         # This indicates taht all lines have been read in and we can append the timing_dict
-        #     report_list.append(timing_dict)
     elif(rep_type == "power"):
         power_rpt_text = open(report_path,"r").read()
         # TODO should have a section for subtools being used in stages of flow as dc_shell can do timing analysis but doesnt output primetime format
@@ -1646,7 +1706,7 @@ def gen_reports(asic_dse: rg_ds.AsicDSE, design: rg_ds.DesignSweepInfo , top_lev
             # looping through hdl search paths
             for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
                 if "param_sweep_headers" in path:
-                    param_hdr_name = os.path.basename(design.type_info.base_header_path)
+                    param_hdr_name = os.path.basename(design.type_info.base_header_fpath)
                     params = read_in_rtl_proj_params(asic_dse, design.type_info.params, top_level_mod, design.rtl_dir_path, os.path.join(path, param_hdr_name))
                     if params != None and params != []:
                         report_dict["rtl_params"] = params
@@ -1688,7 +1748,7 @@ def gen_parse_reports(asic_dse: rg_ds.AsicDSE, report_search_dir: str, top_level
 def write_virtuoso_gds_to_area_script(asic_dse: rg_ds.AsicDSE, gds_fpath: str):
     # skill_fname = "get_area.il"
     skill_script_lines = [
-        f"system(\"strmin -library {asic_dse.stdcell_lib.cds_lib} -strmFile {gds_fpath} -logFile strmIn.log\")",
+        f"system(\"strmin -library {asic_dse.stdcell_lib.cds_lib} -strmFile {gds_fpath} -writeMode noOverwrite -logFile strmIn.log\")",
         f'cv = dbOpenCellViewByType("asap7_TechLib" "TOPCELL" "layout")',
         "print(cv~>bBox)",
     ]
@@ -1747,13 +1807,18 @@ def run_asap7_gds_scaling_scripts(rad_gen: rg_ds.AsicDSE, obj_dir: str, top_lvl_
     if os.path.isfile(gds_file):
         if not os.path.exists(os.path.join(obj_dir,rad_gen.common.report.gds_area_fname)):
             write_virtuoso_gds_to_area_script(rad_gen, gds_file)
-            for ext in ["csh","sh"]:
+            for ext in ["csh"]:
                 permission_cmd = "chmod +x " +  os.path.join(rad_gen.stdcell_lib.pdk_rundir_path,f'{rad_gen.scripts.gds_to_area_fname}.{ext}')
                 rg_utils.run_shell_cmd_no_logs(permission_cmd)
+            prev_cwd = os.getcwd()
+            os.chdir(rad_gen.stdcell_lib.pdk_rundir_path)
             rg_utils.run_csh_cmd(os.path.join(rad_gen.stdcell_lib.pdk_rundir_path,f"{rad_gen.scripts.gds_to_area_fname}.csh"))
+            os.chdir(prev_cwd)
             gds_area = parse_gds_to_area_output(rad_gen, obj_dir)
         else:
             gds_area = get_gds_area_from_rpt(rad_gen, obj_dir)
+    else:
+        raise FileNotFoundError(f"Could not find gds file at {gds_file}")
 
     return gds_area
 
@@ -1860,7 +1925,7 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
     
     if asic_dse.asic_flow_settings.hammer_driver.database.get_setting("vlsi.core.technology") == "asap7":
         # If the user doesn't specify a virtuoso setup script, then we can assume we cant run virtuoso for gds scaling
-        if asic_dse.scripts.virtuoso_setup_path != None:
+        if asic_dse.scripts.virtuoso_setup_path != None and asic_dse.stdcell_lib.pdk_rundir_path != None:
             # If using asap7 run the gds scaling scripts
             flow_report["gds_area"] = run_asap7_gds_scaling_scripts(asic_dse, asic_dse.asic_flow_settings.hammer_driver.obj_dir, asic_dse.asic_flow_settings.hammer_driver.database.get_setting("par.inputs.top_module"))
         else:

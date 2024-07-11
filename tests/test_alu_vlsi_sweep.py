@@ -91,7 +91,7 @@ def test_alu_vlsi_sweep_gen(alu_vlsi_sweep_gen_tb, request):
     # BELOW ARE ASSUMPTIONS THAT WILL BE CHANGED IF THE SWEEP CONFIG FILE CHANGES
     # THEY AFFECT ASSERTIONS!
     proj_tree: rg_ds.Tree
-    _, proj_tree, _ = alu_vlsi_sweep_gen_tb
+    _, proj_tree, rg_args = alu_vlsi_sweep_gen_tb
 
     # TODO find a way to get this information from the sweep generation itself?
     # Assumptions from input sweep config file
@@ -102,21 +102,24 @@ def test_alu_vlsi_sweep_gen(alu_vlsi_sweep_gen_tb, request):
 
     # Test specific variables
     proj_name: str = "alu"
-    num_sweep_points: int = 2
 
     # Get dpath which sweep config files are generated
     sw_conf_dpath: str = proj_tree.search_subtrees(f"projects.{proj_name}.configs.gen", is_hier_tag=True)[0].path
 
     # Expected VLSI sweep points (will be in the name of generated conf files)
     # <base_conf_name>_<param>_<val>.yml -> 'dummy_base_period_0.0.yml'
-    expect_vlsi_sw_pts = OrderedDict(
+    custom_map_expect_vlsi_sw_pts = OrderedDict(
         [
-            ("period", ['0.0', '2.0']),
+            ("period", ['0 ns', '0 ns', '2 ns']),
+            ("core_util", [0.5, 0.7, 0.9]),
+            ("effort", ["express", "standard", "extreme"]) 
         ]
     )
+    num_sweep_points = len(custom_map_expect_vlsi_sw_pts["period"])
+    for vals in custom_map_expect_vlsi_sw_pts.values():
+        assert len(vals) == num_sweep_points
     # Check that the sweep config files were generated
-    assert len(os.listdir(sw_conf_dpath)) == num_sweep_points
-    gen_conf_fpaths, _ = tests_common.get_param_gen_fpaths(expect_vlsi_sw_pts, sw_conf_dpath)
+    gen_conf_fpaths, _ = tests_common.get_param_gen_fpaths(custom_map_expect_vlsi_sw_pts, sw_conf_dpath)
     for gen_conf_fpath in gen_conf_fpaths:
         assert os.path.exists(gen_conf_fpath), f"Generated config file {gen_conf_fpath} does not exist"
 
@@ -132,7 +135,7 @@ def alu_sw_pt_asic_flow_tb(hammer_flow_template) -> rg_ds.RadGenArgs:
     # TODO find a better way to select which sweep point we're evaluating rather than just below hardcoded str
     alu_conf_fpath: str = [
         os.path.join(gen_conf_dpath, fname) 
-            for fname in os.listdir(gen_conf_dpath) if "period_0.0" in fname
+            for fname in os.listdir(gen_conf_dpath) if "period_0ns__core_util_0.7__effort_standard" in fname
     ][0]
     rg_args: rg_ds.RadGenArgs = tests_common.gen_hammer_flow_rg_args(
         hammer_flow_template = hammer_flow_template,

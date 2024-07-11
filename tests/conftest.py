@@ -41,7 +41,7 @@ def create_rg_fixture(
     def parse_fixture(request):
         input_data = request.getfixturevalue(input_fixture)
         rg_args = copy.deepcopy(input_data)
-        rg_args.subtool_args.compile_results = True
+        # rg_args.subtool_args.compile_results = True
         tests_common.write_fixture_json(rg_args, stack_lvl = 7)
         return rg_args
     
@@ -133,8 +133,8 @@ def hammer_flow_template() -> Tuple[rg_ds.RadGenArgs, rg_ds.Tree]:
     asic_dse_args = rg_ds.AsicDseArgs(
         tool_env_conf_fpaths = [tool_env_conf_fpath],
         flow_conf_fpaths = base_configs + [dummy_flow_conf_fpath],
-        common_asic_flow__top_lvl_module = "dummy",
-        common_asic_flow__hdl_path = dummy_rtl_dpath,
+        top_lvl_module = "dummy",
+        hdl_dpath = dummy_rtl_dpath,
         stdcell_lib__pdk_name = "asap7",
         mode__vlsi__flow = "hammer",
         mode__vlsi__run = "serial",
@@ -155,8 +155,8 @@ def hammer_flow_template() -> Tuple[rg_ds.RadGenArgs, rg_ds.Tree]:
     ]
     dummy_asic_flow_args.subtool_args.flow_conf_fpaths = flow_conf_fpaths
     # Remove the rtl path + top_lvl_module
-    dummy_asic_flow_args.subtool_args.common_asic_flow__top_lvl_module = None
-    dummy_asic_flow_args.subtool_args.common_asic_flow__hdl_path = None
+    dummy_asic_flow_args.subtool_args.top_lvl_module = None
+    dummy_asic_flow_args.subtool_args.hdl_dpath = None
     # Remove just_config_init
     dummy_asic_flow_args.just_config_init = False
     # Set all stages of asic flow to run

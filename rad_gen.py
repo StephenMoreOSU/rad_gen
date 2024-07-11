@@ -103,7 +103,7 @@ def main(args: argparse.Namespace | None = None) -> Tuple[ Any | None, rg_ds.Tre
     global log_verbosity
 
     # Get logger into main
-    logger = init_logger()
+    # logger = init_logger()
 
     #Clear rad gen log
     fd = open(rad_gen_log_fd, 'w')
@@ -117,6 +117,12 @@ def main(args: argparse.Namespace | None = None) -> Tuple[ Any | None, rg_ds.Tre
     # If we want to return initialized data structs for a subtool, just return here
     if arg_dict["common.just_config_init"]:
         return rad_gen_info, list(rad_gen_info.values())[0].common.project_tree
+
+    # Before running anything we output the serialized json of our task data structure to the object directory of current run
+    rg_utils.dataclass_2_json(
+        list(rad_gen_info.values())[0], 
+        os.path.join(list(rad_gen_info.values())[0].common.obj_dir, "init_state.json")
+    )
 
     cur_env = os.environ.copy()
 
