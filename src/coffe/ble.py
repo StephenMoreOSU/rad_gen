@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+    This module contains implementations for BLE related circuits, loads, and testbenches.
+"""
+
+
 from __future__ import annotations
 from dataclasses import dataclass, field, InitVar
 

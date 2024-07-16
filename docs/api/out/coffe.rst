@@ -172,6 +172,14 @@ coffe.mux\_subcircuits module
    :undoc-members:
    :show-inheritance:
 
+coffe.new\_ram module
+---------------------
+
+.. automodule:: coffe.new_ram
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 coffe.parsing module
 --------------------
 

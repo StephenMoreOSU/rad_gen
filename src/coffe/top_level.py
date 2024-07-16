@@ -1,230 +1,4 @@
 import os
-
-# def generate_switch_block_top(mux_name: str, gen_r_wire: dict):
-#     """ Generate the top level switch block SPICE file """
-    
-#     # Create directories
-#     if not os.path.exists(mux_name):
-#         os.makedirs(mux_name)  
-#     # Change to directory    
-#     os.chdir(mux_name)  
-    
-#     # get wire information from dict
-#     wire_length = gen_r_wire["len"]
-#     wire_id = gen_r_wire["id"]
-#     # param string default format used by wire
-#     # TODO remove duplicates
-#     p_str = f"_L{wire_length}_uid{wire_id}"
-
-#     switch_block_filename = mux_name + ".sp"
-#     sb_file = open(switch_block_filename, 'w')
-#     sb_file.write(f".TITLE Switch block multiplexer\n\n") 
-    
-#     sb_file.write("********************************************************************************\n")
-#     sb_file.write("** Include libraries, parameters and other\n")
-#     sb_file.write("********************************************************************************\n\n")
-#     sb_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-    
-#     sb_file.write("********************************************************************************\n")
-#     sb_file.write("** Setup and input\n")
-#     sb_file.write("********************************************************************************\n\n")
-#     sb_file.write(".TRAN 1p 8n SWEEP DATA=sweep_data\n")
-#     sb_file.write(".OPTIONS BRIEF=1\n\n")
-#     sb_file.write("* Input signal\n")
-#     sb_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 8n)\n\n")
-
-#     sb_file.write("* Power rail for the circuit under test.\n")
-#     sb_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-#     sb_file.write("V_SB_MUX vdd_sb_mux gnd supply_v\n\n")
-
-    
-#     sb_file.write("********************************************************************************\n")
-#     sb_file.write("** Measurement\n")
-#     sb_file.write("********************************************************************************\n\n")
-#     sb_file.write("* inv_sb_mux_1 delay\n")
-#     sb_file.write(".MEASURE TRAN meas_inv_sb_mux_1_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n")
-#     sb_file.write("+    TARG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.Xsb_mux_driver.n_1_1) VAL='supply_v/2' FALL=1\n")
-#     sb_file.write(".MEASURE TRAN meas_inv_sb_mux_1_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
-#     sb_file.write("+    TARG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.Xsb_mux_driver.n_1_1) VAL='supply_v/2' RISE=1\n\n")
-#     sb_file.write("* inv_sb_mux_2 delays\n")
-#     sb_file.write(".MEASURE TRAN meas_inv_sb_mux_2_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
-#     sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
-#     sb_file.write(".MEASURE TRAN meas_inv_sb_mux_2_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n")
-#     sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n\n")
-#     sb_file.write("* Total delays\n")
-#     sb_file.write(".MEASURE TRAN meas_total_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
-#     sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' FALL=1\n")
-#     sb_file.write(".MEASURE TRAN meas_total_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n")
-#     sb_file.write("+    TARG V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) VAL='supply_v/2' RISE=1\n\n")
-
-#     sb_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(Xrouting_wire_load_2.Xrouting_wire_load_tile_1.Xsb_mux_on_out.n_in) AT=7nn\n\n")
-
-#     sb_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-#     sb_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_SB_MUX) FROM=0ns TO=4ns\n")
-#     sb_file.write(".MEASURE TRAN meas_avg_power PARAM = '-(meas_current/4n)*supply_v'\n\n")
-
-#     sb_file.write("********************************************************************************\n")
-#     sb_file.write("** Circuit\n")
-#     sb_file.write("********************************************************************************\n\n")
-#     sb_file.write(f"Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd {mux_name}_on\n\n")
-#     sb_file.write(f"Xrouting_wire_load_1 n_1_1 n_2_1 n_hang_1 vsram vsram_n vdd gnd vdd_sb_mux vdd routing_wire_load{p_str}\n\n")
-#     sb_file.write(f"Xrouting_wire_load_2 n_2_1 n_3_1 n_hang_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load{p_str}\n\n")
-#     sb_file.write(".END")
-#     sb_file.close()
-    
-#     # Come out of swich block directory
-#     os.chdir("../")
-    
-#     return (mux_name + "/" + mux_name + ".sp")
-    
-    
-def generate_connection_block_top(mux_name, min_len_wire: dict):
-    """ Generate the top level switch block SPICE file """
-    
-    # Create directories
-    if not os.path.exists(mux_name):
-        os.makedirs(mux_name)  
-    # Change to directory    
-    os.chdir(mux_name)
-    
-    # TODO link with other definiions elsewhere, duplicated
-    p_str = f"_L{min_len_wire['len']}_uid{min_len_wire['id']}"
-    subckt_sb_mux_on_str = f"sb_mux{p_str}_on"
-    subckt_routing_wire_load_str =  f"routing_wire_load{p_str}"
-
-    connection_block_filename = mux_name + ".sp"
-    cb_file = open(connection_block_filename, 'w')
-    cb_file.write(".TITLE Connection block multiplexer\n\n") 
-    
-    cb_file.write("********************************************************************************\n")
-    cb_file.write("** Include libraries, parameters and other\n")
-    cb_file.write("********************************************************************************\n\n")
-    cb_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-    
-    cb_file.write("********************************************************************************\n")
-    cb_file.write("** Setup and input\n")
-    cb_file.write("********************************************************************************\n\n")
-    cb_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-    cb_file.write(".OPTIONS BRIEF=1\n\n")
-    cb_file.write("* Input signal\n")
-    cb_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-    
-    cb_file.write("* Power rail for the circuit under test.\n")
-    cb_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-    cb_file.write("V_CB_MUX vdd_cb_mux gnd supply_v\n\n")
-    
-    cb_file.write("********************************************************************************\n")
-    cb_file.write("** Measurement\n")
-    cb_file.write("********************************************************************************\n\n")
-    cb_file.write("* inv_cb_mux_1 delay\n")
-    cb_file.write(".MEASURE TRAN meas_inv_cb_mux_1_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xcb_load_on_1.n_in) VAL='supply_v/2' RISE=1\n")
-    cb_file.write("+    TARG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xcb_load_on_1.Xcb_mux_driver.n_1_1) VAL='supply_v/2' FALL=1\n")
-    cb_file.write(".MEASURE TRAN meas_inv_cb_mux_1_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xcb_load_on_1.n_in) VAL='supply_v/2' FALL=1\n")
-    cb_file.write("+    TARG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xcb_load_on_1.Xcb_mux_driver.n_1_1) VAL='supply_v/2' RISE=1\n\n")
-    cb_file.write("* inv_cb_mux_2 delays\n")
-    cb_file.write(".MEASURE TRAN meas_inv_cb_mux_2_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xcb_load_on_1.n_in) VAL='supply_v/2' FALL=1\n")
-    cb_file.write("+    TARG V(Xlocal_routing_wire_load_1.Xlocal_mux_on_1.n_in) VAL='supply_v/2' FALL=1\n")
-    cb_file.write(".MEASURE TRAN meas_inv_cb_mux_2_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xcb_load_on_1.n_in) VAL='supply_v/2' RISE=1\n")
-    cb_file.write("+    TARG V(Xlocal_routing_wire_load_1.Xlocal_mux_on_1.n_in) VAL='supply_v/2' RISE=1\n\n")
-    cb_file.write("* Total delays\n")
-    cb_file.write(".MEASURE TRAN meas_total_tfall TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xcb_load_on_1.n_in) VAL='supply_v/2' FALL=1\n")
-    cb_file.write("+    TARG V(Xlocal_routing_wire_load_1.Xlocal_mux_on_1.n_in) VAL='supply_v/2' FALL=1\n")
-    cb_file.write(".MEASURE TRAN meas_total_trise TRIG V(Xrouting_wire_load_1.Xrouting_wire_load_tile_1.Xcb_load_on_1.n_in) VAL='supply_v/2' RISE=1\n")
-    cb_file.write("+    TARG V(Xlocal_routing_wire_load_1.Xlocal_mux_on_1.n_in) VAL='supply_v/2' RISE=1\n\n")
-
-    cb_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(Xlocal_routing_wire_load_1.Xlocal_mux_on_1.n_in) AT=3n\n\n")
-    
-    cb_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-    cb_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_CB_MUX) FROM=0ns TO=4ns\n")
-    cb_file.write(".MEASURE TRAN meas_avg_power PARAM = '-(meas_current/4n)*supply_v'\n\n")
-
-    cb_file.write("********************************************************************************\n")
-    cb_file.write("** Circuit\n")
-    cb_file.write("********************************************************************************\n\n")
-    cb_file.write(f"Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd {subckt_sb_mux_on_str}\n")
-    cb_file.write(f"Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd_cb_mux {subckt_routing_wire_load_str}\n")
-    cb_file.write("Xlocal_routing_wire_load_1 n_1_3 n_1_4 vsram vsram_n vdd gnd vdd local_routing_wire_load\n")
-    cb_file.write("Xlut_a_driver_1 n_1_4 n_hang1 vsram vsram_n n_hang2 n_hang3 vdd gnd lut_a_driver\n\n")
-    cb_file.write(".END")
-    cb_file.close()
-
-    # Come out of connection block directory
-    os.chdir("../")
-    
-    return (mux_name + "/" + mux_name + ".sp")
-
-
-def generate_local_mux_top(mux_name, gen_r_wire: dict):
-    """ Generate the top level local mux SPICE file """
-    
-    # Create directories
-    if not os.path.exists(mux_name):
-        os.makedirs(mux_name)  
-    # Change to directory    
-    os.chdir(mux_name)
-    
-    # TODO link with other definiions elsewhere, duplicated
-    p_str = f"_L{gen_r_wire['len']}_uid{gen_r_wire['id']}"
-    subckt_sb_mux_on_str = f"sb_mux{p_str}_on"
-    subckt_routing_wire_load_str =  f"routing_wire_load{p_str}"
-
-
-    connection_block_filename = mux_name + ".sp"
-    local_mux_file = open(connection_block_filename, 'w')
-    local_mux_file.write(".TITLE Local routing multiplexer\n\n") 
-    
-    local_mux_file.write("********************************************************************************\n")
-    local_mux_file.write("** Include libraries, parameters and other\n")
-    local_mux_file.write("********************************************************************************\n\n")
-    local_mux_file.write(".LIB \"../includes.l\" INCLUDES\n\n")
-    
-    local_mux_file.write("********************************************************************************\n")
-    local_mux_file.write("** Setup and input\n")
-    local_mux_file.write("********************************************************************************\n\n")
-    local_mux_file.write(".TRAN 1p 4n SWEEP DATA=sweep_data\n")
-    local_mux_file.write(".OPTIONS BRIEF=1\n\n")
-    local_mux_file.write("* Input signal\n")
-    local_mux_file.write("VIN n_in gnd PULSE (0 supply_v 0 0 0 2n 4n)\n\n")
-    
-    local_mux_file.write("* Power rail for the circuit under test.\n")
-    local_mux_file.write("* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.\n")
-    local_mux_file.write("V_LOCAL_MUX vdd_local_mux gnd supply_v\n\n")
-
-    local_mux_file.write("********************************************************************************\n")
-    local_mux_file.write("** Measurement\n")
-    local_mux_file.write("********************************************************************************\n\n")
-    local_mux_file.write("* inv_local_mux_1 delay\n")
-    local_mux_file.write(".MEASURE TRAN meas_inv_local_mux_1_tfall TRIG V(Xlocal_routing_wire_load_1.Xlocal_mux_on_1.n_in) VAL='supply_v/2' RISE=1\n")
-    local_mux_file.write("+    TARG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-    local_mux_file.write(".MEASURE TRAN meas_inv_local_mux_1_trise TRIG V(Xlocal_routing_wire_load_1.Xlocal_mux_on_1.n_in) VAL='supply_v/2' FALL=1\n")
-    local_mux_file.write("+    TARG V(n_1_4) VAL='supply_v/2' RISE=1\n\n")
-    local_mux_file.write("* Total delays\n")
-    local_mux_file.write(".MEASURE TRAN meas_total_tfall TRIG V(Xlocal_routing_wire_load_1.Xlocal_mux_on_1.n_in) VAL='supply_v/2' RISE=1\n")
-    local_mux_file.write("+    TARG V(n_1_4) VAL='supply_v/2' FALL=1\n")
-    local_mux_file.write(".MEASURE TRAN meas_total_trise TRIG V(Xlocal_routing_wire_load_1.Xlocal_mux_on_1.n_in) VAL='supply_v/2' FALL=1\n")
-    local_mux_file.write("+    TARG V(n_1_4) VAL='supply_v/2' RISE=1\n\n")
-
-    local_mux_file.write(".MEASURE TRAN meas_logic_low_voltage FIND V(n_1_1) AT=3n\n\n")
-
-    local_mux_file.write("* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz.\n")
-    local_mux_file.write(".MEASURE TRAN meas_current INTEGRAL I(V_LOCAL_MUX) FROM=0ns TO=4ns\n")
-    local_mux_file.write(".MEASURE TRAN meas_avg_power PARAM = '-(meas_current/4n)*supply_v'\n\n")
-    
-    local_mux_file.write("********************************************************************************\n")
-    local_mux_file.write("** Circuit\n")
-    local_mux_file.write("********************************************************************************\n\n")
-    local_mux_file.write(f"Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd {subckt_sb_mux_on_str}\n")
-    local_mux_file.write(f"Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd {subckt_routing_wire_load_str}\n")
-    local_mux_file.write("Xlocal_routing_wire_load_1 n_1_3 n_1_4 vsram vsram_n vdd gnd vdd_local_mux local_routing_wire_load\n")
-    local_mux_file.write("Xlut_A_driver_1 n_1_4 n_hang1 vsram vsram_n n_hang2 n_hang3 vdd gnd lut_A_driver\n\n")
-    local_mux_file.write(".END")
-    local_mux_file.close()
-
-    # Come out of top-level directory
-    os.chdir("../")
-    
-    return (mux_name + "/" + mux_name + ".sp")
-
 # This netlist measures the power consumption of read operation in SRAM-basd memories
 def generate_sram_read_power_top(name, sram_per_column, unselected_column_count):
 
@@ -345,8 +119,6 @@ def generate_sram_read_power_top(name, sram_per_column, unselected_column_count)
     os.chdir("../")
 
     return (name + "/" + name + ".sp")
-
-
 
 
 # This netlist measures the power consumption of write operation in SRAM-basd memories
@@ -622,7 +394,6 @@ def generate_mtj_read_power_top_lp(name, mtj_per_column):
     os.chdir("../")
 
     return (name + "/" + name + ".sp")
-
 
 
 # This netlist measures the power consumption of write operation in MTJ-basd memories
@@ -1110,7 +881,6 @@ def generate_sram_read_power_top_lp(name, sram_per_column, unselected_column_cou
 
 
 # This is the top-level netlist used to evaluate and size the output crossbar:
-
 def generate_pgateoutputcrossbar_top(name, maxwidth, def_use_tgate):
 
     # Create directories
@@ -1427,7 +1197,6 @@ def generate_mtj_charge(name, colsize):
     return (name + "/" + name + ".sp")        
 
 
-
 # MTJ-based sense amplifier measurements:
 def generate_mtj_sa_top(name, colsize):
 
@@ -1618,7 +1387,6 @@ def generate_mtj_discharge(name, colsize):
     os.chdir("../")
 
     return (name + "/" + name + ".sp")         
-
 
 
 # this is the top-level path for the last stage in the configurable decoder
@@ -2169,7 +1937,6 @@ def generate_rowdecoderstage1_top(name, fanout, size):
     return (name + "/" + name + ".sp")
 
 
-
 # This is the first stage of row decoder using low power transistors:
 def generate_rowdecoderstage1_top_lp(name, fanout, size):
 
@@ -2412,9 +2179,6 @@ def generate_configurabledecoder2ii_top_lp(name, fanout, size):
     return (name + "/" + name + ".sp")
 
 
-
-
-
 # This is the top-level path for the initial stage in the row-decoder:
 def generate_rowdecoderstage0_top(name,numberofgates2,numberofgates3, decodersize, label2, label3):
 
@@ -2470,7 +2234,7 @@ def generate_rowdecoderstage0_top(name,numberofgates2,numberofgates3, decodersiz
     the_file.write("********************************************************************************\n")
     the_file.write("** Circuit\n")
     the_file.write("********************************************************************************\n\n")
-    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n")
+    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load_id_0\n")
     the_file.write("Xlocal_routing_wire_load_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd RAM_local_routing_wire_load\n")
     the_file.write("Xinv_ff_output_driver n_1_3 n_1_4 vdd gnd inv Wn=inv_ff_output_driver_nmos Wp=inv_ff_output_driver_pmos\n")
     # Circuit Under test
@@ -2545,7 +2309,7 @@ def generate_rowdecoderstage0_top_lp(name,numberofgates2,numberofgates3, decoder
     the_file.write("********************************************************************************\n")
     the_file.write("** Circuit\n")
     the_file.write("********************************************************************************\n\n")
-    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n")
+    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load_id_0\n")
     the_file.write("Xlocal_routing_wire_load_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd RAM_local_routing_wire_load\n")
     the_file.write("Xinv_ff_output_driver n_1_3 n_1_4 vdd_lp gnd inv_lp Wn=inv_ff_output_driver_nmos Wp=inv_ff_output_driver_pmos\n")
     # Circuit Under test
@@ -2625,7 +2389,7 @@ def generate_configurabledecoderi_top(name,numberofgates2,numberofgates3, ConfiD
     the_file.write("********************************************************************************\n")
     the_file.write("** Circuit\n")
     the_file.write("********************************************************************************\n\n")
-    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n")
+    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load_id_0\n")
     the_file.write("Xlocal_routing_wire_load_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd RAM_local_routing_wire_load\n")
     the_file.write("Xinv_ff_output_driver n_1_3 n_1_4 vdd gnd inv Wn=inv_ff_output_driver_nmos Wp=inv_ff_output_driver_pmos\n")
     #add configurable recorder
@@ -2706,7 +2470,7 @@ def generate_configurabledecoderi_top_lp(name,numberofgates2,numberofgates3, Con
     the_file.write("********************************************************************************\n")
     the_file.write("** Circuit\n")
     the_file.write("********************************************************************************\n\n")
-    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n")
+    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load_id_0\n")
     the_file.write("Xlocal_routing_wire_load_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd RAM_local_routing_wire_load\n")
     the_file.write("Xinv_ff_output_driver n_1_3 n_1_4 vdd_lp gnd inv_lp Wn=inv_ff_output_driver_nmos Wp=inv_ff_output_driver_pmos\n")
     #add configurable recorder
@@ -2799,7 +2563,7 @@ def generate_columndecoder_top(name, numberoftgates, decsize):
     the_file.write("********************************************************************************\n")
     the_file.write("** Circuit\n")
     the_file.write("********************************************************************************\n\n")
-    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n")
+    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load_id_0\n")
     the_file.write("Xlocal_routing_wire_load_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd RAM_local_routing_wire_load\n")
     the_file.write("Xinv_ff_output_driver n_1_3 n_1_4 vdd gnd inv Wn=inv_ff_output_driver_nmos Wp=inv_ff_output_driver_pmos\n")
     the_file.write("Xdecorder n_1_4 n_1_5 vdd_col gnd columndecoder\n")
@@ -2890,7 +2654,7 @@ def generate_columndecoder_top_lp(name, numberoftgates, decsize):
     the_file.write("********************************************************************************\n")
     the_file.write("** Circuit\n")
     the_file.write("********************************************************************************\n\n")
-    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n")
+    the_file.write("Xrouting_wire_load_1 n_in n_1_1 n_1_2 vsram vsram_n vdd gnd vdd vdd routing_wire_load_id_0\n")
     the_file.write("Xlocal_routing_wire_load_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd RAM_local_routing_wire_load\n")
     the_file.write("Xinv_ff_output_driver n_1_3 n_1_4 vdd_lp gnd inv_lp Wn=inv_ff_output_driver_nmos Wp=inv_ff_output_driver_pmos\n")
     the_file.write("Xdecorder n_1_4 n_1_5 vdd_col gnd columndecoder\n")
@@ -2908,6 +2672,7 @@ def generate_columndecoder_top_lp(name, numberoftgates, decsize):
     os.chdir("../")
 
     return (name + "/" + name + ".sp")
+
 
 def generate_writedriver_top(name, numberofsrams):
 
@@ -3130,7 +2895,6 @@ def generate_writedriver_top_lp(name, numberofsrams):
     return (name + "/" + name + ".sp")
 
 
-
 # This is the sense amplifier for SRAM-based BRAMs:
 def generate_samp_top_part2(name, numberofsrams, difference):
 
@@ -3231,7 +2995,6 @@ def generate_samp_top_part2(name, numberofsrams, difference):
     os.chdir("../")
 
     return (name + "/" + name + ".sp")
-
 
 
 # This is the sense amplifier for SRAM-based BRAMs:
@@ -3409,8 +3172,6 @@ def generate_samp_top_part1(name, numberofsrams, difference):
     return (name + "/" + name + ".sp")
 
 
-
-
 # This is the sense amplifier for SRAM-based BRAMs:
 def generate_samp_top_part1_lp(name, numberofsrams, difference):
 
@@ -3481,7 +3242,6 @@ def generate_samp_top_part1_lp(name, numberofsrams, difference):
     os.chdir("../")
 
     return (name + "/" + name + ".sp")
-
 
 
 # This is the sense amplifier for SRAM-based BRAMs:
@@ -3812,8 +3572,8 @@ def generate_HB_local_mux_top(mux_name, name):
     local_mux_file.write("********************************************************************************\n")
     local_mux_file.write("** Circuit\n")
     local_mux_file.write("********************************************************************************\n\n")
-    local_mux_file.write("Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd sb_mux_on\n")
-    local_mux_file.write("Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n")
+    local_mux_file.write("Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd sb_mux_id_0_on\n")
+    local_mux_file.write("Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd routing_wire_load_id_0\n")
     local_mux_file.write("Xlocal_routing_wire_load_1 n_1_3 n_1_4 vsram vsram_n vdd gnd vdd_local_mux "+name+"_local_routing_wire_load\n")
     # the inputs have to be registered, but we don't know where EDI places them.
     # therefore, I'll add a considerably long wire here (calculated in fpga.py)
@@ -3826,9 +3586,6 @@ def generate_HB_local_mux_top(mux_name, name):
     os.chdir("../")
     
     return (mux_name + "/" + mux_name + ".sp")
-
-
-
 
 
 def generate_RAM_local_mux_top(mux_name):
@@ -3884,8 +3641,10 @@ def generate_RAM_local_mux_top(mux_name):
     local_mux_file.write("********************************************************************************\n")
     local_mux_file.write("** Circuit\n")
     local_mux_file.write("********************************************************************************\n\n")
-    local_mux_file.write("Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd sb_mux_on\n")
-    local_mux_file.write("Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n")
+    # TODO fix this, so I don't have to refactor all of the RAM circuitry stuff rn I will force the sb mux to be used to be the sb_mux_id_0
+    # In reality this should be a design parameter that is determined or passed via user.
+    local_mux_file.write("Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd sb_mux_id_0_on\n")
+    local_mux_file.write("Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd routing_wire_load_id_0\n")
     local_mux_file.write("Xlocal_routing_wire_load_1 n_1_3 n_1_4 vsram vsram_n vdd gnd vdd_local_mux RAM_local_routing_wire_load\n")
     local_mux_file.write("Xff n_1_4 n_hang1 vsram vsram_n vdd gnd gnd vdd gnd vdd vdd gnd ff\n\n")
     #im putting a flip flop here for now, if we are going to move it, this needs to change.
@@ -3896,7 +3655,6 @@ def generate_RAM_local_mux_top(mux_name):
     os.chdir("../")
     
     return (mux_name + "/" + mux_name + ".sp")
-
 
 
 def generate_RAM_local_mux_top_lp(mux_name):
@@ -3972,8 +3730,8 @@ def generate_RAM_local_mux_top_lp(mux_name):
     local_mux_file.write("********************************************************************************\n")
     local_mux_file.write("** Circuit\n")
     local_mux_file.write("********************************************************************************\n\n")
-    local_mux_file.write("Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd sb_mux_on\n")
-    local_mux_file.write("Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd routing_wire_load\n")
+    local_mux_file.write("Xsb_mux_on_1 n_in n_1_1 vsram vsram_n vdd gnd sb_mux_id_0_on\n")
+    local_mux_file.write("Xrouting_wire_load_1 n_1_1 n_1_2 n_1_3 vsram vsram_n vdd gnd vdd vdd routing_wire_load_id_0\n")
     local_mux_file.write("Xlocal_routing_wire_load_1 n_1_3 n_1_4 vsram vsram_n vdd gnd vdd_local_mux RAM_local_routing_wire_load\n")
     local_mux_file.write("XCSVL n_1_4 n_1_5 vdd vdd_lp gnd CSVL\n")
     local_mux_file.write("Xff n_1_5 n_hang1 vsram vsram_n vdd_lp gnd gnd vdd_lp gnd vdd_lp vdd gnd ff\n\n")
@@ -3985,7 +3743,8 @@ def generate_RAM_local_mux_top_lp(mux_name):
     os.chdir("../")
     
     return (mux_name + "/" + mux_name + ".sp")
-    
+
+
 def generate_lut6_top(lut_name, use_tgate):
     """ Generate the top level 6-LUT SPICE file """
 

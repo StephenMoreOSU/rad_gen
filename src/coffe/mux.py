@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+"""
+    This module provides base implementations and structs for Mux circuits in the FPGA.
+"""
+
 from __future__ import annotations
 
 import math
@@ -111,8 +116,8 @@ class Mux2Lvl(c_ds.SizeableCircuit):
     
     def generate_ptran_2lvl_mux(self, sp_fpath: str) -> Tuple[ List[str], List[str] ]:
         """ 
-        Creates two-level MUX circuits
-        There are 3 different types of MUX that are generated depending on how 'on' the mux is
+            Creates two-level MUX circuits
+            There are 3 different types of MUX that are generated depending on how 'on' the mux is
             1. Fully on (both levels are on) circuit name: mux_name + "_on"
             2. Partially on (only level 1 is on) circuit name: mux_name + "_partial"
             3. Off (both levels are off) circuit name: mux_name + "_off"

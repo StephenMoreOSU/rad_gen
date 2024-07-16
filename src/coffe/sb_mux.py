@@ -1,3 +1,7 @@
+# -*- coding: utf-8 -*-
+"""
+    Implementations for Switch Block Mux sizeable circuit and thier corresponding testbenches
+"""
 from __future__ import annotations
 from dataclasses import dataclass, field, InitVar
 from typing import List, Dict, Any, Tuple, Union, Type
@@ -13,14 +17,6 @@ import src.coffe.utils as utils
 import src.coffe.mux as mux
 import src.coffe.gen_routing_loads as gen_r_load_lib
 import src.coffe.constants as consts
-
-# @dataclass
-# class SwitchBlock(Model):
-#     # Model describing FPGA switchblock,
-#     #   assumption of each model is that for a particular run, all instances in the list exist in the device
-#     name: str                                   # Name of the model, will be used to generate the "base" subckt names of insts, the inst name will be the model name + the inst uid
-#                                                 #       Ex. "sb"
-#     muxes: List[Mux]                            # List of switch block muxes for each wire length
 
 
 @dataclass
@@ -248,108 +244,3 @@ class SwitchBlockMuxTB(c_ds.SimTB):
             low_v_node = meas_inv_sb_mux_2_in_node,
         )
         
-
-        # Compressed format for generating measurement statements for each inverter and tfall / trise combo
-        # total trise / tfall is same as the last inverter
-        # for i, meas_name in enumerate(delay_names):
-        #     for trans_state in ["rise", "fall"]:
-        #         # Define variables to determine which nodes to use for trig / targ in the case of rising / falling
-        #         trig_trans: bool = trans_state == "rise"
-        #         if i == 0:
-        #             targ_node: str = meas_inv_sb_mux_1_drv_out_node
-        #         else:
-        #             targ_node: str = meas_inv_sb_mux_2_in_node
-
-        #         # If we measure total delay we just use the index of the last inverter
-        #         delay_idx: int = i + 1 if meas_name != "total" else i
-        #         # Rise and fall combo, based on how many inverters in the chain
-        #         # If its even we set both to rise or both to fall
-        #         if delay_idx % 2 == 0:
-        #             rise_fall_combo: Tuple[bool] = (trig_trans, trig_trans)
-        #         else:
-        #             rise_fall_combo: Tuple[bool] = (not trig_trans, trig_trans)
-
-        #         delay_bounds: Dict[str, c_ds.SpDelayBound] = {
-        #             del_str: c_ds.SpDelayBound(
-        #                 probe = c_ds.SpNodeProbe(
-        #                     node = node,
-        #                     type = "voltage",
-        #                 ),
-        #                 eval_cond = self.delay_eval_cond,
-        #                 rise = rise_fall_combo[i],
-        #             ) for (i, node), del_str in zip(enumerate([trig_node, targ_node]), ["trig", "targ"])
-        #         }
-        #         # Create measurement object
-        #         measurement: c_ds.SpMeasure = c_ds.SpMeasure(
-        #             value = c_ds.Value(
-        #                 name = f"{self.meas_val_prefix}_{meas_name}_t{trans_state}",
-        #             ),
-        #             trig = delay_bounds["trig"],
-        #             targ = delay_bounds["targ"],
-        #         )
-        #         self.meas_points.append(measurement)
-        # # Create pwr, current, low_voltage measurements
-        # meas_logic_low_voltage_lines: List[str] = [
-        #     f".MEASURE TRAN meas_logic_low_voltage FIND V({meas_inv_sb_mux_2_in_node}) AT=7n",
-        # ]
-        # meas_power_lines: List[str] = [ 
-        #     f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz",
-        #     f".MEASURE TRAN meas_current INTEGRAL I(V_SB_MUX) FROM=0ns TO=4ns",
-        #     f".MEASURE TRAN meas_avg_power PARAM = '-(meas_current/4n)*supply_v'",
-        # ]
-
-        # # Create the SPICE file
-        # top_sp_lines: str = [
-        #     f".TITLE Switch Block Mux {self.dut_ckt.sp_name} TB #{self.id} Simulation",
-        #     # Library includes
-        #     *self.inc_hdr_lines,
-        #     *[ lib.get_sp_str() for lib in self.inc_libs],
-        #     # Stimulus, Simulation Settings, and Voltage Sources
-        #     *self.setup_hdr_lines,
-        #     self.mode.get_sp_str(), # Analysis + Simulation Mode
-        #     # Options for the simulation
-        #     self.get_option_str(),
-        #     "*** Input Signal & Power Supply ***",
-        #     "* Power rail for the circuit under test.",
-        #     "* This allows us to measure power of a circuit under test without measuring the power of wave shaping and load circuitry.",
-        #     *[ src.get_sp_str() for src in self.voltage_srcs], # Voltage sources
-        #     # Measurements
-        #     *self.meas_hdr_lines,
-        #     *rg_utils.flatten_mixed_list(
-        #         [ meas.get_sp_lines() for meas in self.meas_points]
-        #     ),
-        #     # Raw Measure statements
-        #     *meas_logic_low_voltage_lines,
-        #     *meas_power_lines,
-        #     # Circuit Inst Definitions
-        #     *self.ckt_hdr_lines,
-        #     *[ inst.get_sp_str() for inst in self.top_insts],
-        #     ".END",
-        # ]
-        # # Write the SPICE file
-        # sp_fpath: str = os.path.join(self.tb_fname, f"{self.tb_fname}.sp")
-        # with open(sp_fpath, "w") as f:
-        #     f.write("\n".join(top_sp_lines))
-        
-        # return sp_fpath
-
-
-
-# @dataclass
-# class SwitchBlockMuxModel(c_ds.Model):
-#     # Some way to represent which peripherial circuits are instantiated in the simulation test bench 
-#     # param_hash: Any     
-#     # basename: str = None
-#     ckt_def: SwitchBlockMux = None
-#     drv_wire: c_ds.GenRoutingWire = None   # Routing wire being driven by this mux
-
-#     # Parameters which determine some higher level behaviors
-#     #    or information about the circuit in the larger FPGA that may be cumbersome to store in circuit definition
-
-# @dataclass
-# class SwitchBlockModel():
-#     # Way to describe the actual switch block in the device
-#     #   As the device may have different switch blocks in reality this just represents our estimation of the switch block
-#     # name: str                                   # Name of the model, will be used to generate the "base" subckt names of insts, the inst name will be the model name + the inst uid
-#                                                 #       Ex. "sb"
-#     mux_models: List[SwitchBlockMuxModel]       # List of each unique SwitchBlockMux in device

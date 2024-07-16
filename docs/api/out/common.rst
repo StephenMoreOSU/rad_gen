@@ -28,6 +28,14 @@ common.gds\_fns module
    :undoc-members:
    :show-inheritance:
 
+common.new\_data\_structs module
+--------------------------------
+
+.. automodule:: common.new_data_structs
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 common.rr\_parse module
 -----------------------
 

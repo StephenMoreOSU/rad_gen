@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+"""
+    Implementations for Data structures used across RAD-Gen
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, make_dataclass, MISSING, InitVar
@@ -56,7 +61,8 @@ def create_timestamp(fmt_only_flag: bool = False) -> str:
                 Used for comparing timestamps when asserted
         
         Return:
-            timestamp string in format "YYYY--MM--DD--HH--MM--SS--fff"
+            timestamp string in format "YYYY--MM--DD--HH--MM--SS--fff" OR
+            format string "{year:04}--{month:02}--{day:02}--{hour:02}--{minute:02}--{second:02}--{milliseconds:03}"
     """
     now = datetime.now()
 
@@ -82,6 +88,20 @@ def create_timestamp(fmt_only_flag: bool = False) -> str:
 class ReportInfo:
     """
         Information relevant to report information and filenames 
+
+        Attributes:
+            report_dir : output directory dname which reports are sent to
+            unparse_report_dir : subdir dname to report_dir for additional information 
+                which parsers haven't been written for yet and should only be looked at manually
+            gds_area_fname : fname of the gds area report file created by GDS export
+            power_lookup : lookup dict to convert power units to a common unit, normalized at Watts
+            power_display_unit : default unit to display in human readable fmt power info
+            timing_display_unit : default unit to display in human readable fmt timing info
+            area_display_unit : default unit to display in human readable fmt area info
+
+        Todo:
+            * move the gds area output report to a more asic flow specific data structure
+            * <TAG><UNITS_REFAC> Refactor the power_lookup stuff to be standardized along with other units
     """
     # name out output directory reports are sent to
     report_dir: str = "reports"
@@ -104,19 +124,73 @@ class ReportInfo:
 class Regexes:
     """
         Stores all regexes used in various placed in RAD Gen, its more convenient to have them all in one place
+
+        Attributes:
+            wspace_re: regex to match any whitespace character
+            find_params_re: regex to find all parameter declarations in a verilog file 
+            find_defines_re: regex to find all `define declarations in a verilog file
+            grab_bw_soft_bkt: regex to grab the value inside a bracket pair
+            find_localparam_re: regex to find all localparam declarations in a verilog file
+            first_eq_re: regex to find the first equals sign in a string
+            find_soft_brkt_chars_re: regex to find all soft bracket characters in a string (not referenced)
+            find_verilog_fn_re: regex to grab text between function in a verilog file (not referenced)
+            grab_verilog_fn_args: regex to grab the arguments of a function in a verilog file (not referenced)
+            find_verilog_fn_hdr: regex to find the header of a function in a verilog file (not referenced)
+            decimal_re: regex to grab decimal or non decimal numbers in a string
+            signed_dec_re: regex to grab signed decimal or non decimal numbers in a string
+            sci_not_dec_re: regex to grab scientific notation decimal or non decimal numbers in a string
+            inn_fp_grab_stdcell_density_re: regex to look for the '-stdcell_density_size' string and then grabbing the 6 floats after it (surrounded by curly braces)
+            int_re: regex to grab integers in a string (not referenced)
+            sp_grab_print_vals_re: regex to grab all the text generated from an HSPICE `.print` statement
+            sp_del_grab_info_re: regex that grabs measure information from the output of an HSPICE simulation, gets the meas statement name, value, and units
+            sp_grab_inv_pn_vals_re: regex that grabs parameter width values from output of HSPICE simulation
+            sp_grab_tran_analysis_ub_str: regex to grab transient analysis information from an HSPICE simulation output file (not referenced)
+            sp_grab_measure_re: line by line grabs either "measure" statements -> group 1 is name of parameter, group 2 is the value in scientific notation from output of HSPICE simulation
+            sp_grab_param_re: grabs parameter name and values from output of HSPICE simulation
+            sp_coffe_grab_params_re: grabs COFFE parameter name and values from output of HSPICE simulation, 
+                for same desired functionality as `sp_grab_param_re` but COFFE specific
+            coffe_key_w_spaces_rep_re: regex for parsing coffe output report
+
+        Examples:
+            find_params_re:
+                >>> include_rtl = open(include_fpath).read()
+                >>> clean_include_rtl = rg_utils.c_style_comment_rm(include_rtl)
+                >>> for inc_line in clean_include_rtl.split("\n"):
+                >>>     # Look for parameters
+                >>>     if asic_dse.common.res.find_params_re.search(inc_line):
+                >>>         # TODO this parameter re will not work if no whitespace between params
+                >>>         clean_line = " ".join(asic_dse.common.res.wspace_re.split(inc_line)[1:]).replace(";","")
+                >>>         # Get the parameter name and value
+                >>>         param_name = clean_line.split("=")[0].replace(" ","")
+                >>>         param_val = clean_line.split("=")[1].replace(" ","").replace("`","")
+            find_defines_res & grab_bw_soft_bkt:
+                >>> elif asic_dse.common.res.find_defines_re.search(inc_line):
+                >>>         # TODO this define re will not work if no whitespace between params
+                >>>         clean_line = " ".join(asic_dse.common.res.wspace_re.split(inc_line)[1:])
+                >>>         # Get the define name and value
+                >>>         define_name = asic_dse.common.res.wspace_re.split(clean_line)[0]
+                >>> if asic_dse.common.res.grab_bw_soft_bkt.search(clean_line):
+                >>>     define_val = asic_dse.common.res.grab_bw_soft_bkt.search(clean_line).group(0)
+                >>> else:
+                >>>     define_val = asic_dse.common.res.wspace_re.split(clean_line)[1].replace("`","")
+            inn_fp_grab_stdcell_density_re:
+                >>> inn_fp_cmd: str = r"create_floorplan -core_margins_by die -flip f -die_size_by_io_height max -site ${vlsi.technology.placement_site} -stdcell_density_size {1.0 0.7 10 10 10 10}"
+                >>> stdcell_density_args: list[str] = asic_dse.common.res.inn_fp_grab_stdcell_density_re.search(inn_fp_cmd).group(0).strip().replace("{","").replace("}","").split()
+        
+        Todo:
+            * Remove or integrate all of the marked (unreferenced) fields
     """
     wspace_re: Pattern = re.compile(r"\s+")
     find_params_re: Pattern = re.compile(r"parameter\s+\w+(\s|=)+.*;")
     find_defines_re: Pattern = re.compile(r"`define\s+\w+\s+.*")
     grab_bw_soft_bkt: Pattern = re.compile(r"\(.*\)")
-    
     find_localparam_re: Pattern = re.compile(r"localparam\s+\w+(\s|=)+.*?;", re.MULTILINE|re.DOTALL)
     first_eq_re: Pattern = re.compile(r"\s=\s")
-    find_soft_brkt_chars_re: Pattern = re.compile(r"\(|\)", re.MULTILINE)
 
-    find_verilog_fn_re: Pattern = re.compile(r"function.*?function", re.MULTILINE|re.DOTALL)
-    grab_verilog_fn_args: Pattern = re.compile(r"\(.*?\)", re.MULTILINE|re.DOTALL)
-    find_verilog_fn_hdr: Pattern = re.compile(r"<=?")
+    find_soft_brkt_chars_re: Pattern = re.compile(r"\(|\)", re.MULTILINE) # TODO Figure out if this is needed no reference to this
+    find_verilog_fn_re: Pattern = re.compile(r"function.*?function", re.MULTILINE|re.DOTALL) # TODO Figure out if this is needed no reference to this
+    grab_verilog_fn_args: Pattern = re.compile(r"\(.*?\)", re.MULTILINE|re.DOTALL) # TODO Figure out if this is needed no reference to this
+    find_verilog_fn_hdr: Pattern = re.compile(r"<=?") # TODO Figure out if this is needed no reference to this
 
     decimal_re: Pattern = re.compile(r"\d+\.{0,1}\d*", re.MULTILINE)
     signed_dec_re: Pattern = re.compile(r"\-{0,1}\d+\.{0,1}\d*", re.MULTILINE)
@@ -124,15 +198,15 @@ class Regexes:
 
     # Innovus command editing
     # looking for the '-stdcell_density_size' string and then grabbing the 6 floats after it (surrounded by curly braces)
-    # inn_fp_script_edit_re: Pattern = re.compile(r"(?<=\-stdcell_density_size)\s+{(\d+\.{0,1}\d*)\s+(\d+\.{0,1}\d*)\s+(\d+\.{0,1}\d*)\s+(\d+\.{0,1}\d*)\s+(\d+\.{0,1}\d*)\s+(\d+\.{0,1}\d*)}")
     inn_fp_grab_stdcell_density_re: Pattern = re.compile(r"(?<=\-stdcell_density_size\s){(\d+\.{0,1}\d*\s)+(\d+\.{0,1}\d*)}")
+    
     # IC 3D
-    int_re : re.Pattern = re.compile(r"[0-9]+", re.MULTILINE)
+    int_re: re.Pattern = re.compile(r"[0-9]+", re.MULTILINE) # TODO Figure out if this is needed no reference to this
     sp_del_grab_info_re: re.Pattern = re.compile(r"^.(?:(?P<var1>[^\s=]+)=\s*(?P<val1>-?[\d.]+)(?P<unit1>[a-z]+))?\s*(?:(?P<var2>[^\s=]+)=\s*(?P<val2>-?[\d.]+)(?P<unit2>[a-z]+))?\s*(?:(?P<var3>[^\s=]+)=\s*(?P<val3>-?[\d.]+)(?P<unit3>[a-z]+))?",re.MULTILINE)
-    sp_grab_print_vals_re: re.Pattern = re.compile(r"^x.*?^y",re.DOTALL | re.MULTILINE) 
+    sp_grab_print_vals_re: re.Pattern = re.compile(r"^x.*?^y",re.DOTALL | re.MULTILINE) # Grabs all the text generated from an HSPICE `.print` statement
     sp_grab_inv_pn_vals_re: re.Pattern = re.compile(r"\s+\.param\s+(?P<name>inv_w[np]_\d+)\s+=\s+(?P<value>\d+\.\d+)\w*")
     # spice output file ".lis" regex matches
-    sp_grab_tran_analysis_ub_str: str = r"\s*transient\s*analysis.*?\s*"
+    sp_grab_tran_analysis_ub_str: str = r"\s*transient\s*analysis.*?\s*" # TODO Figure out if this is needed no reference to this
     sp_grab_tran_analysis_re: re.Pattern = re.compile(r"\s*transient\s*analysis.*?\s*\.title\s*", re.DOTALL)
     # line by line grabs either "measure" statements -> group 1 is name of parameter, group 2 is the value in scientific notation
     sp_grab_measure_re: re.Pattern = re.compile( r"\b(\w+)\s*=\s*(failed|not found|[-+]?\d*(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*(?:\w+)?(?=\s|$)" )
@@ -149,8 +223,18 @@ class Regexes:
 class GeneralCLI:
     """
         Struct to contain all info related to all command line interface args used in RAD Gen
-        - If !optional && default_val == None -> Throw Exception "Required argument <arg> not provided"
-        - All boolean args defaulted to False
+        The primitive data structure used in other tool or mode specific structs to define CLI args
+
+        Attributes:
+            key: key for the cli argument, will be translated to '--<key>' in the command line
+            help_msg: help message for the cli argument
+            datatype: datatype of the cli argument
+            shortcut: optional shortcut for the cli argument, will be translated to '-<shortcut>' in the command line
+            default_val: default value for the cli argument
+            optional: flag to determine if the cli argument is optional
+            nargs: optional argument to determine the number of arguments the cli argument can take
+            choices: optional argument to determine the possible legal values for the datatype
+            action: optional argument to determine the action to take when the cli argument is parsed
     """
     key: str
     help_msg: str
@@ -167,11 +251,16 @@ class GeneralCLI:
         if self.action == "store_true":
             self.default_val = False
 
-class DisplayablePath(object):
+class DisplayablePath():
+    """
+        Class to display a directory structure path similar to the linux `tree` command
+        From "https://stackoverflow.com/questions/9727673/list-directory-tree-structure-in-python"
 
-    # Usage Example:
-    # paths_gen = DisplayablePath.make_tree(Path('/fs1/eecg/vaughn/morestep/rad_gen/unit_tests/outputs/coffe'), criteria=lambda p: p.is_dir())
-    # path_strs = [gen.path.absolute() for gen in paths_gen]
+        Examples:
+            >>> paths_gen = DisplayablePath.make_tree(Path("<some_path>", criteria=lambda p: p.is_dir()))
+            >>> path_strs = [gen.path.absolute() for gen in paths_gen]
+        
+    """
 
     display_filename_prefix_middle = '├──'
     display_filename_prefix_last = '└──'
@@ -254,21 +343,39 @@ class DisplayablePath(object):
 
 class Tree:
     """
-        Linux directory structure for building directory trees and referencing them
-    
-        Tags for parent trees apply to subtrees like so:
-            parent_tag/subtree_tag
+        Linux directory structure for building, creating, traversing, and managing directory trees in python
+
+        Attributes:
+            path: path to this specific dir
+            basename: dir name
+            subtrees: list of subtrees of this dir
+            tag: tag for this dir, should be an string that to be used to search for this directory
+            heir_tag: tag for this dir and all its parent directories, e.g. "<parent_tag>.<tree_tag>"
+            is_leaf: flag to determine if this dir is a leaf of dir structure
+            scan_dir: flag to determine if this dir should be scanned for existing subdirectories and added to the tree
+
+        Todo:
+            * Refactor to convert this to a dataclass
     """
 
-    def __init__(self, path: str, subtrees: List['Tree'] = None, tag: str = None, scan_dir: bool = False):
-        self.path : Union[str, None] = path
-        self.basename : Union[str, None] = os.path.basename(path) if path else None
-        self.subtrees : Union[List['Tree'], None] = subtrees
-        self.tag : Union[str, None] = tag
-        self.heir_tag: Union[str, None] = tag
+    def __init__(
+        self, 
+        path: str, 
+        subtrees: List['Tree'] = None, 
+        tag: str = None, 
+        scan_dir: bool = False
+    ):
+        """
+            Constructor, initializes `is_leaf`, `tag`, and `hier_tag` fields if not passed as args
+        """
+        
+        self.path : str | None = path
+        self.basename : str | None = os.path.basename(path) if path else None
+        self.subtrees : List['Tree'] | None = subtrees
+        self.tag : str | None = tag
+        self.heir_tag: str | None = tag
         self.is_leaf : bool = False
         self.scan_dir: bool = scan_dir # If true will scan the directory path and add any subdirectories to the tree
-        # self.exts: Union[List[str], None] = None # List of file extensions which are searched for in this tree
 
         # Set is_leaf flag
         if self.subtrees == None:
@@ -281,7 +388,14 @@ class Tree:
             self.tag = self.basename
             self.heir_tag = self.tag
 
-    def append_subtree(self, subtree: 'Tree'):
+    def append_subtree(self, subtree: 'Tree') -> None:
+        """
+            Appends the `subtree` arg to the `subtrees` list of this tree.
+            Updates appropriate data structures to reflect the new subtree.
+
+            Args:
+                subtree: Tree object to append to this tree
+        """
         # update the subtree paths to reflect its new placement
         subtree.update_tree(parent = self)
         if self.subtrees:
@@ -291,15 +405,15 @@ class Tree:
             self.is_leaf = False
             self.subtrees = [subtree]
 
-    def rec_add_existing_subtrees(self):
+    def rec_add_existing_subtrees(self) -> None:
         """
-            - Assuming the tree (self) has been constructed (dir exists)
-            This finds all the subdirectories which also currently exist (even if they are not present in the tree)
-            and will add them to the tree data structure
+            Assuming the tree (`self`) has been constructed and directory exists.
+            This finds all the subdirectories which also currently exist,
+            even if they are not present in the tree, and will add them to the tree data structure (`self`)
 
             This fn is useful when you want to use a directory structure which may come from a third party.
             This way when you search for a tag you can use the structure currently defined but if for some reason it changes, 
-            you would only need to update the tag being searched for rather than the entire Tree instantiation
+            you would only need to update the tag being searched for rather than the entire Tree instantiation.
         """
         # Create subtrees and append them
         for subdir in os.listdir(self.path):
@@ -317,19 +431,28 @@ class Tree:
             self.is_leaf = True
 
 
-    def update_tree_top_path(self, new_path: str, new_tag: str = None):
+    def update_tree_top_path(self, new_path: str, new_tag: str = None) -> None:
         """
-            Updates the top level path of a tree and all its subtrees
+            Updates the top level path of a tree and all its subtrees.
+            Really only for use when we have a tree structure that repeated in multiple places, 
+            but we want to change its name / tag for each instantiation of the common tree.
+
+            Args:
+                new_path: new path to set for the tree
+                new_tag: new tag to set for the tree
+
         """
         self.path = new_path
         self.basename = os.path.basename(new_path)
         self.tag = new_tag if new_tag else self.basename
 
-    def update_tree(self, parent: 'Tree' = None):
+    def update_tree(self, parent: 'Tree' = None) -> None:
         """
             Updates a tree to reflect its new placement in the directory structure
-            
             Could be done after adding a new subtree to an existing tree or changing the path of existing tree but keeping subtrees intact
+
+            Args:
+                parent: new parent base tree to update `self` off of.
         """
 
         # Only would pass in a parent if doing something like adding a subtree to existing tree
@@ -348,10 +471,15 @@ class Tree:
                 # Recursively goes down all depths
                 self._update_subdir_paths(subdir, self.path, self.heir_tag)
 
-        # Now get a list of all leaves in tree and store\
-        # self.leaves = self.get_leafs()
+    def _update_subdir_paths(self, dir: 'Tree', parent_path: str, parent_tag: str) -> None:
+        """
+            Recursively updates the paths of all subtrees of a tree
 
-    def _update_subdir_paths(self, dir, parent_path, parent_tag):
+            Args:
+                dir: Tree object to update the path of and all its subtrees
+                parent_path: path of the parent directory
+                parent_tag: hier_tag of the parent directory
+        """
         if parent_path:
             dir.path = os.path.join(parent_path, dir.path)
 
@@ -363,14 +491,43 @@ class Tree:
 
         if dir.subtrees:
             for subdir in dir.subtrees:
-                self._update_subdir_paths(subdir, dir.path, dir.heir_tag) #subdir.path
+                self._update_subdir_paths(subdir, dir.path, dir.heir_tag)
 
     def display_tree(self):
+        """
+            Displays the tree structure in a similar format to the linux `tree` command
+        """
         paths = DisplayablePath.make_tree(Path(self.path))
         for path in paths:
             print(path.displayable())
 
-    def search_subtrees(self, target_tag: str, target_depth: int = None, is_hier_tag = False):
+    def search_subtrees(
+            self, 
+            target_tag: str, 
+            target_depth: int = None, 
+            is_hier_tag: str = False
+    ) -> List['Tree']:
+        """
+            Searches the tree for a specific tag and returns the subtree with that tag. 
+
+            Args:
+                target_tag: tag to search for in the tree 
+                    if not `is_hier_tag` this directly matches a tag string of a directory or subdir in `self`
+                    e.g. "dir_tag_string"
+                    if `is_hier_tag` this is a substring search of the `heir_tag` of a directory or subdir in `self`
+                    e.g. "path.to.hier_dir.tag_str"
+                target_depth: depth to search for the tag in the tree, if None will search all depths
+                is_hier_tag: flag to determine how search is performed based of `target_tag`
+
+            Raises:
+                Exception: if the target_tag is not found in the tree
+                
+            Returns:
+                List of Tree objects, sorted by shortest distance to the root of the tree
+            
+            Examples:
+                >>> sram_lib_conf_gen_fpath: str = project_tree.search_subtrees(f"sram_lib.configs.gen", is_hier_tag=True)[0].path
+        """
         results: list = []
         self._search_subtrees(target_tag, target_depth, 0, is_hier_tag, results)
         if not results:
@@ -379,7 +536,25 @@ class Tree:
         results = sorted(results, key = lambda x: len(x.heir_tag.split(".")))
         return results
 
-    def _search_subtrees(self, target_tag, target_depth, current_depth, is_hier_tag, result):
+    def _search_subtrees(
+            self, 
+            target_tag: str, 
+            target_depth: int, 
+            current_depth: int, 
+            is_hier_tag: bool, 
+            result: List['Tree'],
+    ) -> None:
+        """
+            Private recursive function to search a tree at the hierarchy of `current_depth` for a `target_tag`. Used in `search_subtrees`
+
+            Args:
+                target_tag: tag to search for in the tree
+                target_depth: depth to search for the tag in the tree, if None will search all depths
+                current_depth: current depth of the tree
+                is_hier_tag: flag to determine how search is performed based of `target_tag`
+                result: list to store the results of the search at this level of hierarchy
+        """
+        
         # set search tag
         found_tag = self.tag if not is_hier_tag else self.heir_tag
         
@@ -399,7 +574,10 @@ class Tree:
             for subtree in self.subtrees:
                 subtree._search_subtrees(target_tag, target_depth, current_depth + 1, is_hier_tag, result)
     
-    def print_tree(self):
+    def print_tree(self) -> None:
+        """
+            Prints the paths existing in the tree
+        """
         if self.is_leaf:
             print(self.path)
             return
@@ -407,7 +585,10 @@ class Tree:
         for subtree in self.subtrees:
             subtree.print_tree()
 
-    def create_tree(self):
+    def create_tree(self) -> None:
+        """
+            Recursively creates the directory structure of the tree 
+        """
         if self.is_leaf:
             os.makedirs(self.path, exist_ok = True)
             # print(self.path)
@@ -422,6 +603,12 @@ class Tree:
         """
             Appends a subtree to the tree at the location of the input tag.
             This updates the data structure and creates a new directory
+
+            Args:
+                tag: tag to search for in the tree to append the subtree to
+                subtree: Tree object being appended to the tree that matches `tag`
+                is_hier_tag: flag to determine if the tag is a hier_tag or not
+                mkdirs: flag to determine if the directories should be created in the filesystem
         """
         # find subtree in question
         found_subtree: Tree = self.search_subtrees(tag, is_hier_tag = is_hier_tag)[0]
@@ -437,14 +624,26 @@ class Tree:
             # Make the dirs
             if mkdirs:
                 found_subtree.create_tree()
-        else:
-            raise Exception(f"Tag {tag} not found in tree")
       
 
+def add_arg(
+        parser: argparse.ArgumentParser, 
+        cli_opt: GeneralCLI,
+) -> None:    
+    """
+        Adds an argument to an argparse parser based on the GeneralCLI object passed in
 
-def add_arg(parser: argparse.ArgumentParser, cli_opt: GeneralCLI):    
+        Args:
+            parser: argparse.ArgumentParser object to add the argument to
+            cli_opt: GeneralCLI object containing the argument information to add to
+
+        Examples:
+            >>>     # Add common_cli command line args to the parser
+            >>>     common_cli = rg_ds.RadGenCLI()
+            >>>     for cli_arg in common_cli.cli_args:
+            >>>         rg_ds.add_arg(parser, cli_arg)
+    """
     # Create list to deal with optional shortcut
-    key_keys = ["key", "shortcut"]
     arg_keys = []
     if cli_opt.shortcut != None:
         arg_keys.append(cli_opt.shortcut)
@@ -459,6 +658,7 @@ def add_arg(parser: argparse.ArgumentParser, cli_opt: GeneralCLI):
         "nargs" : cli_opt.nargs,
         "choices" : cli_opt.choices,
     }
+    # If arg values are None we remove them from the `parser.add_argument()` call
     del_keys = []
     for key in arg_dict.keys():
         if arg_dict[key] == None:
@@ -478,7 +678,24 @@ def add_arg(parser: argparse.ArgumentParser, cli_opt: GeneralCLI):
 
 @dataclass
 class Common:
+    """
+        Dataclass to hold all common data structures used in RAD Gen regardless of mode of operation
 
+        Attributes:
+            just_config_init: flag to determine if the invocation of RAD Gen will just initialze data structures and not run the tools.
+            override_outputs: flag to determine if the dpath / fpath outputs generated from this mode of operation will override existing files or create new ones
+            manual_obj_dir: dname to manually specify the object directory for the current run
+            obj_dir: The object directory dpath for the current run
+            rad_gen_home_path: dpath to the RAD Gen home directory, should be equal to `os.env.get("RAD_GEN_HOME")`
+            hammer_home_path: dpath to the Hammer home directory, should be equal to `os.env.get("HAMMER_HOME")`
+            logger: logger object for RAD Gen
+            verbosity: verbosity level for the logger & other outputs
+            project_tree: Tree object to hold the project directory structure for the current run
+            project_name: name of the RAD-Gen project
+            res: Regexes object to hold all regexes used in RAD Gen
+            report: ReportInfo object to hold report info used in RAD Gen
+
+    """
     # All user input fields which exist in a dynamic dataclass, and originate from CommonCLI
     # TODO remove comment or integrate this
     # args: Any = None 
@@ -526,39 +743,62 @@ class Common:
 
 
 class MetaDataclass(type):
-    # name - name of the class being defined
-    # bases - base classes for constructed class
-    # namespace - dict with methods and fields defined in class  
+    """
+        Meta class to create a dataclass dynamically from field_dtypes
+
+        Attributes:
+            fields_dtypes: dict of field names and their datatypes
+            fields_defaults: dict of field names and their default values
+    """
     fields_dtypes = {}
     fields_defaults = {}
 
     def __new__(cls, name, bases, namespace):
+        """
+            Args:
+                cls: MetaDataclass object
+                name: name of the class being defined
+                bases: base classes for constructed class
+                namespace: dict with methods and fields defined in class
+
+            Todo:
+                * Verify that are initialized in this function result in an equivalent dataclass object
+        """
         # Add fields to the dataclass dynamically
         for field_name, field_type in cls.fields_dtypes.items():
-        # for field_name, field_type in namespace["__annotations__"].items():
             namespace[field_name] = field_type
         
         cls_obj = dataclass(super().__new__(cls, name, bases, namespace))
         return cls_obj
 
 
-
-
 @dataclass 
 class ParentCLI:
+    """
+        Base class for a CLI class for subtool in RAD Gen
+
+        Attributes:
+            cli_args: list of GeneralCLI objects to define the CLI args for the subtool
+            _fields: dict of field names and their datatypes
+            _defaults: dict of field names and their default values
+    """
     cli_args: List[GeneralCLI] = None
-    arg_definitions: List[Dict[str, Any]] = None
 
     # Below are used for dynamic dataclass creation and initialization
+    # Initialized in __post_init__
     _fields: Dict[str, Any] = None # key, datatype pairs for all fields in this dataclass
     _defaults: Dict[str, Any] = None # key, default_val pairs for all fields in this dataclass
 
     def __post_init__(self):
-        # If cli_args still not generated we use the arg_definitions to generate them
-        if self.cli_args == None and self.arg_definitions != None:
-            self.cli_args = [ GeneralCLI(**arg_dict) for arg_dict in self.arg_definitions ]
-        elif self.cli_args == None:
-            raise Exception("No cli_args or arg_definitions provided for CLI class")
+        """
+            Verfies `cli_args` and initializes `_fields` and `_defaults` dicts
+
+            Raises:
+                Exception: if `cli_args` is None
+
+        """
+        if self.cli_args == None:
+            raise Exception("No cli_args provided for CLI class")
         self._fields = dict(sorted( 
             {_field.key : _field.datatype for _field in self.cli_args}.items() 
         ))
@@ -568,7 +808,17 @@ class ParentCLI:
     
     def get_dataclass_fields(self, is_cli: bool = False) -> Dict[str, List[Any]]:
         """
-            Returns the dynamic (defined in _fields) and static (defined in dataclass) to instantiate the dynamic dataclass
+            Returns the dynamic (defined in _fields) and static (defined in dataclass) to instantiate the dynamic dataclass type object
+
+            Args:
+                is_cli: flag to determine if the fields are being used for a CLI or not (deprecated)
+
+            Todo:
+                * Fix or remove the is_cli functionality. Original intention was to only allow fields 
+                    defined in `_fields` to be able to define the new dataclass rather than all of those contained in `self`
+
+            Returns:
+                Dict of lists with keys for 'keys' (field names), 'dtypes' (field datatypes), and 'defaults' (field default values) 
         """
         # To deal with problem of "." character being invalid for field names we replace it with double underscore here, has to be converted back to "." when cli args are written to console
         for key in self._fields.copy().keys():
@@ -596,10 +846,10 @@ class ParentCLI:
             
         return {"keys" : [_key for _key in keys], "dtypes": [_dtype for _dtype in dtypes], "defaults": [_default for _default in defaults] }
 
-def dyn_dataclass_init(self, **kwargs):
+def dyn_dataclass_init(self: MetaDataclass, **kwargs) -> None:
     """
         Dynamically initializes a dataclass with the provided keyword arguments
-        - When creating a new dynamic dataclass set the __init__ namespace key to this function
+        When creating a new dynamic dataclass set the __init__ namespace key to this function
     """
     set_fields = []
     # Sets all fields from user input kwargs
@@ -612,7 +862,24 @@ def dyn_dataclass_init(self, **kwargs):
         if field_name not in set_fields:
             setattr(self, field_name, field_default_val)
 
-def get_dyn_class(cls_name: str, fields: Dict[str, List[Any]],  bases: Tuple[Any] = None):
+def get_dyn_class(cls_name: str, fields: Dict[str, List[Any]], bases: Tuple[Any] = None) -> Type[MetaDataclass]:
+    """
+        Creates a dynamic dataclass type object from the fields provided in the `fields` dict
+
+        Args:
+            cls_name: name of the class to create
+            fields: dict of lists with keys for 'keys' (field names), 'dtypes' (field datatypes), and 'defaults' (field default values)
+                generated from ParentCLI.get_dataclass_fields()
+            bases: base classes for the new class
+
+        Returns:
+            Dynamic dataclass object with the fields defined in `fields`
+
+        Todo:
+            * Refactor to not set the fields_dtypes and fields_defaults in the MetaDataclass class itself. 
+                Figure out how to do this in the __new__ function
+                
+    """
     fields_dtypes = dict(zip(fields["keys"], fields["dtypes"]))
     fields_defaults = dict(zip(fields["keys"], fields["defaults"]))
     
@@ -631,7 +898,16 @@ def get_dyn_class(cls_name: str, fields: Dict[str, List[Any]],  bases: Tuple[Any
 
 @dataclass
 class RadGenCLI(ParentCLI):
-    
+    """
+        Dataclass to hold all command line interface arguments for the RAD Gen tool
+        Maps cli keys into the `Common` data structure fields. 
+
+        Attributes:
+            cli_args: list of GeneralCLI objects to define the CLI args that map to `Common`
+            subtool_args: Options would be the cli classes for each subtool, TODO define this more clearly
+            no_use_arg_list: list of arguments which should not be used in the command line interface when calling RAD-Gen
+            
+    """
     cli_args: List[GeneralCLI] = field(default_factory = lambda: [ 
         GeneralCLI(key = "subtools", shortcut="-st", datatype = str, nargs = "*", help_msg = "subtool to run"),
         GeneralCLI(key = "top_config_fpath", shortcut = "-tc", datatype = str, help_msg = "path to (optional) RAD-GEN top level config file"),
@@ -646,9 +922,23 @@ class RadGenCLI(ParentCLI):
     ])
 
     subtool_args: Any = None # Options would be the cli classes for each subtool
-    no_use_arg_list: List[str] = None # list of arguments which should not be used in the command line interface
+    no_use_arg_list: List[str] = None # list of arguments which should not be used in the command line interface when calling RAD-Gen 
 
-    def decode_dataclass_to_cli(self, cmd_str: str, _field: str, args_dict: Dict[str, str], obj: Any = None): #-> Tuple[str, List[str]]:
+    def decode_dataclass_to_cli(self, cmd_str: str, _field: str, args_dict: Dict[str, str], obj: Any = None) -> str:
+        """
+            Decodes a dataclass field to a string that can be run from the command line to invoke RAD Gen
+
+            Args:
+                cmd_str: string to append decoded dataclass field to
+                _field: field name to decode
+                args_dict: dict equivalent of the cmd_str to store decoded fields
+                obj: optional object to get field value from (default is self)
+            
+            Returns:
+                cmd_str: string with the decoded field appended
+                    e.g. "python3 rad_gen.py --<field1> <value1> ..."
+            
+        """
         if obj == None:
             obj = self
         val = getattr(obj, _field)
@@ -673,6 +963,15 @@ class RadGenCLI(ParentCLI):
         return cmd_str
 
     def get_rad_gen_cli_cmd(self, rad_gen_home: str) -> Tuple[str, List[str], Dict[str, str]]:
+        """
+            Args:
+                rad_gen_home: path to the RAD Gen home directory
+            
+            Returns:
+                cmd_str: string to run from the command line to invoke RAD Gen
+                sys_args: list of strings to run from the command line to invoke RAD Gen
+                sys_args_dict: dict equivalent of the sys_args list
+        """
         sys_args_dict = {}
         sys_args = []
         cmd_str = f"python3 {rad_gen_home}/rad_gen.py"
@@ -700,17 +999,13 @@ class RadGenCLI(ParentCLI):
         sys_args = cmd_str.split(" ")[2:] # skip over the <python3 rad_gen.py>
         return cmd_str, sys_args, sys_args_dict
     
-    # def __post_init__(self):
-    #     # Post inits required for structs that use other struct values as inputs and cannot be clearly defined
-    #     self.cli_args = [ GeneralCLI(**arg_dict) for arg_dict in self.arg_definitions ]
 
 
 # RadGenCLI is definitions but we basically want to use it as a factory to create the dataclass which holds values for input args
-
 rad_gen_cli = RadGenCLI()
 RadGenArgs = get_dyn_class(
     cls_name = "RadGenArgs", 
-    fields = rad_gen_cli.get_dataclass_fields(), # Don't pass is_cli = True as we want to have fields other than just ones specified in "cli_args"
+    fields = rad_gen_cli.get_dataclass_fields(),
     bases = (RadGenCLI,))
 
 
@@ -760,7 +1055,7 @@ class AsicDseCLI(ParentCLI):
 
         # AsicDSE TOP LEVEL FIELDS
         # TODO rename with fpath convension
-        GeneralCLI(key = "result_search_path", datatype = str, help_msg = "Path to config file describing sweep tasks and containing design parameters to sweep"),
+        GeneralCLI(key = "result_search_path", datatype = str, help_msg = "Path to output tree to search for results"),
 
         # RUN MODE
         GeneralCLI(key = "mode.vlsi.run", shortcut = "-r", datatype = str, choices = ["serial", "parallel", "gen_scripts"], default_val = "serial", help_msg = "Specify if flow is run in serial or parallel for sweeps"),
@@ -779,8 +1074,6 @@ class AsicDseCLI(ParentCLI):
         GeneralCLI(key = "scripts.gds_to_area_fname", datatype = str, help_msg = "Filename for converting GDS to area and of output .csv file"),
         
         # COMMON ASIC FLOW
-        # GeneralCLI(key = "common_asic_flow.top_lvl_module", shortcut = "-t", datatype = str, help_msg = "Top level module of design"),
-        # GeneralCLI(key = "common_asic_flow.hdl_path", shortcut = "-v", datatype = str, help_msg = "Path to directory containing hdl files"),
         GeneralCLI(key = "common_asic_flow.db_libs", datatype = str, nargs = "*", help_msg = "db libs used in synopsys tool interactions, directory names not paths"),
         
         # FLOW STAGES
@@ -825,16 +1118,16 @@ AsicDseArgs = get_dyn_class(
 )
 
 
-
-
-
-
-
-
 @dataclass
 class VLSIMode:
     """ 
         Mode settings associated with running VLSI flow
+
+        Attributes:
+            run: what mode to run it in?
+            flow: what flow backend to use?
+            enable: Do we actually execute the ASIC flow tools?
+            config_pre_proc: Do we need to preprocess the config file for the flow?
     """
     # specify if flow is run in serial or parallel for sweeps 
     run: str = None # choices: ["serial", "parallel", "gen_scripts"]
@@ -867,16 +1160,15 @@ class VLSIMode:
             # We don't set config_pre_proc to false as its an invalid parameter to be set for this mode of operation
                 
 
-
-            
-
 @dataclass 
 class AsicDseMode:
     """ 
-    The mode in which the RADGen tool is running
-    Ex. 
-     - Sweep mode
-     - Single design mode
+        The mode in which the ASIC-DSE subtool is running
+
+        Attributes:
+            sweep_gen: Are we in sweep mode?
+            result_parse: Are we in result parse mode?
+            vlsi: VLSIMode object for running VLSI flow 
     """
     sweep_gen: bool = False # run sweep config, header, script generation
     result_parse: bool = False # parse results 
@@ -886,7 +1178,12 @@ class AsicDseMode:
             self,
             sweep_conf_valid: bool, 
             compile_results: bool,
-    ):
+    ) -> None:
+        """
+            Args:
+                sweep_conf_valid: from higher level init function, are preconditions met to run in sweep mode?
+                compile_results: is the compile_results flag set? 
+        """
         # If in sweep mode
         if sweep_conf_valid:
             # If result flat not set we generate sweeps
@@ -898,18 +1195,24 @@ class AsicDseMode:
                 self.result_parse = True
 
 
-
 @dataclass
 class SRAMCompilerSettings:
     """
         Paths related to SRAM compiler outputs
-        If not specified in the top level config file, will use default output structure (sent to rad gen input designs directory)
+
+        Attributes:
+            rtl_out_dpath: path to output directory for RTL files generated by SRAM compiler
+            config_out_dpath: path to output directory for config files generated by SRAM compiler
+            scripts_out_dpath: path to output directory for scripts generated by SRAM compiler
     """
     rtl_out_dpath: str = None 
     config_out_dpath: str = None 
     scripts_out_dpath: str = None
     
     def init(self, project_tree: Tree):
+        """
+            Initializes the paths for the SRAM compiler settings, based on initialized project tree
+        """
         self.config_out_dpath = project_tree.search_subtrees(f"sram_lib.configs.gen", is_hier_tag=True)[0].path  
         self.rtl_out_dpath = project_tree.search_subtrees(f"sram_lib.rtl.gen", is_hier_tag=True)[0].path         
         self.scripts_out_dpath = project_tree.search_subtrees(f"sram_lib.scripts", is_hier_tag=True)[0].path
@@ -918,7 +1221,7 @@ class SRAMCompilerSettings:
 @dataclass
 class StdCellLib:
     """
-        Paths and PDK information for the current rad gen run
+        Paths and PDK information for the current ASIC flow run
     """
     pdk_name: str = "asap7" # name of technology lib, this is what is searched for in either "hammer" or whatever other tool to find stuff like sram macros
     cds_lib: str = "asap7_TechLib" # name of technology library in cdslib directory, contains views for stdcells, etc needed in design
@@ -934,35 +1237,39 @@ class StdCellLib:
         )[0].path
         
 
-
-
-    
-
 @dataclass 
 class SRAMSweepParams:
+    """
+        Parameters for generating SRAMs from a PDK macro library.
+
+        Attributes:
+            sram_rtl_template_fpath: path to RTL file which will be modified by SRAM scripts to generate SRAMs, its an SRAM instantiation (supporting dual and single ports with ifdefs) wrapped in registers
+            mems:
+                List of dicts each of which contain the following elements:
+                    * rw_ports -> number of read/write ports
+                    * w -> sram width
+                    * d -> sram depth
+            rw_ports: list of rw ports to attempt to wrappers for single sram macros if they exist
+            widths: list of widths to attempt to wrappers for single sram macros if they exist
+            depths: list of depths to attempt to wrappers for single sram macros if they exist
+    """
     sram_rtl_template_fpath: str = None # path to RTL file which will be modified by SRAM scripts to generate SRAMs, its an SRAM instantiation (supporting dual and single ports with ifdefs) wrapped in registers
-    """
-        List of dicts each of which contain the following elements:
-        - rw_ports -> number of read/write ports
-        - w -> sram width
-        - d -> sram depth
-    """
-    mems: List[Dict[str, int]] = None# Contains sram information to be created from existing SRAM macros using mappers
+    mems: List[Dict[str, int]] = None # Contains sram information to be created from existing SRAM macros using mappers
     # parameters for explicit macro generation
     rw_ports: List[int] = None
     widths: List[int] = None
     depths: List[int] = None
 
 
-# @dataclass
-# class ParamSweepInfo:
-#     params: dict
-
-
 @dataclass 
 class VLSICustomMap():
     """
         Info about how to map "indirectly" defined VLSI parameters to the values which affect them in hammer
+
+        Attributes:
+            period: List of period values
+            core_util: List of core utilization values
+            effort: List of effort levels
     """
     period: List[str] = None # In format of "2 ns"
     core_util: List[float] = None # Target core utilization
@@ -979,7 +1286,14 @@ class VLSICustomMap():
     # metal_layers: List[int] = None
 
 @dataclass
-class VLSISweepParams(): #(ParamSweepInfo):
+class VLSISweepParams(): 
+    """
+        Attributes:
+            direct_map: Parameters which have a 1:1 mapping to those found in `hammer/config/default_types.yml`
+                This means that if the parameter desired to sweep is a list[dict] (as it is with vlsi.inputs.clocks)
+                then the data structure required as the input would be a list[list[dict]]
+            custom_map: Parameters which are mapped via custom functionality that exists in `asic_dse.design_sweep()` function
+    """
     # Parameters which have a 1:1 mapping to those found in `hammer/config/default_types.yml`
     # This means that if the parameter desired to sweep is a list[dict] (as it is with vlsi.inputs.clocks)
     #   then the data structure required as the input would be a list[list[dict]]
@@ -996,43 +1310,73 @@ class VLSISweepParams(): #(ParamSweepInfo):
         # assert len(set([ len(clock.periods) for clock in self.clocks ])) == 1
     
 
-
-
 @dataclass
 class RTLSweepParams():
     """
-        Contains information for sweeping designs
+        Contains information for sweeping designs with RTL parameters
 
-        parameters to sweep, each [key, dict] pair contains the following elements:
-        - key = name of parameter to sweep
-        - dict elements:
-            - vals -> sweep values for parameter defined in "key"
-            - <arbirary_additional_param_values> -> sweep values of same length of "vals" for any additional parameters which need to be swept at the same time
- 
+        Attributes:
+            base_header_fpath: fpath containing RTL header file for parameter sweeping
+            sweep: parameters to sweep, each [key, dict] pair contains the following elements:
+                * key = name of parameter to sweep
+                * dict elements:
+                    * vals -> sweep values for parameter defined in "key"
+                    * <arbirary_additional_param_values> -> sweep values of same length of "vals" for any additional parameters which need to be swept at the same time
+
     """
-    base_header_fpath: str # path to  containing RTL header file for parameter sweeping
+    base_header_fpath: str # fpath containing RTL header file for parameter sweeping
     sweep: dict 
+
 # TODO add validators
 @dataclass
 class DesignSweepInfo:
     """
         Information specific to a single sweep of design parameters, this corresponds to a single design in sweep config file
-        Ex. If sweeping clock freq in terms of [0, 1, 2] this struct contains information about that sweep
+        Required to do run any of the following tasks, for a design:
+            * Sweep the clock freq across periods of ["0ns", "1ns", "2ns"] and generate configs + scripts
+            * Generate SRAM RTL + configs + scripts
+            * Sweep NoC parameters and generate configs + scripts
+
+        Attributes:
+            base_config_path: path to hammer config of design
+            top_lvl_module: top level module of design
+            hdl_dpath: path to directory containing hdl files for design
+            type: options are "sram", "rtl" or "vlsi" TODO this could be instead determined by searching through parameters acceptable to hammer IR
+            flow_threads: number of vlsi runs which will be executed via output script in parallel (in terms of sweep parameters)
+            vlsi_params: # VLSI parameters to sweep
+            sram_params: # Parameters to generate SRAM RTL + configs
+            rtl_params: RTLSweepParams object
+            type_info: contains either RTLSweepInfo or SRAMSweepInfo depending on sweep type
+            tool_env_conf_fpaths: paths to hammer flow config files
+            flow_conf_fpaths: paths to hammer env config files
     """
     base_config_path: str = None # path to hammer config of design
     top_lvl_module: str = None # top level module of design
     hdl_dpath: str = None # path to directory containing hdl files for design
     type: str = None # options are "sram", "rtl_params" or "vlsi_params" TODO this could be instead determined by searching through parameters acceptable to hammer IR
     flow_threads: int = 1 # number of vlsi runs which will be executed in parallel (in terms of sweep parameters)
-    vlsi_params: VLSISweepParams = None # VLSI parameters to sweep
-    sram_params: SRAMSweepParams = None # Parameters to generate SRAM RTL + configs
-    rtl_params: RTLSweepParams = None
-    # type_info: Any = None # contains either RTLSweepInfo or SRAMSweepInfo depending on sweep type
-    # Optional params for hammer env or hammer flow configs which are shared across design sweeps
+    vlsi_params: VLSISweepParams = None # VLSI parameters to generate sweep configs, and scripts for
+    sram_params: SRAMSweepParams = None # Parameters to generate SRAM RTL, configs, and scripts for
+    rtl_params: RTLSweepParams = None # RTL parameters to sweep configs, and scripts for
+    # Optional params for hammer env or hammer flow configs which are shared across design sweeps, required to generate run scripts.
     tool_env_conf_fpaths: List[str] = None # paths to hammer flow config files
     flow_conf_fpaths: List[str] = None # paths to hammer env config files
 
-    def init(self, base_config: dict, project_tree: Tree):
+    def init(self, base_config: dict, project_tree: Tree) -> None:
+        """
+            Initializes:
+                * `sram_params.sram_rtl_template_fpath`
+                * `top_lvl_module`
+            From control signals:
+                * `self.type`
+            From data dependancies:
+                * `base_config`
+                * `project_tree`
+            
+            Args: 
+                base_config: dict containing a hierarchically parsed hammer config file
+                project_tree: Tree object containing the project directory structure
+        """
         if self.type == "vlsi" or self.type == "rtl":
             # Validation to ensure struct can operate in VLSI mode
             base_conf_input_files = base_config.get("synthesis.inputs.input_files")
@@ -1053,6 +1397,12 @@ class DesignSweepInfo:
 class ScriptInfo:
     """
         Filenames of various scripts used in RAD Gen
+
+        Attributes:
+            gds_to_area_fname: name for gds to area `.csh` and `.il` scripts
+            virtuoso_setup_path: path to an (t)csh script that sets up a virtuoso environment when sourced
+                acts as control signal for meathod of GDS conversion when using asap7 pdk
+
     """
     gds_to_area_fname: str = "get_area" # name for gds to area script & output csv file
     virtuoso_setup_path: str = None
@@ -1061,7 +1411,16 @@ class ScriptInfo:
 class FlowStage:
     """
         In arbitrary tooling flow, information about a specific stage of the flow
-        *Currently only supported for ASIC flow
+        Currently only supported for ASIC flow.
+
+        Attributes:
+            tag: What stage of flow is this? TODO link to a list of legal tags
+            exec_idx: Index of execution in flow
+            run: Should this stage be run?
+            tool: What tool should be used for this stage? TODO link to a list of legal tools
+        
+        Todo: 
+            * Add verification for legal `tags`, and `tools`
     """
     tag: str  = None # What stage of flow is this? TODO link to a list of legal tags
     exec_idx: int = None # Index of execution in flow
@@ -1071,7 +1430,14 @@ class FlowStage:
 @dataclass
 class FlowStages:
     """
-        This struct stores the possible + default flow stages for a design through the ASIC DSE flow
+        Stores the possible + default flow stages for a design through the ASIC VLSI flow
+        
+        Attributes:
+            build: Flow stage that generates a makefile to manage flow dependencies and execution
+            sram: Flow stage during VLSI ASIC flow required if using SRAM macros in design
+            syn: Flow stage for synthesis
+            par: Flow stage for place & route
+            pt: Flow stage for primetime (static timing analysis & power)
     """
     build: FlowStage = field(
         default_factory = lambda: FlowStage(
@@ -1093,7 +1459,22 @@ class FlowStages:
         default_factory = lambda: FlowStage(
             tag = "pt", run = False, tool = "synopsys")
     )
-    def init(self, only_parse_flag: bool):
+
+    def init(self, only_parse_flag: bool) -> None:
+        """
+            Initializes:
+                * `syn.run`
+                * `par.run`
+                * `pt.run`
+            From dependancies:
+                * `only_parse_flag`
+                * `syn.run`
+                * `par.run`
+                * `pt.run`
+
+            Args:
+                only_parse_flag: flag to only parse the design, not run any flow stages
+        """
         run_all_flow: bool = not (
             self.syn.run or self.par.run or self.pt.run
         ) and not only_parse_flag
@@ -1107,15 +1488,14 @@ class FlowStages:
             self.pt.run = False
         
 
-
-
-
 @dataclass 
 class HammerFlow:
     """ 
-        ASIC flow related design specific settings relevant the following catagories:
-        - paths
-        - flow stage information
+        Holds Hammer specific settings for the VLSI ASIC flow
+
+        Attributes:
+            cli_driver_bpath: path to hammer driver executable
+            hammer_driver: driver object used to wrap around and access the hammer database 
     """
     
     # Hammer Info
@@ -1129,6 +1509,20 @@ class HammerFlow:
             tool_env_conf_fpaths: List[str],
             flow_conf_fpaths: List[str], 
     ):
+        """
+            Initializes:
+                * `hammer_driver`
+                * `cli_driver_bpath`
+            From dependancies:
+                * `sweep_conf_fpath`
+                * `flow`
+                * `tool_env_conf_fpaths`
+                * `flow_conf_fpaths`
+            
+            Args:
+                sweep_conf_fpath: path to config file describing sweep tasks and containing design parameters to sweep
+                flow: mode which hammer flow is run in, from `AsicDseMode.`
+        """
         hammer_flow_enable: bool = (
             # Not in sweep mode
             sweep_conf_fpath == None and
@@ -1163,12 +1557,19 @@ class HammerFlow:
                 self.cli_driver_bpath = "hammer-vlsi"
 
 
-
-
-
-
 @dataclass
 class CommonAsicFlow:
+    """
+        Settings common to VLSI asic flow for all designs + backends
+
+        Attributes:
+            top_lvl_module: top level module of design
+            hdl_dpath: path to root directory containing hdl src files
+            flow_conf_fpaths: paths to flow config files, these can be either custom or hammer format
+            tool_env_conf_fpaths: paths to hammer environment configuration file (used to specify industry tool paths + licenses)
+            db_libs: db libs used in synopsys tool interactions, dnames
+            flow_stages: flow stages
+    """
     top_lvl_module: str = None # top level module of design
     hdl_dpath: str       = None # path to directory containing hdl files
     flow_conf_fpaths: List[str] = None # paths to flow config files, these can be either custom or hammer format
@@ -1181,6 +1582,20 @@ class CommonAsicFlow:
         default_factory = lambda: FlowStages() # flow stages being run 
     )
     def init(self, pdk_name: str):
+        """
+            Initializes:
+                * `db_libs`
+            From control signals:
+                * `pdk_name`
+                * `self.flow_stages.sram.run`
+                * `self.db_libs` 
+            From data dependancies:
+                * `pdk_name`
+            
+            Args:
+                pdk_name: name of the PDK being used that determines the path to search for db libs
+                    from `stdcell_lib.pdk_name`
+        """
         if not self.db_libs and pdk_name is not None:
             if self.flow_stages.sram.run:
                 self.db_libs = ["sram_db_libs", f"{pdk_name}_db_libs"]
@@ -1233,26 +1648,32 @@ class CommonAsicFlow:
 @dataclass
 class AsicDSE:
     """
-        These settings are applicable to a single execution of the RAD Gen tool from command line 
+        Data structure required to run the `asic_dse` subtool.
 
-        Settings which are used by users for higher level data preperation such as following:
-        - Preparing designs to be swept via RTL/VLSI parameters
-        - Using the SRAM mapper
+        Attributes:
+            common: common settings for RAD Gen from `Common`
+            mode: modes of operation in which RAD Gen can be / is running
+            stdcell_lib: technology information for the design
+            scripts: script information for RAD Gen
+            sweep_conf_fpath: path to sweep configuration file containing design parameters to sweep
+            result_search_path: path which will look for various output obj directories to parse results from
+            common_asic_flow: common asic flow settings for all designs
+            asic_flow_settings: asic flow settings for single design
+            custom_asic_flow_settings: custom asic flow settings
+            design_sweep_info: sweep specific information for a single design
+            sram_compiler_settings: paths related to SRAM compiler outputs
+            design_out_tree: Tree for the design output directory structure        
     """
     common: Common # common settings for RAD Gen
-    # env_settings: EnvSettings # env settings relative to paths and filenames for RAD Gen
     mode: AsicDseMode # mode in which RAD Gen is running
     stdcell_lib: StdCellLib # technology information for the design
     scripts: ScriptInfo = None # script information for RAD Gen
-    # project_name: str = None # name of project, this will be used to create a subdir in the 'projects' directory which will store all files related to inputs for VLSI flow. Needed if we want to output configurations or RTL and want to know where to put them
     sweep_conf_fpath: str = None # path to sweep configuration file containing design parameters to sweep
     result_search_path: str = None # path which will look for various output obj directories to parse results from
-    # top_lvl_module: str = None # top level module of design being run or swept 
     common_asic_flow: CommonAsicFlow = None # common asic flow settings for all designs
     asic_flow_settings: HammerFlow = None # asic flow settings for single design
     custom_asic_flow_settings: Dict[str, Any] = None # custom asic flow settings
     design_sweep_info: DesignSweepInfo = None # sweep specific information for a single design
-    # design_sweep_infos: List[DesignSweepInfo] = None # sweep specific information for a single design
     sram_compiler_settings: SRAMCompilerSettings = None # paths related to SRAM compiler outputs
     # ASIC DSE dir structure collateral
     design_out_tree: Tree = None
@@ -1267,7 +1688,29 @@ class AsicDSE:
 
 @dataclass
 class Hardblock:
-    asic_dse_cli: AsicDseCLI 
+    """
+        Info required to describe a hardblock module in custom FPGA fabric during COFFE flow
+
+        Attributes:
+            asic_dse_cli: "asic_dse" subtool arguments for invoking the the ASIC stdcell flow for hardblock design
+            name: name of the hardblock
+            num_gen_inputs: number of inputs to the hard block from general programmable routing
+            crossbar_population: population (%) of crossbar switches in the hard block local interconnect
+            height: height of the hard block in logic clusters
+            num_gen_outputs: number of outputs from the hard block to general programmable routing
+            num_dedicated_outputs: number of outputs from the hard block to dedicated routing
+            soft_logic_per_block: soft logic per hardblock in tiles
+            area_scale_factor: factor by which the area is scaled to convert stdcell results to a process technology
+            freq_scale_factor: factor by which the frequency is scaled to convert stdcell results to a process technology
+            power_scale_factor: factor by which the power is scaled to convert stdcell results to a process technology
+            input_usage: percentage of inputs used in the hard block
+            num_crossbars: number of crossbars in the hard block
+            crossbar_modelling: type of crossbar modelling to use choices are ["optimistic"]
+
+    """
+    # asic_dse_cli: AsicDseCLI 
+    asic_dse_cli: AsicDseArgs
+
     # COFFE tx sizing hb settings
     name: str
     num_gen_inputs: int
@@ -1286,6 +1729,9 @@ class Hardblock:
 
 @dataclass
 class CoffeCLI(ParentCLI):
+    """
+        Command line args for the "coffe" subtool, used for automatic transistor sizing for custom FPGA fabric
+    """
     cli_args: List[GeneralCLI] = field(default_factory = lambda: [
         GeneralCLI(key = "fpga_arch_conf_path", shortcut = "-f", datatype = str, help_msg = "path to config file containing coffe FPGA arch information"),
         GeneralCLI(key = "hb_flows_conf_path", shortcut = "-hb", datatype = str, help_msg = "path to config file containing coffe hard block flows information"),
@@ -1299,7 +1745,7 @@ class CoffeCLI(ParentCLI):
         GeneralCLI(key = "size_hb_interfaces", shortcut = "-sh", datatype = float, default_val = 0.0, help_msg = "perform transistor sizing only for hard block interfaces"),
         GeneralCLI(key = "quick_mode", shortcut = "-q", datatype = float, default_val = -1.0, help_msg = "minimum cost function improvement for resizing, Ex. could try 0.03 for 3% improvement"),
         GeneralCLI(key = "ctrl_comp_telemetry_fpath", shortcut = "-ct", datatype = str, help_msg = "path to control compare telemetry file"),
-        # Additional Args for FPL'24
+        # Additional Args for Refactor
         GeneralCLI(key = "rrg_data_dpath", shortcut = "-rrg", datatype = str, help_msg = "Path to directory containing parsed RRG output csvs"),
         GeneralCLI(key = "pass_through", shortcut = "-pass", datatype = bool, action = "store_true", help_msg = "Flag which enables pass-through mode for COFFE, this does NOT run spice simulations but allows the tool to be run to the end for debugging purposes" ),
         GeneralCLI(
@@ -1319,6 +1765,9 @@ CoffeArgs = get_dyn_class(
 
 @dataclass
 class RoutingWireType:
+    """
+        General programmable wire type for FPGA fabric
+    """
     name: str   = None # Identifier, should keep in line with RRG segment name
     len: int    = None # length in tiles
     freq: int   = None # frequency of wires in channel
@@ -1335,6 +1784,46 @@ class FsInfo:
 
 @dataclass
 class FPGAArchParams:
+    """
+        Input params to describe an FPGA custom architecture for COFFE flow
+
+        Attributes:
+            N: Num BLEs per cluster
+            K: Num inputs per BLE
+            wire_types: list of gen prog routing wires
+            Fs_mtx: If using Fs to describe switch pattern rather than RRG we use these to get our switch block info
+            Or: Num BLE outputs to general routing 
+            Ofb: Num BLE outputs to local routing
+            Fclocal: Population of local routing MUXes
+            Rsel: Register select
+            Rfb: Register feedback muxes
+            use_fluts: Do we want to use fracturable Luts?
+            independent_inputs: How many LUT inputs should be independant of one another? can be as large as K-1
+            enable_carry_chain: Do we have a hard carry chain in our LBs?
+            carry_chain_type: legal options 'skip' and 'ripple'
+            FAs_per_flut: Number of Full Adders per fracturable LUT
+            vdd: supply voltage
+            vsram: SRAM supply voltage, also the boost voltage for pass transistor FPGAs
+            vsram_n: SRAM ground voltage
+            gate_length: gate length in nm
+            rest_length_factor: This parameter controls the gate length of PMOS level-restorers. For example, setting this paramater 
+                to 4 sets the gate length to 4x the value of 'gate_legnth'. Increasing the gate length weakens the 
+                PMOS level-restorer, which is sometimes necessary to ensure proper switching.
+            min_tran_width: For FinFETs, minimum transistor refers to the contact width of a single-fin transistor (nm).
+                For Bulk I don't think this parameter is used 
+                COFFE uses this when it calculates source/drain parasitic capacit
+            trans_diffusion_length: Length of diffusion for a single-finger transistor (nm).
+                COFFE uses this when it calculates source/drain parasitic capacitances.
+            min_width_tran_area: Minimum-width transistor area (nm^2)
+                Look in design rules, make me 1 fin, shortest gate, contact on both sides, no diffusion sharing, 1 space between next transistor
+                Layout a single transistor pass DRC, look for sample layout
+            sram_cell_area: SRAM area (in number of minimum width transistor areas)
+            model_path: path to spice model file  Ex. /path/to/7nm_TT.l
+            model_library: name of spice model library Ex. 7NM_FINFET_HP
+            metal: R, C values for each metal layer
+            gen_routing_metal_pitch: pitch of general routing metal layers (nm)
+            gen_routing_metal_layers: number of metal layers used in gen routing
+    """
     N: int                              = None # Num BLEs per cluster
     K: int                              = None # Num inputs per BLE
     wire_types: List[RoutingWireType]   = None # list of gen prog routing wires
@@ -1420,6 +1909,28 @@ class FPGAArchParams:
 
 @dataclass
 class Coffe:
+    """
+        Data structure to run the "coffe" subtool.
+
+        Attributes:
+            common: common settings for RAD Gen
+            no_sizing: don't perform transistor sizing
+            opt_type: optimization type, options are "global" or "local"
+            initial_sizes: where to get initial transistor sizes options are "default" ... TODO find all valid options
+            re_erf: how many sizing combos to re-erf
+            area_opt_weight: area optimization weight
+            delay_opt_weight: delay optimization weight
+            max_iterations: max FPGA sizing iterations
+            size_hb_interfaces: perform transistor sizing only for hard block interfaces
+            quick_mode: minimum cost function improvement for resizing, could try 0.03 for 3% improvement
+            fpga_arch_conf: FPGA architecture configuration dictionary
+            ctrl_comp_telemetry_fpath: path to control compare telemetry file 
+            rrg_data_dpath: Path to directory containing parsed RRG output csvs
+            pass_through: Flag which enables pass-through mode for COFFE, this does NOT run spice simulations but allows the tool to be run to the end for debugging purposes
+            checkpoint_dpaths: Paths to spice subckt sizing grid search iterations from previous COFFE runs. This allows the current run to skip the found iterations and run spice simulations for missing iterations
+            arch_name: name of FPGA architecture
+            hardblocks: Hard block flows configuration dictionary
+    """
     common: Common # common settings for RAD Gen
     # args: CoffeArgs = None
     # TODO put coffe CLI in here
@@ -1443,8 +1954,6 @@ class Coffe:
     hardblocks: List[Hardblock] = None # Hard block flows configuration dictionary
 
 
-
-
 # ██╗ ██████╗    ██████╗ ██████╗ 
 # ██║██╔════╝    ╚════██╗██╔══██╗
 # ██║██║          █████╔╝██║  ██║
@@ -1456,8 +1965,15 @@ class Coffe:
 @dataclass
 class SpProcess:
     """
-    This represents a spice run which will be done
-    From a title a spice directory will be created
+        This represents a spice run to be executed.
+        From a title a spice directory will be created
+    
+        Attributes:
+            title: title of the spice run, which will be same as basename for `sp_dir`
+            top_sp_dir: parent directory to `sp_dir`
+            sp_dir: directory where the spice run will be executed and files will be generated
+            sp_file: path to the ".sp" spice file used for this simulation
+            sp_outfile: path to the output file ".lis"
     """
     title: str
     top_sp_dir: str # path to top level spice directory
@@ -1466,6 +1982,18 @@ class SpProcess:
     sp_outfile: str = None # output file ".lis"
 
     def __post_init__(self):
+        """
+            Initializes:
+                * `self.sp_dir`
+                * `self.sp_file`
+                * `self.sp_outfile`
+            From data dependancies:
+                * `self.title`
+                * `self.top_sp_dir`
+
+            Todo:
+                * refactor dir / file names / paths to be consistent with "fpath" / "dname" ...
+        """
         self.sp_dir = os.path.join(self.top_sp_dir,self.title)
         if not os.path.exists(self.sp_dir):
             os.makedirs(self.sp_dir)
@@ -1475,7 +2003,13 @@ class SpProcess:
 
 @dataclass
 class SpInfo:
-    """Spice subckt generation info"""
+    """
+        Spice directory / file structure information for "ic_3d" subtool.
+
+        Todo:
+            * Update to use `Tree` struct instead of current custom meathod
+        
+    """
     top_dir: str = os.path.expanduser("~/rad_gen")
     sp_dir: str = os.path.join(top_dir,"spice_sim")
     sp_sim_title: str = "ubump_ic_driver"
@@ -1510,7 +2044,24 @@ class SpInfo:
 
 @dataclass
 class SpSubCkt:
-    """Spice subckt generation info"""
+    """
+        Information to represent / manipulate a spice subcircuit defined from a ".sp" netlist. 
+        
+        Attributes:
+            * ports: dict of ports in the subcircuit containing the port name and index in which they are instantiated in spice
+            * params: dict of spice parameters for the subcircuit
+            * raw_sp_insts_lines: list of raw spice instance lines for the subcircuit (not referenced) TODO remove this
+            * name: name of the spice subcircuit
+            * element: element type of the subcircuit (cap, res, mfet, subckt, etc)
+            * prefix: prefix for the subcircuit element type, e.g. "C" for capacitor, or "X" for subcircuit
+            * insts: list of instances of the subcircuit
+            * direct_conn_insts: flag that determines if inputs and outputs of subckt instances are connected directly to the subckt ports during init
+        
+        Examples:
+            >>> print(self.ports)
+            {'in': {'name': 'n_in', 'idx': 0}, 'out': {'name': 'n_out', 'idx': 1}}
+            
+    """
 
     ports: dict
     params: dict = field(default_factory=lambda: {})
@@ -1521,10 +2072,17 @@ class SpSubCkt:
     # Element could be one of the following (cap, res, mfet, subckt, etc)
     element: str = "subckt"
     prefix: str = None
-    insts: list = None
+    insts: List[SpSubCktInst] = None
     direct_conn_insts: bool = False
 
     def print(self, summary: bool = False) -> str:
+        """
+            Prints the subcircuit information in a human readable format
+
+            Args:
+                summary: flag to print a summary of the subcircuit or a detailed view
+
+        """
         msg_lines = []
         if summary:
             line = ""
@@ -1552,9 +2110,10 @@ class SpSubCkt:
                 inst.print()
             return ""
 
-    def connect_insts(self):
+    def connect_insts(self) -> None:
         """
-        Connects the instances of the subckt together
+            Modifies the `instances` of this object to connect their ports together in a chain of inputs and ouputs
+            Connects the instances of the subckt together
         """
         for idx, inst in enumerate(self.insts):
             prev_tmp_int_node = f"n_{idx}"
@@ -1573,6 +2132,13 @@ class SpSubCkt:
             
                 # Connect las inst output to subckt output
     def __post_init__(self):
+        """
+            Initializes:
+                * `self.prefix`
+            From data dependancies:
+                * `self.direct_conn_insts`
+                * `self.element`
+        """
         prefix_lut = {
             "cap" : "C",
             "res" : "R",
@@ -1581,7 +2147,7 @@ class SpSubCkt:
             "mpfet" : "M",
             "subckt" : "X",
             "v_src" : "V",
-        }        
+        }
         self.prefix = prefix_lut[self.element]
         if (self.direct_conn_insts == True):
             self.connect_insts()
@@ -1590,7 +2156,15 @@ class SpSubCkt:
 @dataclass
 class SpSubCktInst:
     """
-        Information for instantiating a subcircuit in spice
+        Information for instantiating a subcircuit in spice, could be in a subcircuit or a testbench
+
+        Attributes:
+            * subckt: subcircuit type of instantiatation
+            * name: name of the instance
+            * conns: dictionary of connections for the instance
+            * parent_subckt: parent subcircuit of the instance
+            * param_values: dictionary of parameter values for the instance
+
     """
     subckt: SpSubCkt
     name: str                                           # Name of instantiation ie X<inst_name> ... <ports> ... <subckt_name>
@@ -1610,6 +2184,13 @@ class SpSubCktInst:
     #         return self.parent_subckt.find_top_subckt()
 
     def print(self, summary: bool = False) -> str:
+        """
+            Prints the subcircuit information in a human readable format
+
+            Args:
+                summary: flag to print a summary of the subcircuit or a detailed view
+
+        """
         if summary:
             line = ""
             line += f" {self.subckt.name:<20}" 
@@ -1630,7 +2211,18 @@ class SpSubCktInst:
 
 
     def get_sp_str(self) -> str:
-        """ Generates the instance line for a spice subckt """
+        """ 
+            Generates the instance instantiation line for a spice subckt or testbench
+
+            Returns:
+                spice instance line in format compatable with spice simulators
+
+            Raises:
+                AssertionError: If not all connections are made in the instantiation
+                
+            Todo:
+                * Fix to work for BUFFER DSE currently only used in COFFE 
+        """
         # TODO FIX to make work for BUFFER DSE currently only used in COFFE
         subckt_inst_sublines = [
             f"{self.name}",
@@ -1667,8 +2259,13 @@ class SpSubCktInst:
         elif self.param_values == None:
             self.param_values = {}
 
+
+# <TAG> <UNREFERENCED-TODO> see if this should be kept or deleted 
 @dataclass
 class TechInfo:
+    """
+        <TAG> <UNREFERENCED-TODO> see if this should be kept or deleted 
+    """
     # beol info
     mlayer_ic_res_list : list = None
     mlayer_ic_cap_list : list = None
@@ -1689,14 +2286,24 @@ class TechInfo:
 
 @dataclass
 class SpProcessData:
+    """
+        Used to represent spice process params required for simulating a particular process technology
+    """
     global_nodes : dict
     voltage_info : dict
     geometry_info : dict
     driver_info : dict
     tech_info: dict
 
+
 @dataclass
 class DriverSpModel:
+    """
+        Common node / parameter definitions used in "ic_3d" subtool. 
+        
+        Todo:
+            * <TAG> <REFACTOR-TODO> Integrate this data structure with COFFE or use COFFE methodology for defining these nodes and delete this data structure
+    """
     global_in_node: str = "n_in"
     global_out_node: str = "n_out"
     v_supply_param: str = "supply_v" 
@@ -1707,13 +2314,31 @@ class DriverSpModel:
     dut_out_node : str = "n_dut_out"
 
 
-
-
 @dataclass
 class SpVoltageSrc:
     """
         Data structure for specifying a voltage source 
         Only supportive of a pulse voltage source
+
+        Attributes:
+            name: (str) Name of voltage source
+            sp_name: (str) Name of voltage source written to spice file
+                Ex. if name = "IN" -> will be written out "VIN"
+            out_node: (str) Node connecting to output of voltage source
+            gnd_node: (str) Node connected to gnd
+            type: (str) Type of voltage source 
+                Ex. "PULSE" | "SINE" | "PWL" | "DC"
+            init_volt: (Value) Initial voltage OR constant voltage for DC voltage src
+            peak_volt: (Value) Peak voltage for pulse voltage src
+            delay_time: (Value) Delay time for pulse voltage src
+            rise_time: (Value) Rise time for pulse voltage src
+            fall_time: (Value) Fall time for pulse voltage src
+            pulse_width: (Value) Pulse width for pulse voltage src
+            period: (Value) Period for pulse voltage src
+        
+        Todo:
+            * <TAG> <REFACTOR-TODO> Delete this and use the one that exists with same name under 
+                `src.coffe.data_structs`
     """
     name: str # name of voltage source, ex. if name = "IN" -> will be written as "VIN"
     out_node: str # node connecting to output of voltage source
@@ -1728,10 +2353,23 @@ class SpVoltageSrc:
     period: str = None
 
 
-
-
 @dataclass
 class SpLocalSimSettings:
+    """
+        Data structure for specifying local simulation settings for "ic_3d" subtool buffer design space exploration testbench
+    
+        Attributes:
+            dut_in_vsrc: (SpVoltageSrc) voltage source for providing stimulus to the DUT
+            target_freq: (int) target frequency in MHz
+            target_period: (float) target period in ns
+            sim_time: (float) Total simulation time in ns
+            sim_prec: (float) Frequency of simulation sampling in ps
+            prec_factor: (float) Factor to be applied to the simulation time to ensure that all the measure statments are captured
+            sim_time_factor: (float) Factor to be applied to the simulation time to ensure that all the measure statments are captured
+    
+        Todo: 
+            * <TAG> <REFACTOR-TODO> Determine if to delete this or integrate with COFFE counterpart
+    """
 
     dut_in_vsrc: SpVoltageSrc # voltage source for providing stimulus to the DUT
 
@@ -1763,10 +2401,26 @@ class SpLocalSimSettings:
             self.dut_in_vsrc.period = f"{self.target_period}n"
 
 
-
-
 @dataclass 
 class SpGlobalSimSettings:
+    """
+        Global spice simulation settings for all sims in "ic_3d" subtool.
+
+        Attributes:
+            unit_lookups: unit lookups for time and voltage
+            unit_lookup_factors: unit lookup factors for time and voltage
+            abs_unit_lookups: absolute unit lookups for time and voltage
+            sp_options: spice options for simulation
+            gnd_node: ground node
+            vdd_node: VDD node
+            vdd_param: VDD node parameter name
+
+        Todos:
+            * <TAG> <TODO-REFACTOR> move `gnd_node`, `vdd_node`, and `vdd_param` from here to
+                a more appropriate location and common with COFFE
+            * <TAG> <TODO-REFACTOR> integrate with COFFE or delete this data structure
+
+    """
     # These unit lookups will set the default unit value of returned hspice sim plots
     # For below example 1ps will be the default time unit and 1mV will be the default voltage unit
     unit_lookups: dict = field(default_factory = lambda: {
@@ -1814,24 +2468,50 @@ class SpGlobalSimSettings:
     vdd_param: str = "supply_v" #VDD node
 
 
-    bottom_die_inv_stages: int = 1 # This should be removed pray this inst being used somewhere  
+    # bottom_die_inv_stages: int = 1 # This should be removed pray this inst being used somewhere  
 
 
 ########################## GENERAL PROCESS INFORMATION ###########################
 
 @dataclass
 class SpOptSettings:
+    """
+        Used to define an HSPICE `.opt` statement for a single param.
+        
+        Attributes:
+            init: Initial value for the param
+            range: Range of values for the param
+            step: Step size for the param
+        
+        Todo:
+            * <TAG><TODO-REFACTOR> Integrate with common spice data structure 
+    """
     init: float
     range: List[float]
     step: float
 
     def __post_init__(self):
+        """
+            Verification that the range is valid for the initial value
+        """
         if min(self.range) > self.init or max(self.range) < self.init:
             raise ValueError(f"Initial value {self.init} is not within range {self.range}")
 
 
 @dataclass
 class SpParam:
+    """
+        Describes a single spice parameter used in "ic_3d" subtool
+
+        Attributes:
+            name: name of the parameter
+            suffix: unit suffix for the parameter
+            value: value of the parameter
+            opt_settings: optimization settings for the parameter
+
+        Todo:
+            * <TAG><TODO-REFACTOR> Integrate with common spice data structure 
+    """
     # param name
     name: str
     # param unit (ex. f, p, etc)
@@ -1849,6 +2529,27 @@ class SpParam:
 
 @dataclass
 class MlayerInfo:
+    """
+        Describes a Metal Layer in a process technology
+
+        Attributes:
+            * idx: Index of the metal layer in stack from lowest to highest
+            * wire_res_per_um: Wire resistance per unit length in Ohms / um
+            * wire_cap_per_um: Wire capacitance per unit length in fF / um
+            * via_res: Via resistance in Ohms
+            * via_cap: Via capacitance in fF
+            * via_pitch: Via pitch in nm
+            * pitch: Pitch in nm
+            * t_barrier: Thickness of the barrier in nm
+            * height: Height of the metal layer in nm
+            * width: Width of the metal layer in nm
+            * sp_params: Spice parameters for the metal layer
+
+        Todo: 
+            * Define and verify which direction the vias are going (for `via_res` and `via_cap`).
+                By this I mean I'm forgetting if when we have a `MlayerInfo` object for metal layer 0, 
+                is the associated via going from M0 -> M1? or POLY -> M0? I forget.
+    """
     idx: int # LOWEST -> TOP
     wire_res_per_um: float # Ohm / um
     wire_cap_per_um: float # fF / um
@@ -1862,6 +2563,17 @@ class MlayerInfo:
     # Spice Info for MLayer / Vias
     sp_params: dict = field(default_factory = lambda: {})
     def __post_init__(self):
+        """
+            Initializes:
+                * `sp_params`
+            From data dependancies:
+                * `self.idx` 
+                * `self.wire_res_per_um`
+                * `self.wire_cap_per_um`
+                * `self.via_res`
+                * `self.via_cap`
+        """
+
         # for each member of mlayer
         for sp_param in ["wire_res_per_um","wire_cap_per_um","via_res","via_cap"]:
             attr_val = getattr(self, sp_param)
@@ -1881,6 +2593,18 @@ class MlayerInfo:
 
 @dataclass
 class ViaStackInfo:
+    """
+        Information for a stack of vias connecting two metal layers.
+
+        Attributes:
+            mlayer_range: List of two integers representing the metal layers the via stack connects
+                e.g. [1, 5] to connect M1 -> M5
+            res: Via stack resistance in Ohms
+            cap: Via stack capacitance in fF
+            height: Height of the via stack in nm
+            avg_mlayer_cap_per_um: Average capacitance per unit length of the metal layers in fF / um
+            sp_params: Spice parameters for the via stack
+    """
     mlayer_range: List[int]
     res: float # Ohm
     height: float # nm
@@ -1889,6 +2613,14 @@ class ViaStackInfo:
     cap: float = None # fF
     sp_params: dict = field(default_factory = lambda: {})
     def __post_init__(self):
+        """
+            Initializes:
+                * `cap`
+                * `sp_params`
+            From data dependancies:
+                * `self.height`
+                * `self.avg_mlayer_cap_per_um`
+        """
         # This is a rough (conservative estimation for via capacitance, probably much lower than this)
         self.cap = (self.height * 1e-3) * (self.avg_mlayer_cap_per_um)
         for sp_param in ["res", "cap"]:
@@ -1906,16 +2638,29 @@ class ViaStackInfo:
 
 @dataclass
 class TxGeometryInfo:
-    """ Geometry information for a single transistor of process """
-    # hfin: float # nm
+    """ 
+        Geometry information for a single transistor of a process
+
+        Attributes:
+            min_tx_contact_width: Minimum width of the transistor contact in nm
+            tx_diffusion_length: Diffusion length of the transistor in nm
+            gate_length: Gate length of the transistor in nm
+            min_width_tx_area: Minimum width of the transistor area in nm^2
+            sp_params: Spice parameters for the transistor
+    """
+    # hfin: float # nm TODO figure out if this is needed
     min_tx_contact_width: float # nm
     tx_diffusion_length: float # nm
     gate_length: float # nm
     min_width_tx_area: float # nm^2
     sp_params: dict = field(default_factory = lambda: {})
     def __post_init__(self):
+        """
+            Initializes:
+                * `sp_params`
+
+        """
         sp_params = [field.name for field in fields(self) if field.name != "sp_params"]
-        #sp_params = [ "min_tx_contact_width", "tx_diffusion_length", "gate_length", "hfin"]
         for sp_param in sp_params:
             attr_val = getattr(self, sp_param)
             suffix = "n"
@@ -1927,6 +2672,17 @@ class TxGeometryInfo:
 
 @dataclass
 class ProcessInfo:
+    """
+        Represents a PDK with metal layer and Transistor geometry information
+
+        Attributes:
+            * name: Name of the process 
+            * num_mlayers: Number of metal layers in the process
+            * mlayers: List of MlayerInfo objects for each metal layer in the process
+            * contact_poly_pitch: Pitch of the contact poly in nm
+            * via_stack_infos: List of ViaStackInfo objects for each via stack in the process
+            * tx_geom_info: TxGeometryInfo object for the process
+    """
     name: str
     num_mlayers: int
     mlayers: List[MlayerInfo]
@@ -1941,21 +2697,48 @@ class ProcessInfo:
 ########################## PDN MODELING ###########################
 @dataclass
 class GridCoord:
+    """
+        Grid Coordinate for a 2D space
+    """
     x: float
     y: float
 
 @dataclass
 class RectBB:
+    """
+        Rectangular bounding box object used to represent an object in 2D space like a TSV
+
+        Attributes:
+            p1: bottom left corner of the bounding box      <TAG><TODO-VERIFY-COMMENT>
+            p2: top right corner of the bounding box        <TAG><TODO-VERIFY-COMMENT>
+            bb: shapely polygon object representing the bounding box
+            label: label for what this BB represents
+    """
     p1 : GridCoord
     p2 : GridCoord
     # label for what this BB represents
-    bb : sh.box
+    bb : sh.Polygon
     # tsv_grid -> "TSV" "KoZ"
     # C4_grid -> "PWR" "GND" "IO"
     label : str
 
 @dataclass
 class GridPlacement:
+    """
+        Used for representing a grid of objects in a 2D grid space. e.g. TSVs, C4 bumps, etc
+
+        Attributes:
+            start_coord: GridCoord object representing the bottom left corner of the grid in plane
+            h: horizontal distance in um for each TSV
+            v: vertical distance in um for each TSV
+            s_h: horizontal distance between tsvs in um
+            s_v: vertical distance between tsvs in um
+            dims: List of two integers representing the dimensions of the grid. e.g. [10, 10] for a 10x10 grid
+            grid: list of list of Rectangle objects indexed by [col][row]
+            tag: tag for what this grid is representing
+            area: area of the grid in um^2 (unsure if used or where its set) <TAG><TODO-VERIFY-COMMENT>
+            bb_poly: shapely Polygon object representing the bounding box of the whole grid
+    """
     start_coord: GridCoord
     # vertical and horizontal distance in um for each TSV
     h: float 
@@ -1970,8 +2753,12 @@ class GridPlacement:
     tag: str = None # used to identify what this grid is for
     area: float = None # area of the grid in um^2
     bb_poly: sh.Polygon = None # Polygon containing a bounding box for the grid (xmin, ymin, xmax, ymax)
-    # def update_grid()
     def __post_init__(self) -> None:
+        """
+            Initializes:
+                * `self.grid`
+                * `self.bb_poly`
+        """
         self.grid = [[None]*self.dims[1] for _ in range(self.dims[0])]
         for col in range(self.dims[0]):
             for row in range(self.dims[1]):
@@ -2001,7 +2788,26 @@ class GridPlacement:
                 (max(x for _,_,x,_ in [poly.bounds for poly in poly_bbs]), max(y for _,y,_,_ in [poly.bounds for poly in poly_bbs])) # BR pos (xmax, ymin)
             ]
         )
-    def gen_fig(self, fig: go.Figure, fill_color: str, opacity: str, label_filt: str = None, layer: str = "above", line_color: str = "black") -> None:
+    def gen_fig(self, 
+        fig: go.Figure, 
+        fill_color: str, 
+        opacity: str, 
+        label_filt: str = None, 
+        layer: str = "above", 
+        line_color: str = "black"
+    ) -> None:
+        """
+            Generates a plotly figure of the grid. Modifies the input `fig` argument
+
+            Args:
+                fig: Plotly figure object to add the grid to
+                fill_color: Fill color for the grid
+                opacity: Opacity of the grid
+                label_filt: Filter for the label of the grid
+                layer: Layer to plot the grid on
+                line_color: Line color for
+            
+        """
         for col in range(self.dims[0]):
             for row in range(self.dims[1]):
                 if label_filt is None or self.grid[col][row].label == label_filt:
@@ -2021,9 +2827,20 @@ class GridPlacement:
                     )
 
 
-
 @dataclass
 class SingleTSVInfo:
+    """
+        Information for a single TSV
+
+        Attributes:
+            height: Height of the TSV in um
+            diameter: Diameter of the TSV in um
+            pitch: Pitch of the TSV grid in um
+            resistivity: Resistivity of the TSV in Ohm * um
+            keepout_zone: Keepout zone of the TSV in um
+            area: Area of the TSV in um^2
+            resistance: Resistance of the TSV in Ohm
+    """
     height: int #um
     diameter: int #um
     pitch: int #um
@@ -2032,6 +2849,12 @@ class SingleTSVInfo:
     area: float = None # um^2
     resistance: float = None # Ohm
     def __post_init__(self):
+        """
+            Initializes:
+                * `self.area`
+            Data dependancies:
+                * `self.diameter`
+        """
         self.area = (self.diameter**2)
         # self.resistance = self.resistivity * self.height / (self.diameter**2)
 
@@ -2040,6 +2863,13 @@ class SingleTSVInfo:
 class PolyPlacements:
     """
         This dataclass is used for representing a list of polygons in a 2D space
+    
+        Attributes:
+            rects: List of RectBB objects representing the polygons
+            tag: tag for what this grid is representing
+            area: area of the grid in um^2 (unsure if used or where its set) <TAG><TODO-VERIFY-COMMENT>
+            bb_poly: shapely Polygon object representing the bounding box of the whole grid
+    
     """
     # grid start and end in um
     rects: List[RectBB] = None
@@ -2047,7 +2877,26 @@ class PolyPlacements:
     area: float = None # area of the grid in um^2
     bb_poly: sh.Polygon = None # Polygon containing a bounding box for the grid (xmin, ymin, xmax, ymax)
 
-    def gen_fig(self, fig: go.Figure, fill_color: str, opacity: str, label_filt: str = None, layer: str = "above", line_color: str = "black") -> None:
+    def gen_fig(
+            self, 
+            fig: go.Figure, 
+            fill_color: str, 
+            opacity: str, 
+            label_filt: str = None, 
+            layer: str = "above", 
+            line_color: str = "black"
+    ) -> None:
+        """
+            Generates a plotly figure of the grid. Modifies the input `fig` argument
+
+            Args:
+                fig: Plotly figure object to add the grid to
+                fill_color: Fill color for the grid
+                opacity: Opacity of the grid
+                label_filt: Filter for the label of the grid
+                layer: Layer to plot the grid on
+                line_color: Line color for
+        """
         for rect in self.rects:
             if label_filt is None or rect.label == label_filt:
                 fig.add_shape(
@@ -2068,6 +2917,21 @@ class PolyPlacements:
 @dataclass
 # per C4 bump TSV info
 class TSVInfo:
+    """
+        Information for the TSV grid
+
+        Attributes:
+            * single_tsv: SingleTSVInfo object for a single TSV
+            * placement_setting: mode of operation for the TSV grid ("dense" or "checkerboard")
+            * koz_grid: GridPlacement object for the KoZ grid, need to figure out if this is used <TAG><TODO-VERIFY-COMMENT>
+            * tsv_grid: GridPlacement object for the TSV grid, need to figure out if this is used <TAG><TODO-VERIFY-COMMENT>
+            * tsv_rect_placements: PolyPlacements object for the TSV grid, figure out where this is used
+            * koz_rect_placements: PolyPlacements object for the KoZ grid, figure out where this is used
+            * dims: List of two integers representing the dimensions of the grid. e.g. [10, 10] for a 10x10 grid
+            * area_bounds: List of two floats representing the maximum x and y bounds of the grid in um
+            * resistance: Resistance of the TSV grid in Ohms
+
+    """
     single_tsv: SingleTSVInfo
     placement_setting: str # "dense" or "checkerboard"
     koz_grid: GridPlacement
@@ -2092,6 +2956,16 @@ class TSVInfo:
 
 @dataclass
 class SingleC4Info:
+    """
+        Information for a single C4 bump
+
+        Attributes:
+            height: Height of the C4 bump in um
+            diameter: Diameter of the C4 bump in um
+            pitch: Pitch of the C4 grid in um
+            area: Area of the C4 bump in um^2
+            resistance: Resistance of the C4 bump in Ohms
+    """
     height: int #um
     diameter: int #um
     pitch: int #um 
@@ -2102,6 +2976,18 @@ class SingleC4Info:
 
 @dataclass
 class C4Info:
+    """
+        Information for the C4 grid. C4 bumps connect the package to interposer.
+
+        Attributes:
+            single_c4: Information for a single C4 bump
+            placement_setting: mode of operation for the C4 grid ("dense" or "checkerboard")
+            margin: Margin between edge of device and start of C4 grid in um
+            grid: GridPlacement object for the C4 grid
+            max_c4_placements: PolyPlacements object containing the maximum number of C4s for a given die area
+            max_c4_dims: List of two integers representing the max dimensions for a given die area
+            pdn_dims: List of two integers representing the dimensions of the power deliver network on C4 bumps 
+    """
     single_c4: SingleC4Info
     placement_setting: str # "dense" or "checkerboard"
     # margin between edge of device and start of C4 grid
@@ -2186,15 +3072,27 @@ class PDNSimSettings:
 ######################## GENERATING FPGA SECTOR FLOORPLAN ########################
 @dataclass
 class Coord:
+    """
+        Integer coordinate point
+    """
     x: int
     y: int
 
 @dataclass
 class BlockRegion:
+    """
+        Region of a block in a sector
+
+        Attributes:
+            resource_tag: what type of resource does this represent in the fpga fabric options are ["dsp", "bram", "lb", "io", "gnd", "pwr"]
+            pwr_region_coord: Coord object representing the power region coordinate <TAG><TODO-VERIFY-COMMENT>
+            sector_coord: Coord object representing the sector coordinate <TAG><TODO-VERIFY-COMMENT>
+    """
     resource_tag: str # "dsp", "bram", "lb", "io", "gnd", "pwr"
     pwr_region_coord: Coord # coord in grid of power regions
     sector_coord: Coord 
 
+# TODO deletion candidate
 # @dataclass
 # class PwrRegion:
 #     # abs_dims: List[float] # [width, height]
@@ -2204,6 +3102,20 @@ class BlockRegion:
 
 @dataclass 
 class SectorInfo:
+    """
+        Information for a sector in the FPGA fabric
+        
+        Attributes:
+            width: width of the sector in LB tiles
+            height: height of the sector in LB tiles
+            bram_cols: number of BRAM columns in the sector
+            dsp_cols: number of DSP columns in the sector
+            sector_grid: 2D list of BlockRegion objects representing the sector grid
+
+        Todo:
+            * Figure out what sector refers to
+            * Integrate into FPGA floorplan generator
+    """
     # All below are calculated from floorplan and TSVs
     width: int = None # in LB tiles
     height: int = None # in LB tiles
@@ -2215,6 +3127,16 @@ class SectorInfo:
 
 @dataclass
 class FPGAResource:
+    """
+        Information for a resource in the FPGA fabric. e.g. LBs, DSPs, BRAMs
+
+        Attributes:
+            total_num: Total number of this type of resource in the FPGA
+            abs_area: Absolute area of the resource in um^2
+            rel_area: Relative area of the resource in LBs
+            abs_width: Absolute width of the resource in um
+            abs_height: Absolute height of the resource in um
+    """
     total_num: int
     abs_area: float # um^2
     rel_area: int # area in LBs (assume aspect ratio of W / L = Area / 1)
@@ -2223,6 +3145,19 @@ class FPGAResource:
 
 @dataclass
 class FPGAInfo:
+    """
+        Information for the FPGA fabric
+
+        Attributes:
+            sector_info: SectorInfo object for the FPGA
+            sector_dims: List of two integers representing the dimensions of the FPGA in sectors. e.g. [10, 10] for a 10x10 FPGA
+            lbs: FPGAResource object for the LBs in the FPGA
+            dsps: FPGAResource object for the DSPs in the FPGA
+            brams: FPGAResource object for the BRAMs in the FPGA
+            grid_height: Height of the FPGA in LB tiles
+            grid_width: Width of the FPGA in LB tiles
+
+    """
     sector_info: SectorInfo
     sector_dims: List[int] # [x, y] number of sectors
     lbs: FPGAResource 
@@ -2238,6 +3173,12 @@ class FPGAInfo:
 def get_total_poly_area(boxes: List[sh.Polygon]) -> float:
     """ 
         Get total area of polygons, subtracts overlap area bw two bboxes (if any)
+
+        Args:
+            boxes: List of shapely Polygon objects representing the boxes
+
+        Returns:
+            total_coverage_area: Total area of the boxes in the list
     """
     # Create polygons for each rectangle
     polygons = [sh.Polygon(box.exterior.coords) for box in boxes]
@@ -2261,6 +3202,27 @@ def get_total_poly_area(boxes: List[sh.Polygon]) -> float:
 
 @dataclass
 class DesignPDN:
+    """
+        Information relevant to the design of the power delivery network
+
+        Attributes:
+            floorplan: shapely Polygon object representing the floorplan of the design
+            power_budget: Power budget of the design in W
+            process_info: PDK information
+            supply_voltage: Supply voltage of the design in V TODO should move into unified structure
+            ir_drop_budget: IR drop budget of the design in mV
+            fpga_info: FPGAInfo object for the FPGA
+            tsv_info: TSV Grid info
+            c4_info: C4 Grid info
+            ubump_info: Micro bump Grid info
+            pwr_rail_info: PDN Power rail
+            pwr_region_dims: List of two integers representing the dimensions of the power regions. e.g. [10, 10] for a 10x10 grid 
+            resistance_target: Target resistance of the PDN in mOhm
+            current_per_tx: Current per transistor in A
+            num_txs: number of transistors in the total design
+
+
+    """
     ################ USER INPUTTED VALUES ################
     # Polygon containing the floorplan of the design (top and bottom die assumed to be the same)
     floorplan: sh.Polygon
@@ -2285,6 +3247,16 @@ class DesignPDN:
 
 
     def init_placement(self, grid_pls: List[GridPlacement], area_inter: bool) -> PolyPlacements:
+        """
+            Initializes the placement of the grid
+
+            Args:
+                grid_pls: List of GridPlacement objects representing the grid
+                area_inter: Boolean flag to determine if area is calculated with or without intersection
+            
+            Returns:
+                pps: PolyPlacements object representing the placement of the grid
+        """
         rects = [ rect for grid_pl in grid_pls for rows in grid_pl.grid for rect in rows ]
         polys = [ rect.bb for grid_pl in grid_pls for rows in grid_pl.grid for rect in rows ]
         if area_inter:
@@ -2376,36 +3348,43 @@ class DesignPDN:
         self.design_pdn_post_init()
 
 
-@dataclass
-class TSVGridPlacement:
-    start_coord: GridCoord
-    # vertical and horizontal distance in um for each TSV
-    tsv_h: float 
-    tsv_v: float
-    # vertical and horizontal distance bw tsvs in um 
-    tsv_s_h: float
-    tsv_s_v: float
-    dim: int
-    # grid start and end in um
-    tsv_grid : List[RectBB] = None
-    def __post_init__(self):
-        self.tsv_grid = [[None]*self.dim for _ in range(self.dim)]
-        for col in range(self.dim):
-            for row in range(self.dim):
-                # bb of tsv coords 
-                self.tsv_grid[col][row] = RectBB(
-                    p1 = GridCoord(
-                        x = self.start_coord.x + col*(self.tsv_s_h),
-                        y = self.start_coord.y + row*(self.tsv_s_v),
-                    ),
-                    p2 = GridCoord(
-                        x = self.start_coord.x + col*(self.tsv_s_h) + self.tsv_h,
-                        y = self.start_coord.y + row*(self.tsv_s_v) + self.tsv_v,
-                    ),
-                )
+# TODO deletion candidate
+# @dataclass
+# class TSVGridPlacement:
+#     start_coord: GridCoord
+#     # vertical and horizontal distance in um for each TSV
+#     tsv_h: float 
+#     tsv_v: float
+#     # vertical and horizontal distance bw tsvs in um 
+#     tsv_s_h: float
+#     tsv_s_v: float
+#     dim: int
+#     # grid start and end in um
+#     tsv_grid : List[RectBB] = None
+#     def __post_init__(self):
+#         self.tsv_grid = [[None]*self.dim for _ in range(self.dim)]
+#         for col in range(self.dim):
+#             for row in range(self.dim):
+#                 # bb of tsv coords 
+#                 self.tsv_grid[col][row] = RectBB(
+#                     p1 = GridCoord(
+#                         x = self.start_coord.x + col*(self.tsv_s_h),
+#                         y = self.start_coord.y + row*(self.tsv_s_v),
+#                     ),
+#                     p2 = GridCoord(
+#                         x = self.start_coord.x + col*(self.tsv_s_h) + self.tsv_h,
+#                         y = self.start_coord.y + row*(self.tsv_s_v) + self.tsv_v,
+#                     ),
+#                 )
 
 @dataclass
 class PDNModelingInfo:
+    """
+        Script paths to call `fpga21-scaled-tech` repo for RC calculations
+
+        Todo:
+            * Delete this structure and get these paths through trees
+    """
     r_script_path: str = os.path.expanduser("~/3D_ICs/fpga21-scaled-tech/rc_calculations/custom_calc_resistance.py")
     c_script_path: str = os.path.expanduser("~/3D_ICs/fpga21-scaled-tech/rc_calculations/custom_calc_capacitance.py")
 
@@ -2419,6 +3398,18 @@ pdn_modeling_info = PDNModelingInfo()
 
 @dataclass
 class TxSizing:
+    """
+        Buffer DSE transistor sizing information & HSPICE optimization
+
+        Attributes:
+            opt_mode: which transistor to optimize in a buffer design options are ["P", "NP", "N"]
+            opt_goal: optimization goal options are ["tpd", "diff"] for (propegation delay) and (match the rising and falling propegation delays), respectively.
+            pmos_sz: PMOS transistor size in fins
+            nmos_sz: NMOS transistor size in fins
+            p_opt_params: dict containing "init", "step", and "range" for optimization
+            n_opt_params: dict containing "init", "step", and "range" for optimization
+            iters: max iterations for optimization
+    """
     opt_mode: str = None  # possible modes are "P", "NP" and "N" if one of those strings is included then the sizing for the respective PMOS / NMOS will be optimized by hspice
     opt_goal: str = None # options are "tpd" (propegation delay) or "diff" (match the rising and falling propegation delays)
     pmos_sz: int = None
@@ -2429,15 +3420,21 @@ class TxSizing:
 
 
 
-
-
-
 @dataclass
 class SpTestingModel:
+    """
+        Spice testbench object currently used for buffer_dse in "ic_3d" subtool
 
-
-
-
+        Attributes:
+            insts: List of SpSubCktInst objects representing the nodes inside the spice simulation
+            vsrcs: List of SpVoltageSrc objects representing the voltage sources for the simulation
+            dut_in_node: string representing the input node of the DUT
+            dut_out_node: string representing the output node of the DUT
+            opt_params: List of SpParam objects representing the optimization parameters used in the simulation
+            static_params: List of SpParam objects representing the static parameters used in the simulation
+            sim_settings: SpLocalSimSettings object representing the simulation settings
+            target_freq: target frequency in MHz
+    """
     # Design Info
     insts :  List[SpSubCktInst] # All nodes inside of the spice sim
     vsrcs: List[SpVoltageSrc]  = None # We create a basic voltage source for each instantiation to measure their power
@@ -2450,7 +3447,6 @@ class SpTestingModel:
     opt_params: List[SpParam] = None # List of all optimization parameters used in simulation
     static_params: List[SpParam] = None # List of all static parameters used in simulation
     sim_settings: SpLocalSimSettings = None # Simulation settings
-    # target_freq: int = 1000 # freq in MHz
     # target_period: float = None # period in ns
     # voltage_src: SpVoltageSrc = None # voltage source for simulation
     
@@ -2462,15 +3458,7 @@ class SpTestingModel:
             if self.sim_settings.dut_in_vsrc.out_node is None:
                 self.sim_settings.dut_in_vsrc.out_node = self.dut_in_node
 
-    
-
- 
-
-
-
-
-
-
+    # TODO deletion candidate
     # sim_prec: int # samples in ps
     # Params swept in sp simulation
     # sweep_mlayer_trav_dist: SpParam = None # um
@@ -2493,12 +3481,24 @@ class SpTestingModel:
 
 @dataclass
 class SpPNOptModel:
+    """
+        inverter NP default parameter names.
+
+        Todo:
+            * Delete this struct, integrate into something else
+    """
     wn_param : str = "inv_Wn"
     wp_param : str = "inv_Wp"
 
 
 @dataclass
 class SpSubCktLibs:
+    """
+        "ic_3d" subtool way of accessing spice subcircuit libraries
+
+        Todo:
+            * Delete this and use COFFE methodology to get subckt libraries
+    """
     atomic_subckts: Dict[str, SpSubCkt] = None #= field(default_factory = lambda: sp_subckt_atomic_lib)
     basic_subckts: Dict[str, SpSubCkt] = None #= field(default_factory = lambda: basic_subckts)
     subckts: Dict[str, SpSubCkt] = None #= field(default_factory = lambda: subckts)
@@ -2506,19 +3506,15 @@ class SpSubCktLibs:
 """ Here defines the top class used for buffer exploration """
 @dataclass
 class SRAMInfo:
+    """
+        BRAM geometry information used in BUFFER-DSE in "ic_3d" 
+    """
     width: float # um
     height: float # um
     area: float = None # um^2
     def __post_init__(self):
         self.area = self.width * self.height
 
-"""
-    height: float
-    diameter: float
-    pitch: float
-    res : float
-    cap : float
-"""
 
 @dataclass
 class PackageInfo:
@@ -2532,12 +3528,10 @@ class PackageInfo:
     # tsv_info: TSVInfo
 
 
-
-
 @dataclass
 class HwModuleInfo:
     """
-    Contains information about the HW Module
+        Contains information about the HW Module
     """
     name: str
     area: float
@@ -2577,7 +3571,9 @@ class NoCInfo:
         
 @dataclass
 class DesignInfo:
-    """ Contains information about the Whole Design """
+    """ 
+        Contains information about the whole design relevant to the Buffer DSE mode in "ic_3d" subtool 
+    """
     # Process information
     process_info: ProcessInfo
 

@@ -5,7 +5,6 @@ from dataclasses import dataclass, field, fields, InitVar
 from typing import List, Dict, Any, Tuple, Union, Type, Set
 
 
-
 import os
 import logging
 import copy
@@ -17,26 +16,6 @@ import src.common.utils as rg_utils
 import src.common.spice_parser as sp_parser
 
 # import src.common.rr_parse as rrg_parse
-
-
-
-# def common_hash(obj):
-#     field_values = []
-
-#     for field in fields(obj):
-#         value = getattr(obj, field.name)
-
-#         # Check if the field is mutable
-#         if not dataclasses._is_classvar(field) and not dataclasses._is_initvar(field):
-#             # If the field is another dataclass, call custom_hash recursively
-#             if dataclasses.is_dataclass(value):
-#                 field_values.append(custom_hash(value))
-#             else:
-#                 field_values.append(value)
-
-#     # Combine the values of mutable fields to calculate the hash
-#     return hash(tuple(field_values))
-
 @dataclass
 class LoadCircuit():
     """
@@ -226,13 +205,6 @@ class SizeableCircuit():
         """
         return f"{self.name}_{self.get_param_str()}"
 
-    # def set_fields(self, fields: Dict[str, Any]) -> None:
-    #     """ 
-    #         Set the fields of this sizeable circuit from a dictionary
-    #     """
-    #     for field_name, field_val in fields.items():
-    #         setattr(self, field_name, field_val)
-
     def generate(self) -> Dict[str, int | float]:
         """ 
             Generate SPICE subcircuits, write out the circuits to the output architecture directory in subcircuits.l file
@@ -303,13 +275,6 @@ class CompoundCircuit():
                 A unique id of the object
         """
         return id(self)
-
-    # def set_fields(self, fields: Dict[str, Any]):
-    #     """ 
-    #         Set the fields of this sizeable circuit from a dictionary
-    #     """
-    #     for field_name, field_val in fields.items():
-    #         setattr(self, field_name, field_val)
 
     def get_sp_name(self) -> str:
         """ 
@@ -463,10 +428,11 @@ class Value:
 
         Attributes:
             value: (int | float) Base value, if units are set this value is multiplied by the unit.factor to get the true value
-            name: (str) Name of the parameter Ex. "mux_type" or "meas_
+            name: (str) Name of the parameter Ex. "mux_type"
             units: (Units) Units of the value Ex. "time" | "voltage" | "current"
             abs_val_flag: (bool) If true, we assume the value is absolute and we decode it into the factors that exist in units
     """
+
     # Params used to affect generation of a subckt or netlist. Ex. for a mux params could be "mux_type" : "on" | "off" | "partial"
     # Key used to hash this struct and find it in other data structs & write out the "parameter" name to various tools
     value: int | float              = None # Base value, if units are set this value is multiplied by the unit.factor to get the true value

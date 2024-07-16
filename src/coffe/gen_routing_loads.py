@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+"""
+    This module contains implementations for general programmable routing loads.
+"""
+
 import src.coffe.utils as utils
 
 from typing import Dict, List, Tuple, Union, Any, Set
@@ -6,7 +11,6 @@ import copy
 import math, os
 import src.coffe.data_structs as c_ds
 import src.common.utils as rg_utils
-# from src.coffe.new_sb_mux import SwitchBlockModel
 import src.coffe.sb_mux as sb_mux_lib
 import src.coffe.cb_mux as cb_mux_lib
 
@@ -25,7 +29,6 @@ class GeneralBLEOutputLoad(c_ds.LoadCircuit):
     # There could be a larger number of ON muxes if the fanout at that particular net leaving the BLE is high
     sb_mux_on_assumption_freqs: Dict[sb_mux_lib.SwitchBlockMux, int] = None  # Which SB muxes (and how many of each) are driving an ON mux in this load?
     sb_mux_load_dist: Dict[sb_mux_lib.SwitchBlockMux, float] = None  # What is the likelyhood for each SB mux in this dict to be loading a BLE output?
-
 
     # Used as inputs to compute_load, Initialized in __post_init__
     # Calculated in compute_load
@@ -46,9 +49,12 @@ class GeneralBLEOutputLoad(c_ds.LoadCircuit):
         self.wire_names = self.generate_general_ble_output_load(subcircuit_filename)
 
     def _compute_load(self, specs: c_ds.Specs):
-        """ Calculate how many on/partial/off switch block multiplexers are connected to each cluster output.
+        """ 
+            Calculate how many on/partial/off switch block multiplexers are connected to each cluster output.
             Inputs are FPGA specs object, switch block mux object, assumed channel usage and assumed number of on muxes.
-            The function will update the object's off & partial attributes."""
+            The function will update the object's off & partial attributes.
+            
+        """
         
         # Number of tracks in the channel connected to LB opins
         num_tracks = specs.W

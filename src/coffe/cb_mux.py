@@ -1,6 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+    Implementations for Connection Block Mux sizeable circuits and thier corresponding testbenches
+"""
 from __future__ import annotations
 from dataclasses import dataclass, field, InitVar
-
 from typing import List, Dict, Any, Tuple, Union, Type
 import os, re, sys
 

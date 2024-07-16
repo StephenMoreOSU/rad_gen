@@ -118,7 +118,17 @@ import src.common.rr_parse as rrg_parse
 # When looking at multiple "models" we can determine if we need to do a geometric or linear sweep of them to accurately represent the FPGA
 
 
-def fpga_state_fmt(fpga_inst:'FPGA', tag: str):
+def fpga_state_fmt(fpga_inst:'FPGA', tag: str) -> dict:
+    """
+        Get a timestamp for the current FPGA state to use when outputting debug info, s.t. users can know when things are happening
+
+        Args:
+            fpga_inst (FPGA): The FPGA instance to get the timestamp for
+            tag (str): The tag to use for the timestamp
+        
+        Returns:
+            a dictionary of the current timestamp
+    """
     row_data = { 
         "TAG": tag, 
         "AREA_UPDATE_ITER": fpga_inst.update_area_cnt, 
@@ -128,8 +138,16 @@ def fpga_state_fmt(fpga_inst:'FPGA', tag: str):
     }
     return row_data
 
-def fpga_state_to_csv(fpga_inst: 'FPGA', tag: str, catagory: str, ckt: Type[c_ds.SizeableCircuit] = None):
-    """ Update the FPGA telemetry CSV file with the current FPGA telemetry, Create CSV if it doesnt exist """
+def fpga_state_to_csv(fpga_inst: 'FPGA', tag: str, catagory: str, ckt: Type[c_ds.SizeableCircuit] = None) -> None:
+    """ 
+        Update the FPGA telemetry CSV file with the current FPGA telemetry, Create CSV if it doesnt exist     
+
+        Args:
+            fpga_inst (FPGA): The FPGA instance to get the telemetry from
+            tag (str): The tag to use for the timestamp
+            catagory (str): The catagory of information to output to the CSV
+            ckt (Type[c_ds.SizeableCircuit]): The circuit to output telemetry for, if None output all circuits
+    """
 
     out_catagories = {
         "wire_length": fpga_inst.wire_lengths,
@@ -149,11 +167,11 @@ def fpga_state_to_csv(fpga_inst: 'FPGA', tag: str, catagory: str, ckt: Type[c_ds
     # Open the CSV file
     out_dir = "debug"
     os.makedirs(out_dir, exist_ok=True)
-
+    cat_v: dict
+    fpath: str
     if ckt is None:
         cat_v = out_catagories[catagory]
         fpath = os.path.join(out_dir,f"{catagory}_detailed.csv")
-
     else:
         sp_name: str = ckt.sp_name if (hasattr(ckt, "sp_name") and ckt.sp_name) else ckt.name
         if catagory == "wire_length": 
@@ -166,7 +184,7 @@ def fpga_state_to_csv(fpga_inst: 'FPGA', tag: str, catagory: str, ckt: Type[c_ds
         # Output path stuff
         os.makedirs(os.path.join(out_dir, sp_name), exist_ok = True)
         fpath = os.path.join(os.path.join(out_dir, sp_name),f"{catagory}_{sp_name}.csv")
-
+    # Sort it for easy comparison
     sorted_cat = OrderedDict(sorted(cat_v.items())) 
     row_data = { 
         "TAG": tag, 
@@ -190,30 +208,28 @@ def sim_tbs(
     tbs: List[Type[c_ds.SimTB]],
     sp_interface: spice.SpiceInterface,
     parameter_dict: Dict[str, List[str]],
-) -> Dict[Type[c_ds.SimTB], 
-        Dict[str, 
-            List[float] | List[bool]
-        ]
+) -> Dict[
+    Type[c_ds.SimTB], 
+    Dict[str, 
+        List[float] | List[bool]
+    ]
 ]:
     """
         Runs HSPICE on all testbenches in the list with the corresponding parameter dict
         Returns a dict hashed by each testbench with its corresponding results (delay, power)
+
+        Args:
+            tbs (List[Type[c_ds.SimTB]]): The list of testbenches to simulate
+            sp_interface (spice.SpiceInterface): The interface to the HSPICE (or other SPICE) simulator(s)
+            parameter_dict (Dict[str, List[str]]): The parameter dictionary to use for the simulation
+        
+        Returns:
+            A dict containing the simulation results hashed by testbench which got those values
     """
-    # valid_delay: bool = True
-    # sp_out_meas = { 
-    #     "trise": None,
-    #     "tfall": None,
-    #     "delay": None,
-    #     "power": None,    
-    #     "valid": None,  # If the simulation was successful
-    # }
-    # sp_out_meas: List[float] = []
-    # tb_meas: Dict[Type[c_ds.SimTB], Dict[str, float]] = defaultdict(lambda: copy.deepcopy(sp_out_meas))
     
     # Create a default dict of dicts of lists to store measurements for each tb sweep point
     tb_meas: Dict[Type[c_ds.SimTB], Dict[str, float]] = defaultdict(lambda: defaultdict(list))
     
-
     for tb in tbs:
         sp_name: str = tb.dut_ckt.sp_name if (hasattr(tb.dut_ckt, "sp_name") and tb.dut_ckt.sp_name) else tb.dut_ckt.name
         print(f"Updating delay for {sp_name} with TB {tb.tb_fname.replace('.sp','')}")
@@ -231,17 +247,6 @@ def sim_tbs(
                 **{mp.value.name: [1]*len(list(parameter_dict.values())[0]) for mp in tb.meas_points}
             }
         
-        # if  spice_meas["meas_total_tfall"][0] == "failed" \
-        #         or spice_meas["meas_total_trise"][0] == "failed":
-        #     valid_delay = False
-        #     tfall = 1
-        #     trise = 1
-        # else:  
-        #     tfall = float(spice_meas["meas_total_tfall"][0])
-        #     trise = float(spice_meas["meas_total_trise"][0])
-        # if tfall < 0 or trise < 0:
-        #     valid_delay = False
-
         valid_delays: List[bool] = None
         # Account for additional measurements which are not explictly asked for
         for key in spice_meas.keys():
@@ -297,18 +302,9 @@ def merge_tb_meas(
             ]
         ]
     ], 
-    # delay_dict: Dict[str, float] = None, 
-    # set_flag: bool = True,
-
-    # merge_fn: Callable[[
-    #     Dict[
-    #             Type[c_ds.SimTB], Dict[str, float | bool]
-    #         ]
-    #     ], Dict[str, float]
-    # ],
 ) -> Dict[ Type[c_ds.SizeableCircuit], Dict[str, List[float] | List[bool]]]:
     """
-        Takes result dictionary which is hashed by testbenches,
+        Takes result dictionary which is hashed by testbenches (from `sim_tbs`),
             merges delays and power for each unique circuit to set them
             merge function is specific to a testbench / subckt combo
     """
@@ -1260,11 +1256,7 @@ class FPGA:
                     self.lut_inputs[lut_in.lut_input_key].append(lut_in)
                     self.lut_input_drivers[lut_in.lut_input_key].append(lut_in.driver)
                     self.lut_input_not_drivers[lut_in.lut_input_key].append(lut_in.not_driver)
-                
-
-
-
-            
+                            
             #########################
             ### CREATE RAM OBJECT ###
             #########################
@@ -1400,10 +1392,6 @@ class FPGA:
 
         # Post generation of spice libraries we need to parse them into our data structures to be able to write the circuit testing environments
         # Setting up inputs for the parser function
-        # parser_args = {
-        #     "input_sp_files": [self.basic_subcircuits_filename, self.subcircuits_filename],
-        #     "get_structs": True,
-        # }
 
         parser_args = [
             "--input_sp_files",  self.basic_subcircuits_filename, self.subcircuits_filename,
@@ -1436,7 +1424,6 @@ class FPGA:
         )
         sim_options: Dict[str, str] = {
             "BRIEF": "1",
-            # Check if these work...
             "POST": "1",
             "INGOLD":"1",
             "NODE":"1",
@@ -1455,7 +1442,9 @@ class FPGA:
         # - L16 SB Mux -> L16 -> L4 SB Mux 
         # We may not want to simulate all of these options but we should have the ability to do so
         sb_mux_sim_mode: c_ds.SpSimMode = copy.deepcopy(base_sim_mode)
-        # Certain simulations may run at lower / higher clock freqs? The only reason I could see for this would be make sure the meas statements voltage triggers hit
+        # Certain simulations may run at lower / higher clock freqs? 
+        #   The only reason I could see for this would be make sure the meas statements voltage triggers hit
+        #   i.e. its probably important that we run sims at different clk freqs :)
         sb_mux_sim_mode.sim_time = c_ds.Value(8, units = sb_mux_sim_mode.sim_time.units) # ns
 
         print("Creating SB Mux TB Objects:")
@@ -1494,7 +1483,7 @@ class FPGA:
                     tb_idx += 1
                     # For now only append to the list for each uniq comb of src_routing_wire_load & sink_routing_wire_load
                     # ie ignore unique start sb_muxes
-                    # TODO implement TB filtering somewhere else
+                    # TODO implement TB filtering somewhere else -> allow us to easily decide which testbenches to actually use vs ones that are legal but not important
                     # Only append if there is no existing TB with the same src and sink routing wire loads 
                     tb_cond: bool = False
                     for tb in self.sb_mux_tbs:
@@ -1504,9 +1493,6 @@ class FPGA:
                     if not tb_cond:
                         self.sb_mux_tbs.append(sb_mux_tb)
         
-        # TODO FIXME TODO, just removing multiple SB testbenches because they seemed to have similar delays and I want fast runtime atm
-        # self.sb_mux_tbs = [self.sb_mux_tbs[0], self.sb_mux_tbs[2]]
-
         #    ___ ___   __  __ _   ___  __
         #   / __| _ ) |  \/  | | | \ \/ /
         #  | (__| _ \ | |\/| | |_| |>  < 
@@ -1514,10 +1500,9 @@ class FPGA:
         
         
         # Again the way we get all possible sim combinations would be to take the circuits in the testbench and combine them geometrically        
-        print("Creating CB Mux TB Object")
+        print("Creating CB Mux TB Objects")
         
         gen_sim_mode: c_ds.SpSimMode = copy.deepcopy(base_sim_mode)
-        # Certain simulations may run at lower / higher clock freqs? The only reason I could see for this would be make sure the meas statements voltage triggers hit
         gen_sim_mode.sim_time = c_ds.Value(4, units = sb_mux_sim_mode.sim_time.units) # ns
         
         # Num TBs = number of unique terminating CB muxes * num unique routing wire loads that can drive them * \
@@ -1528,14 +1513,15 @@ class FPGA:
         tb_gen_r_wire_loads: List[gen_r_load_lib.RoutingWireLoad] = []
         for cb_mux in self.cb_muxes:
             for gen_r_wire_load in self.gen_routing_wire_loads:
-                # This filters out general routing wires which have terminal_cb_muxes inside thier struct yet don't have them assigned
+                # This filters out general routing wires which have terminal_cb_muxes inside thier struct, yet don't have them assigned
                 # TODO really terminal muxes shouldn't be assigned to gen_r_wire_loads thats don't have them
                 if gen_r_wire_load.terminal_cb_mux and gen_r_wire_load.terminal_cb_mux == cb_mux and \
                     gen_r_wire_load.tile_cb_load_assignments[0][gen_r_wire_load.terminal_cb_mux]["num_on"] > 0:
                     tb_gen_r_wire_loads.append(gen_r_wire_load)
                 
         # TODO find all legal local routing wire loads that can be driven by the CB mux
-        # We just assume as many types as we have logic clusters TODO circuits should be split up and indivdualized for more clarity + modularity
+        # We just assume as many types as we have logic clusters 
+        # TODO circuits should be split up and indivdualized for more clarity + modularity
         tb_local_r_wire_loads: List[lb_lib.LocalRoutingWireLoad] = [
             lb.local_routing_wire_load for lb in self.logic_clusters
         ]
@@ -1566,14 +1552,15 @@ class FPGA:
             gen_r_wire_load: gen_r_load_lib.RoutingWireLoad = cb_tb_in_ckt_combo[0]
             local_r_wire_load: lb_lib.LocalRoutingWireLoad = cb_tb_in_ckt_combo[1]
             lut_input_driver: lb_lib.ble_lib.lut_lib.LUTInputDriver = cb_tb_in_ckt_combo[3]
-            # Find SB mux corresponding to the wire load
+            # Find SB mux driving the wire load
             def condition (sb_mux: sb_mux_lib.SwitchBlockMux) -> bool:
                 return sb_mux.sink_wire == gen_r_wire_load.gen_r_wire
+            # Its a continuous assertion that there is a 1:1 mapping between SB muxes and gen routing wires
             start_sb_mux: sb_mux_lib.SwitchBlockMux = rg_utils.get_unique_obj(
                 self.sb_muxes,
                 condition,
             )
-            cb_mux_tb: cb_mux_lib.ConnectionBlockMuxTB = cb_mux_lib.ConnectionBlockMuxTB(
+            cb_mux_tb = cb_mux_lib.ConnectionBlockMuxTB(
                 id = tb_idx,
                 # CB Mux Specific args
                 start_sb_mux = start_sb_mux,
@@ -1589,7 +1576,7 @@ class FPGA:
             )
             self.cb_mux_tbs.append(cb_mux_tb)
             # LOGIC BLOCK TBs
-            local_mux_tb: lb_lib.LocalMuxTB = lb_lib.LocalMuxTB(
+            local_mux_tb = lb_lib.LocalMuxTB(
                 id = tb_idx,
                 # Local Mux Specific args
                 # CB Mux Specific args
@@ -1745,12 +1732,13 @@ class FPGA:
 
         # Get list of all possible input keys, ONLY WORKS FOR ONE LC
         # Assumes matching keys for all input drivers + not drivers + input drv loads
-        # TODO get this to work for multiple LCs
+        # TODO get this to work for multiple LC types
         lut_input_keys: Set[str] = set([   
             key for lb in self.logic_clusters 
                 for key in lb.ble.lut.input_drivers.keys() 
         ])
 
+        ## For LCs with an arbitrary number of LUT inputs would do something like this
         # for lb in self.logic_clusters:
         #     for lut_in_key in lb.ble.lut.input_drivers.keys(): 
         #         tb_lut_input_drivers.append(
@@ -1759,9 +1747,6 @@ class FPGA:
         #         tb_lut_input_not_drivers.append(
         #             lb.ble.lut.input_drivers[lut_in_key].not_driver
         #         )
-
-        # tb_local_r_wire_loads
-        # tb_cb_muxes
 
         # For each input key create a product of other circuits to get possible LUT configs
         for input_key in lut_input_keys:
@@ -2315,7 +2300,10 @@ class FPGA:
 
         # Block RAM updates
         if self.specs.enable_bram_block == 1:
-            # TODO update this for multi wire types
+            # TODO bring the sb_mux and cb_mux used in BRAM up to user level
+            # just choosing 
+            bram_sb_mux = [sb_mux for sb_mux in self.sb_muxes if sb_mux.sink_wire == min(self.gen_r_wires.values(), key=lambda x: x.length) ][0]
+            bram_cb_mux = self.cb_muxes[0]
             # Calculate RAM area:
 
             # LOCAL MUX + FF area
@@ -2324,9 +2312,9 @@ class FPGA:
             self.width_dict["ram_local_mux_total"] = math.sqrt(RAM_local_mux_area)
 
             # SB and CB in the RAM tile:
-            RAM_area =(RAM_local_mux_area + self.area_dict[self.cb_mux.name + "_sram"] * self.RAM.ram_inputs + (2** (self.RAM.conf_decoder_bits + 3)) * self.area_dict[self.sb_mux.name + "_sram"]) 
-            RAM_SB_area = 2 ** (self.RAM.conf_decoder_bits + 3) * self.area_dict[self.sb_mux.name + "_sram"] 
-            RAM_CB_area =  self.area_dict[self.cb_mux.name + "_sram"] * self.RAM.ram_inputs 
+            RAM_area =(RAM_local_mux_area + self.area_dict[bram_cb_mux.sp_name + "_sram"] * self.RAM.ram_inputs + (2** (self.RAM.conf_decoder_bits + 3)) * self.area_dict[bram_sb_mux.sp_name + "_sram"]) 
+            RAM_SB_area = 2 ** (self.RAM.conf_decoder_bits + 3) * self.area_dict[bram_sb_mux.name + "_sram"] 
+            RAM_CB_area =  self.area_dict[bram_cb_mux.sp_name + "_sram"] * self.RAM.ram_inputs 
 
 
             self.area_dict["level_shifters"] = self.area_dict["level_shifter"] * self.RAM.RAM_local_mux.num_per_tile
@@ -2608,103 +2596,8 @@ class FPGA:
                     self.d_cc_to_ffble = dist
             elif (stripe1_key == "ffble" and stripe2_key == "sb") or (stripe2_key == "sb" and stripe2_key == "ffble"):
                 if dist > self.d_ffble_to_sb:
-                    self.d_ffble_to_sb = dist
-            
+                    self.d_ffble_to_sb = dist      
 
-
-        # worst-case distance between two stripes:
-        # for index1, item1 in enumerate(self.stripe_order):
-        #     for index2, item2 in enumerate(self.stripe_order):
-        #         if item1 != item2:
-        #             # If we want to find the maximum distance between "cb" and "ic" stripes
-        #             if (item1 == "cb" and item2 == "ic") or (item1 == "ic" and item2 == "cb"):
-        #                 if index1 < index2:
-        #                     # Begin summing up distances across stripes to get the total distance of this wire
-        #                     # Start with the distance from closer side of stripe I/Os to the next stripe 
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                     # Sum up widths of intermediate stripes (full width as we traverse across them)
-        #                     for i in range(index1 + 1, index2):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                 else:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                     for i in range(index2 + 1, index1):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                 if self.d_cb_to_ic < distance_temp:
-        #                     self.d_cb_to_ic = distance_temp
-
-        #             if (item1 == "lut" and item2 == "ic") or (item1 == "ic" and item2 == "lut"):
-        #                 if index1 < index2:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                     for i in range(index1 + 1, index2):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                 else:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                     for i in range(index2 + 1, index1):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                 if self.d_ic_to_lut < distance_temp:
-        #                     self.d_ic_to_lut = distance_temp
-
-        #             if (item1 == "lut" and item2 == "cc") or (item1 == "cc" and item2 == "lut"):
-        #                 if index1 < index2:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                     for i in range(index1 + 1, index2):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                 else:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                     for i in range(index2 + 1, index1):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                 if self.d_lut_to_cc < distance_temp:
-        #                     self.d_lut_to_cc = distance_temp
-
-        #             if (item1 == "ffble" and item2 == "cc") or (item1 == "cc" and item2 == "ffble"):
-        #                 if index1 < index2:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                     for i in range(index1 + 1, index2):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                 else:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                     for i in range(index2 + 1, index1):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                 if self.d_cc_to_ffble < distance_temp:
-        #                     self.d_cc_to_ffble = distance_temp                                                                                    
-
-        #             if (item1 == "ffble" and item2 == "sb") or (item1 == "sb" and item2 == "ffble"):
-        #                 if index1 < index2:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                     for i in range(index1 + 1, index2):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                 else:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                     for i in range(index2 + 1, index1):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                 if self.d_ffble_to_sb < distance_temp:
-        #                     self.d_ffble_to_sb = distance_temp
-
-        #             if (item1 == "ffble" and item2 == "ic") or (item1 == "ic" and item2 == "ffble"):
-        #                 if index1 < index2:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                     for i in range(index1 + 1, index2):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp +=  self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                 else:
-        #                     distance_temp = self.dict_real_widths[self.stripe_order[index2]] / self.span_stripe_fraction
-        #                     for i in range(index2 + 1, index1):
-        #                         distance_temp += self.dict_real_widths[self.stripe_order[i]]
-        #                     distance_temp += self.dict_real_widths[self.stripe_order[index1]] / self.span_stripe_fraction
-        #                 if self.d_ffble_to_ic < distance_temp:
-        #                     self.d_ffble_to_ic = distance_temp       
-
-        
         # Compute Dist logging
         if consts.VERBOSITY == consts.DEBUG:
             csv_outdir = "debug"
@@ -2812,19 +2705,16 @@ class FPGA:
                 sb_ratio = 1 / sb_ratio
             
             #if the ratio is larger than 2.0, we can look at this stripe as two stripes put next to each other and partly fix the ratio:
-                
             cb_ratio: float = (self.lb_height / (self.cb_mux.total_num_per_tile / self.num_cb_stripes)) / self.dict_real_widths["cb"]
             if cb_ratio < 1.0:
                 cb_ratio = 1 / cb_ratio
                 
             #if the ratio is larger than 2.0, we can look at this stripe as two stripes put next to each other and partly fix the ratio:
-
             ic_ratio: float = (self.lb_height / (self.local_mux.total_num_per_tile / self.num_ic_stripes)) / self.dict_real_widths["ic"]
             if ic_ratio < 1.0:
                 ic_ratio = 1 / ic_ratio
                 
             #if the ratio is larger than 2.0, we can look at this stripe as two stripes put next to each other and partly fix the ratio:			
-
             lut_ratio: float = (self.lb_height / (self.specs.N / self.num_lut_stripes)) / self.dict_real_widths["lut"]
             if lut_ratio < 1.0:
                 lut_ratio = 1 / lut_ratio
@@ -3190,7 +3080,7 @@ class FPGA:
         # RAM
         # TODO figure out why all the RAM setting of critical path delay were commented out
         if self.specs.enable_bram_block:
-            ram_valid = self.update_ram_delays(spice_interface, parameter_dict)
+            ram_valid = self.update_ram_delays(parameter_dict, spice_interface)
 
         # After getting the delays across subckts and tesbenches we need to combine them for each subckt and assign it trise / tfall / delay / power values.
 
@@ -3641,6 +3531,7 @@ class FPGA:
 
     def update_ram_delays(self, parameter_dict: Dict[str, List[str]], spice_interface: spice.SpiceInterface) -> bool:
         # Local RAM MUX
+        valid_delay = True
         print("  Updating delay for " + self.RAM.RAM_local_mux.name)
         spice_meas = spice_interface.run(self.RAM.RAM_local_mux.top_spice_path, 
                                          parameter_dict) 

@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+"""
+    This module contains implementations for custom circuitry, loading, and testbenches for hardblocks in the FPGA.
+"""
+
 import math
 
 import src.coffe.mux_subcircuits as mux_subcircuits

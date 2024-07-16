@@ -57,11 +57,11 @@ class _pgateoutputcrossbar(_SizableCircuit):
         current_count = self.maxwidth
         ptran_count = self.maxwidth
 
-        while current_count >1:
-            ptran_count += current_count//2
-            current_count //=2
+        while current_count > 1:
+            ptran_count += current_count // 2
+            current_count //= 2
 
-        ptran_count *=2
+        ptran_count *= 2
         ptran_count += self.maxwidth // 2
 
         area = (area_dict["inv_" + self.name + "_1"] + area_dict["inv_" + self.name + "_2"] + area_dict["inv_" + self.name + "_3"] * 2) * self.maxwidth + area_dict["ptran_" + self.name + "_4"]  * ptran_count

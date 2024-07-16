@@ -1299,8 +1299,9 @@ def init_dataclass(
     validate_paths: bool = True
 ) -> Any:
     """
-    Initializes a dataclass with values from the dataclasses internal initialization functions and input configuration dictionaries
-    which have key value pairs mapped to dataclass fields. 
+    Initializes a dataclass with values from the dataclasses factory defaults and
+    input configuration dictionaries which have key value pairs mapped to dataclass fields. 
+    
     Additionally performs path sanitization
     
     Extremely useful function as it allows for defined priority to merge args coming from different sources at different levels of priority
@@ -1340,37 +1341,6 @@ def init_dataclass(
     for field in dataclass_type.__dataclass_fields__.values():
         field_name = field.name
         field_type = type_hints[field.name]
-        # Start with the factory default if it exists, will be overrided if higher priority assignment exists
-        if field.default_factory != MISSING:
-            dataclass_inputs[field_name] = field.default_factory()
-
-        # Hierarchical keys in the input config dict, (we merge two input dicts in priority order)
-        # hier_keys = {k: v for k, v in {**add_arg_config, **in_config}.items() if k.startswith(f"{field_name}{rg_ds.CLI_HIER_KEY}")}
-        # If we find the field name hierarchically defined in either of the input configs
-        #   AND the Non-hier key is not defined in either of input configs
-        # if hier_keys and (field_name not in in_config and field_name not in add_arg_config):
-        #     if not module_lib:
-        #         raise Exception("ERROR: module_lib must be provided if a nested dataclass is found")
-        #     # Get a in config dict for the nested dataclass
-        #     nested_config: dict = {k.replace(f"{field_name}{rg_ds.CLI_HIER_KEY}",""): v for k, v in hier_keys.items()}
-        #     # Get the type from the input module lib
-        #     nested_dataclass_type = getattr(module_lib, field.type)
-        #     default_fac_config: dict
-        #     if field.default_factory != MISSING:
-        #         default_fac_config = dataclasses.asdict(field.default_factory())
-        #     else:
-        #         default_fac_config = {}
-
-        #     ## Initialize the nested dataclass
-        #     dataclass_inputs[field_name] = init_dataclass(
-        #         dataclass_type = nested_dataclass_type, 
-        #         in_config = nested_config, 
-        #         add_arg_config = default_fac_config, 
-        #         module_lib = module_lib, 
-        #         validate_paths = validate_paths
-        #     )
-
-
         init_dict: dict = init_field(
             in_config, 
             field, 
@@ -1385,49 +1355,13 @@ def init_dataclass(
                 field_type, 
                 validate_paths
             )
-        if init_dict.get(field_name):
+        # We look for our field in the single key dict we just created, if its there we assign it 
+        if init_dict:
             dataclass_inputs[field_name] = init_dict[field_name]
-
-        # hier_keys_in_config = {k: v for k, v in in_config.items() if k.startswith(f"{field_name}{rg_ds.CLI_HIER_KEY}")}
-        # if field_name in in_config or hier_keys_in_config:
-        #     # Another path for a hierarchical dataclass definition is a list of dictionaries (which will not be flattened)
-        #     # This condition should be mutually exclusive with being a heirarchical key (as lists are not flattened)
-        #     if typing.get_origin(field_type) == list and in_config.get(field_name) and all(isinstance(i, dict) for i in in_config[field_name]):
-        #         # We should assert that all fields in the dataclass list are of the same type
-        #         assert len(set(typing.get_args(field_type))) == 1
-        #         # Field is a list of dictionaries
-        #         element_type = typing.get_args(field_type)[0] # Get the type of elements in the list
-        #         dataclass_inputs[field_name] = [
-        #             init_dataclass(
-        #                 dataclass_type = element_type, 
-        #                 in_config = item, 
-        #                 add_arg_config = {}, 
-        #                 module_lib = module_lib, 
-        #                 validate_paths = validate_paths
-        #             ) for item in in_config[field_name]
-        #         ]
-        #     elif field_name in in_config:
-        #         dataclass_inputs[field_name] = in_config[field_name]
-        #     else:
-        #         # Get a in config dict for the nested dataclass
-        #         nested_config: dict = strip_hier(in_config, field_name)
-        #         default_fac_config: dict
-        #         if field.default_factory != MISSING:
-        #             default_fac_config = dataclasses.asdict(field.default_factory())
-        #         else:
-        #             default_fac_config = {}
-
-        #         ## Initialize the nested dataclass
-        #         dataclass_inputs[field_name] = init_dataclass(
-        #             dataclass_type = field_type, 
-        #             in_config = nested_config, 
-        #             add_arg_config = default_fac_config, 
-        #             module_lib = module_lib, 
-        #             validate_paths = validate_paths
-        #         )
-
-        # elif field_name in add_arg_config:
-        #     dataclass_inputs[field_name] = add_arg_config[field_name]
+        # If there exists a factory_default for the field then we will 
+        elif field.default_factory != MISSING:
+            dataclass_inputs[field_name] = field.default_factory()
+        # We don't set the field to None if its not found anywhere as this would break dataclasses with mandatory fields
         
         # Clean path and ensure it exists (if "path" keyword in field name)
         if "path" in field_name and field_name in dataclass_inputs:
@@ -1739,6 +1673,8 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
         # Only passing in keys from common, removing heirarchy from keys to make things more clear in function
         common = init_common_structs(strip_hier(result_conf, strip_tag="common"))
 
+        # Remove "common" keys from the conf as now its going into its specific init function
+        result_conf = { k : v for k,v in result_conf.items() if k.startswith(f"{subtool}.")}
         subtool_confs[subtool] = {
             **result_conf,
         }
@@ -2159,7 +2095,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
     # assert not (common.project_name == None and not common_asic_flow.flow_stages.sram.run), "ERROR: Project name must be specified if not running SRAM compiler"
 
     asic_dse_inputs: dict = {} # asic dse parameters
-    design_sweep_infos: List[rg_ds.DesignSweepInfo] = [] # List of sweeps to generate 
+    # design_sweep_infos: List[rg_ds.DesignSweepInfo] = [] # List of sweeps to generate 
     custom_asic_flow_settings: dict = None # TODO get rid of this with updated custom flow init
     #   _____      _____ ___ ___    ___ ___ _  _ 
     #  / __\ \    / / __| __| _ \  / __| __| \| |
@@ -2517,16 +2453,15 @@ def init_coffe_structs(coffe_conf: Dict[str, Any], common: rg_ds.Common) -> rg_d
             Initialized Coffe data structure which can be used to legally execute any mode of operation in the coffe subtool.
     """
 
-    # Add coffe specific trees to common
-    # coffe_conf["common"].project_tree.append_tagged_subtree("config", rg_ds.Tree("coffe", tag="coffe.config"))
+    # Set our output object directory for architecture + spice sims
+    assert common.manual_obj_dir is not None
+    common.obj_dir = common.manual_obj_dir
+    os.makedirs(common.obj_dir, exist_ok = True)
+
     fpga_arch_conf_str = Path(clean_path(coffe_conf["fpga_arch_conf_path"])).read_text().replace("${RAD_GEN_HOME}", os.getenv("RAD_GEN_HOME"))
     param_dict = yaml.safe_load(fpga_arch_conf_str)
     fpga_arch_conf = load_arch_params(clean_path(coffe_conf["fpga_arch_conf_path"]), param_dict)
-    
-    # Set common obj dir
-    common.obj_dir = clean_path(coffe_conf["fpga_arch_conf_path"])
 
-    # coffe_conf["common"].project_tree.append_tagged_subtree("output", rg_ds.Tree(os.path.basename(os.path.splitext(fpga_arch_conf["arch_out_folder"])[0]), tag="coffe.output"))
     if "hb_flows_conf_path" in coffe_conf.keys() and coffe_conf["hb_flows_conf_path"] != None:
         hb_flows_conf =  parse_yml_config(coffe_conf["hb_flows_conf_path"])
         ###################### SETTING UP ASIC TOOL ARGS FOR HARDBLOCKS ######################
@@ -2565,7 +2500,9 @@ def init_coffe_structs(coffe_conf: Dict[str, Any], common: rg_ds.Common) -> rg_d
         "hardblocks": hardblocks,
         "common": common,
     }
-    coffe_info = init_dataclass(rg_ds.Coffe, coffe_inputs, coffe_conf)
+    coffe_info: rg_ds.Coffe = init_dataclass(rg_ds.Coffe, coffe_inputs, coffe_conf)
+     # We get our output arch directory from the manual_obj_dir field now so it must be set
+    assert coffe_info.common.obj_dir is not None,"ERROR: common.obj_dir must be set before running COFFE, it is used as the arch output directory"
     return coffe_info
 
 
@@ -2915,7 +2852,6 @@ def load_arch_params(filename: str, param_dict: dict) -> dict: #,run_options):
         'L': -1,
         'wire_types': [],
         'rr_graph_fpath': "",
-        # 'sb_conn' : {},
         'Fs_mtx' : {},
         'sb_muxes': {},
         'Fs': -1,
@@ -2968,7 +2904,6 @@ def load_arch_params(filename: str, param_dict: dict) -> dict: #,run_options):
         'enable_carry_chain': 0,
         'carry_chain_type': "ripple",
         'FAs_per_flut':2,
-        'arch_out_folder': "None",
         'gen_routing_metal_pitch': 0.0,
         'gen_routing_metal_layers': 0,
     }
@@ -3130,8 +3065,6 @@ def load_arch_params(filename: str, param_dict: dict) -> dict: #,run_options):
             param_dict["fpga_arch_params"]['metal'] = tmp_list
         elif param == 'model_library':
             param_dict["fpga_arch_params"]['model_library'] = str(value)
-        elif param == 'arch_out_folder':
-            param_dict["fpga_arch_params"]['arch_out_folder'] = str(value)
         elif param == 'gen_routing_metal_pitch':
             param_dict["fpga_arch_params"]['gen_routing_metal_pitch'] = float(value)
         elif param == 'gen_routing_metal_layers':

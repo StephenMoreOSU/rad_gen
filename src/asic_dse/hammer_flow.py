@@ -754,9 +754,8 @@ def read_in_rtl_proj_params(asic_dse: rg_ds.AsicDSE, rtl_params: Dict[str, Any],
     local_param_deps = []
     for local_param_str in local_param_matches:
         """ CREATING LIST OF REQUIRED DEPENDANCIES FOR ALL PARAMS """
-        first_eq_re = re.compile(r"\s=\s")
-        local_param_name = re.sub(r"localparam\s+",repl="",string=first_eq_re.split(local_param_str)[0]).replace(" ","").replace("\n","")
-        local_param_val = first_eq_re.split(local_param_str)[1]
+        local_param_name = re.sub(r"localparam\s+",repl="",string=asic_dse.common.res.first_eq_re.split(local_param_str)[0]).replace(" ","").replace("\n","")
+        local_param_val = asic_dse.common.res.first_eq_re.split(local_param_str)[1]
 
         tmp_lparam_list = []
         for i in range(len(rtl_preproc["vals"])):
@@ -1260,9 +1259,8 @@ def parse_report_c(asic_dse: rg_ds.AsicDSE, top_level_mod: str, report_path: str
     """
         This specifically parses reports and looks for keywords to grab the values and put them into a list of dicts 
         The list is indexed based on the number of values present in the report file.
-        For example: 
-            For Timing -> If there are a bunch of paths in the report, the list will be indexed by each specific timing path (index 0 contains worst case)
-            For Area -> If there are a bunch of modules in the report, the list will be indexed by each specific module (index 0 contains total area)
+        For Timing -> If there are a bunch of paths in the report, the list will be indexed by each specific timing path (index 0 contains worst case)
+        For Area -> If there are a bunch of modules in the report, the list will be indexed by each specific module (index 0 contains total area)
     """    
     if flow_stage.tag == "syn":
         cadence_hdr_catagories = ["Instance","Module","Cell Count","Cell Area","Net Area","Total Area"]

@@ -54,6 +54,7 @@ def stratix_iv() -> rg_ds.RadGenArgs:
     )
     rg_args = rg_ds.RadGenArgs(
         override_outputs = True,
+        manual_obj_dir = os.path.join(rg_home,"tests", "data", "stratix_iv", "outputs", "stratix_iv_rrg_debug"),
         project_name = "stratix_iv",
         subtools = ["coffe"],
         subtool_args = coffe_args,
@@ -64,7 +65,7 @@ def stratix_iv() -> rg_ds.RadGenArgs:
 
 @pytest.mark.rrg
 @skip_if_fixtures_only
-def test_stratix_iv_rrg_parse(request):
+def test_stratix_iv_rrg_parse(request: pytest.FixtureRequest):
     import src.common.rr_parse as rr_parse
     tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = tests_common.get_test_info()
     rrg_fpath: str = os.path.join(
@@ -88,7 +89,7 @@ def stratix_iv_passthrough_tb(stratix_iv) -> rg_ds.RadGenArgs:
 
 @pytest.mark.parse
 @skip_if_fixtures_only
-def test_stratix_iv_passthrough(stratix_iv_passthrough_tb: rg_ds.RadGenArgs, request):
+def test_stratix_iv_passthrough(stratix_iv_passthrough_tb: rg_ds.RadGenArgs, request: pytest.FixtureRequest):
     rg_info, _ = tests_common.run_rad_gen(
         stratix_iv_passthrough_tb, tests_common.get_rg_home()
     )
@@ -112,7 +113,7 @@ def stratix_iv_checkpoint_tb(stratix_iv) -> rg_ds.RadGenArgs:
 @pytest.mark.checkpoint
 @pytest.mark.custom_fpga
 @skip_if_fixtures_only
-def test_stratix_iv_checkpoint(stratix_iv_checkpoint_tb: rg_ds.RadGenArgs, request):
+def test_stratix_iv_checkpoint(stratix_iv_checkpoint_tb: rg_ds.RadGenArgs, request: pytest.FixtureRequest):
     """
         Tests ability to take intermediate COFFE checkpoint files and continue from them, getting the same result as if we ran the whole thing in one go
     """
@@ -132,15 +133,70 @@ stratix_iv_conf_init_tb = conftest.create_rg_fixture(
 @pytest.mark.init
 @pytest.mark.custom_fpga
 @skip_if_fixtures_only
-def test_stratix_iv_conf_init(stratix_iv_conf_init_tb, request):
+def test_stratix_iv_conf_init(stratix_iv_conf_init_tb, request: pytest.FixtureRequest):
     tests_common.run_and_verif_conf_init(stratix_iv_conf_init_tb)
 
 @pytest.mark.stratix_iv
 @pytest.mark.custom_fpga
 @skip_if_fixtures_only
-def test_stratix_iv(stratix_iv: rg_ds.RadGenArgs, request):
+def test_stratix_iv(stratix_iv: rg_ds.RadGenArgs, request: pytest.FixtureRequest):
+    rg_args = copy.deepcopy(stratix_iv)
     ret_val: Any = tests_common.run_rad_gen(
         stratix_iv, 
         tests_common.get_rg_home(),
-        just_print = True,
     )
+
+@pytest.fixture
+def stratix_iv_bram_tb(stratix_iv) -> rg_ds.RadGenArgs:
+    tests_tree: rg_ds.Tree
+    tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = tests_common.get_test_info()
+    cur_test_input_dpath: str = tests_tree.search_subtrees(
+        f"tests.data.{test_grp_name}.inputs",
+        is_hier_tag = True,
+    )[0].path
+    # manual_obj_dir = os.path.join(rg_home, "tests", "data", "stratix_iv", "outputs", "stratix_iv_rrg_debug"),
+
+    stratix_iv_bram_fpath = os.path.join(cur_test_input_dpath, "stratix_iv_rrg_bram.yml")
+    rg_args: rg_ds.RadGenArgs = copy.deepcopy(stratix_iv)
+    rg_args.subtool_args.fpga_arch_conf_path = stratix_iv_bram_fpath
+    rg_args.manual_obj_dir = os.path.join(
+        tests_tree.search_subtrees(f"tests.data.{test_grp_name}.outputs", is_hier_tag = True)[0].path,
+        "stratix_iv_rrg_bram_22nm_debug",
+    ) 
+    tests_common.write_fixture_json(rg_args)
+
+    return rg_args
+
+@pytest.fixture
+def stratix_iv_bram_passthrough_tb(stratix_iv_bram_tb) -> rg_ds.RadGenArgs:
+    tests_tree: rg_ds.Tree
+    tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = tests_common.get_test_info()
+    rg_args: rg_ds.RadGenArgs = copy.deepcopy(stratix_iv_bram_tb)
+    rg_args.manual_obj_dir = os.path.join(
+        tests_tree.search_subtrees(f"tests.data.{test_grp_name}.outputs", is_hier_tag = True)[0].path,
+        "stratix_iv_rrg_bram_22nm_passthrough_debug",
+    ) 
+    rg_args.subtool_args.pass_through = True 
+    tests_common.write_fixture_json(rg_args)
+
+    return rg_args
+
+@pytest.mark.stratix_iv
+@pytest.mark.custom_fpga
+@skip_if_fixtures_only
+def test_stratix_iv_bram_passthrough(stratix_iv_bram_passthrough_tb: rg_ds.RadGenArgs, request: pytest.FixtureRequest):
+    rg_info, _ = tests_common.run_rad_gen(
+        stratix_iv_bram_passthrough_tb, tests_common.get_rg_home()
+    )
+
+@pytest.mark.stratix_iv
+@pytest.mark.custom_fpga
+@skip_if_fixtures_only
+def test_stratix_iv_bram(stratix_iv_bram_tb, request: pytest.FixtureRequest):
+    rg_args = copy.deepcopy(stratix_iv_bram_tb)
+    ret_val: Any = tests_common.run_rad_gen(
+        rg_args, 
+        tests_common.get_rg_home(),
+    )
+
+

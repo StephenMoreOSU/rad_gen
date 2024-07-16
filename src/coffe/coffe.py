@@ -16,13 +16,13 @@ from collections import namedtuple
 from dataclasses import fields
 
 def run_coffe_flow(coffe_info: rg_ds.Coffe):
-    arch_folder = utils.create_output_dir(coffe_info.arch_name, coffe_info.fpga_arch_conf["fpga_arch_params"]['arch_out_folder'])
+    arch_folder = utils.create_output_dir(coffe_info.arch_name, coffe_info.common.obj_dir)
 
     is_size_transistors = not coffe_info.no_sizing
     size_hb_interfaces = coffe_info.size_hb_interfaces
 
     # Path to output telemetry file
-    telemetry_file_path = os.path.join(arch_folder, "telemetry.csv")
+    # telemetry_file_path = os.path.join(arch_folder, "telemetry.csv")
     # Print the options to both terminal and report file
     report_file_path = os.path.join(arch_folder, "report.txt") 
 

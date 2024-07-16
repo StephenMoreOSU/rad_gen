@@ -2168,9 +2168,9 @@ def size_subcircuit_transistors(
         re_erf: int, 
         area_opt_weight: int | float, 
         delay_opt_weight: int | float, 
-        outer_iter, 
-        initial_transistor_sizes, 
-        spice_interface,
+        outer_iter: int, 
+        initial_transistor_sizes: dict, 
+        spice_interface: spice.SpiceInterface,
         is_ram_component: int, # TODO change to bool
         is_cc_component: int, # TODO change to bool
         use_sp_name: bool = True,
@@ -2553,8 +2553,8 @@ def size_subckt_grp(
                 outer_iter = iteration, 
                 initial_transistor_sizes = starting_transistor_sizes, 
                 spice_interface = sp_interface, 
-                is_ram_component = is_cc,
-                is_cc_component = is_ram,
+                is_ram_component = is_ram,
+                is_cc_component = is_cc,
             )
         else:
             sizing_results_dict[sp_name] = sizing_results_list[-1][sp_name]
@@ -2605,13 +2605,28 @@ def size_bram_ckts(
     # If it's not the first iteration, we use the transistor sizes of the previous iteration as the starting sizes.
     if iteration == 1:
         quick_mode_dict[name] = 1
-        starting_transistor_sizes = format_transistor_sizes_to_basic_subciruits(fpga_inst.RAM.pgateoutputcrossbar.initial_transistor_sizes)
+        starting_transistor_sizes = format_transistor_sizes_to_basic_subciruits(
+            transistor_sizes = fpga_inst.RAM.pgateoutputcrossbar.initial_transistor_sizes
+        )
     else:
         starting_transistor_sizes = sizing_results_list[len(sizing_results_list)-1][name]
     
     # Size the transistors of this subcircuit
     if quick_mode_dict[name] == 1:
-        sizing_results_dict[name], sizing_results_detailed_dict[name] = size_subcircuit_transistors(fpga_inst, fpga_inst.RAM.pgateoutputcrossbar, opt_type, re_erf, area_opt_weight, delay_opt_weight, iteration, starting_transistor_sizes, spice_interface, 1, 0)
+        sizing_results_dict[name], sizing_results_detailed_dict[name] = size_subcircuit_transistors(
+            fpga_inst = fpga_inst,
+            subcircuit = fpga_inst.RAM.pgateoutputcrossbar, 
+            opt_type = opt_type,
+            run_options = run_options,
+            re_erf = re_erf, 
+            area_opt_weight = area_opt_weight, 
+            delay_opt_weight = delay_opt_weight,
+            outer_iter = iteration, 
+            initial_transistor_sizes = starting_transistor_sizes,
+            spice_interface = spice_interface, 
+            is_ram_component = 1, 
+            is_cc_component = 0
+        )
     else:
         sizing_results_dict[name]= sizing_results_list[len(sizing_results_list)-1][name]
         sizing_results_detailed_dict[name] = sizing_results_detailed_list[len(sizing_results_list)-1][name]   
@@ -2620,7 +2635,12 @@ def size_bram_ckts(
         time_after_sizing = time.time()
     
         past_cost = current_cost
-        current_cost =  cost_lib.cost_function(cost_lib.get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0), get_current_delay(fpga_inst, 1), area_opt_weight, delay_opt_weight)   
+        current_cost =  cost_lib.cost_function(
+            cost_lib.get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0),
+            get_current_delay(fpga_inst, 1),
+            area_opt_weight,
+            delay_opt_weight
+        )   
         if (past_cost - current_cost)/past_cost < fpga_inst.specs.quick_mode_threshold:
             quick_mode_dict[name] = 0
 

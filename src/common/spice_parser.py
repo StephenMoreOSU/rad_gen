@@ -411,7 +411,7 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, rg_ds.S
                                 inst_params[isnt_param_name] = inst_param_val
                         
                         # At this point we should have all the information needed to create a subckt inst instance
-                        inst: dict = {"name": inst_name, "subckt": inst_subckt, "ports": inst_ports, "params": inst_params}
+                        inst: dict = {"name": inst_name.lower(), "subckt": inst_subckt.lower(), "ports": inst_ports, "params": inst_params}
                         subkt_insts.append(inst)
                         # inst: rg_ds.SpSubCktInst = rg_ds.SpSubCktInst(None, inst_name, {port: "" for port in inst_ports}, inst_params)
                     
@@ -424,7 +424,7 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, rg_ds.S
                             (param.split(param_delim)[0]).strip(): (param.split(param_delim)[1]).strip() 
                             for param in subckt_params
                         }
-                    subckt: dict = {"name": subckt_name, "ports": subckt_ports, "params": subckt_params, "insts": subkt_insts}
+                    subckt: dict = {"name": subckt_name.lower(), "ports": subckt_ports, "params": subckt_params, "insts": subkt_insts}
                     subckts.append(subckt)
         
         # Now "subckts" should be full of our subckts and their instances
@@ -435,7 +435,7 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, rg_ds.S
         for subckt in lib_subckts:
             if subckt.name in all_subckts.keys():
                 raise ValueError(f"Subckt {subckt.name} already exists in the library")
-            all_subckts[subckt.name] = subckt
+            all_subckts[str(subckt.name).lower()] = subckt
         # Because of weird instantiation order carried from ic 3d we have to create subckts, then insts
         
         # Holds list of subckts which we haven't parsed and don't exist in our lib, ie we cannot create the Inst Object until they are parsed
