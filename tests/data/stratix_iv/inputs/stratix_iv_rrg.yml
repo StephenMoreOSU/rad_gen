@@ -1,0 +1,229 @@
+# EXAMPLE COFFE INPUT FILE (FINFET TRANSISTORS)
+#
+# Note: COFFE interprets any line beginning with a '#' as a comment in it's input files.
+#
+# COFFE input parameters can be divided into 2 groups:
+# 1- Parameters describing the FPGA architecture
+# 2- Process technology-related parameters
+# 
+# [1] C. Chiasson and V.Betz. "COFFE: Fully-Automated Transistor Sizing for FPGAs",
+#      IEEE Int. Conf. on Field-Programmable Technology (FPT), 2013
+
+
+#######################################
+##### Architecture Parameters
+#######################################
+fpga_arch_params:
+  # The following parameters are the classic VPR architecture parameters
+  N : 10
+  K : 6 
+  W : 300
+  L : 4
+  I : 80          # Strtx IV Arch File VTR
+  Fs : 3
+  Fcin : 0.055    # Strtx IV Arch File VTR
+  Fcout : 0.075   # Strtx IV Arch File VTR
+
+  # arch_out_folder: ${RAD_GEN_HOME}/tests/data/stratix_iv/outputs/stratix_iv_rrg_debug
+
+  # Running the checkpoint with confirmed results from ${RAD_GEN_HOME}/tests/data/stratix_iv/outputs/stratix_iv_rrg_full_run dir
+  #   (w results): ${RAD_GEN_HOME}/tests/data/stratix_iv/outputs/stratix_iv_checkpointed_it_1
+
+  # Ran with a checkpoint coming from either the original 'part1' and 'part2' dirs or from the 
+  #   ${RAD_GEN_HOME}/tests/data/stratix_iv/outputs/stratix_iv_rrg_full_run dir 
+  #   (w results): ${RAD_GEN_HOME}/tests/data/stratix_iv/outputs/stratix_iv_rrg_mt_8_it_4_from_checkpoint_it_1
+
+  # For full run (currently unused): ${RAD_GEN_HOME}/tests/data/stratix_iv/outputs/stratix_iv_rrg_mt_8_it_4
+  # For debug
+
+
+  # rr_graph_fpath: ${RAD_GEN_HOME}/unit_tests/inputs/coffe/stratix_iv/rr_graph_ep4sgx110.xml
+
+  # Wire types in format [length, percentage of total channel width]
+  # ORIGINAL WIRE TYPE DEFINITION
+  # wire_types:
+  #   - len: 4 # Length of wire type
+  #     freq: 260 # Frequency of wire type
+  #     metal: 1 # metal RC index
+
+  #   - len: 16
+  #     freq: 40
+  #     metal: 1
+  # RRG BASED WIRE TYPE DEFINITION
+  wire_types:
+    - name: "L4"  # Name used to identify this wire, matching name found in the rr_graph
+      len: 4
+      freq: 260
+      metal: 1    # metal RC index
+    - name: "L16" # Name used to identify this wire, matching name found in the rr_graph
+      len: 16
+      freq: 40
+      metal: 2    # metal RC index
+
+
+
+  # Connectivity of each wire type to one another in switch boxes
+  Fs_mtx:
+    # Each element is a dict with:
+    #   src: source wire type index
+    #   dst: destination wire type index
+    #   Fs: routing directions from src to dst wire types
+    # L4 -> L4
+    - src: 0 
+      dst: 0
+      Fs: 3
+    # L4 -> L16
+    - src: 0
+      dst: 1
+      Fs: 0
+    # L16 -> L4
+    - src: 1
+      dst: 0
+      Fs: 3
+    # L16 -> L16
+    - src: 1
+      dst: 1
+      Fs: 3
+    
+
+  # Multi Wire Segment related parameters
+  # options
+  # sb_conn: full -> each wire type can switch to any other wire type in SB
+  # sb_conn: seperate -> each wire type can only connect to wires of the same type in SB
+  # sb_conn: manual -> manually assign connectivity 
+  # sb_conn: 
+  #   mode: full # This just means we have full connectivity between wire lengths
+  # based on the index of wire type we specify how many of each type can connect to other types in each SB
+  # manual_conns:
+  #   - [0.5]
+
+  # The following architecture parameters are new and help COFFE describe
+  # a more flexible BLE. See [1] for more details.
+
+  # Number of BLE outputs to general routing 
+  Or : 2
+
+  # Number of BLE outputs to local routing
+  Ofb : 2
+
+  # Population of local routing MUXes 
+  Fclocal : 0.5
+
+  # Register select:
+  # Defines whether the FF can accept it's input directly from a BLE input or not.
+  # To turn register-select off, Rsel : z
+  # To turn register select on, Rsel : <ble_input_name>
+  # where <ble_input_name>  :  the name of the BLE input from which the FF can
+  # accept its input (e.g. a, b, c, etc...).
+  Rsel : c
+
+  # Register feedback muxes:
+  # Defines which LUT inputs support register feedback.
+  # Set Rfb to a string of LUT input names.
+  # For example: 
+  # Rfb : c tells COFFE to place a register feedback mux on LUT input C.
+  # Rfb : cd tells COFFE to place a register feedback mux on both LUT inputs C and D.
+  # Rfb : z tells COFFE that no LUT input should have register feedback muxes.
+  Rfb : c
+
+  # Do we want to use fracturable Luts?
+  use_fluts : True
+
+  # can be as large as K-1
+  independent_inputs  :  0
+
+  enable_carry_chain  :  1
+  #the carry chain type could be "skip" or "ripple"
+  carry_chain_type  :  skip
+  FAs_per_flut  :  2
+
+  #######################################
+  ##### Process Technology Parameters
+  #######################################
+
+  # Transistor type can be 'bulk' or 'finfet'. 
+  # Make sure your spice model file matches the transistor type you choose.
+  transistor_type : bulk
+
+  # The switch type can be 'pass_transistor' or 'transmission_gate'.
+  switch_type : transmission_gate
+
+  # Supply voltage
+  vdd : 1.0
+
+  # SRAM Vdd
+  # May be unclear but this is also the boost voltage for pass transistor based FPGAs
+  vsram : 1.1 
+
+  # SRAM Vss
+  vsram_n : 0.0
+
+  # Gate length (nm)
+  # From Free45 PDK Layout
+  gate_length : 50
+
+  # This parameter controls the gate length of PMOS level-restorers. For example, setting this paramater 
+  # to 4 sets the gate length to 4x the value of 'gate_legnth'. Increasing the gate length weakens the 
+  # PMOS level-restorer, which is sometimes necessary to ensure proper switching.
+  rest_length_factor  :  5
+
+  # For FinFETs, minimum transistor refers to the contact width of a single-fin transistor (nm).
+  # For Bulk I don't think this parameter is used 
+  # COFFE uses this when it calculates source/drain parasitic capacitances.
+  # ASAP7 has 7nm minimum 
+  min_tran_width  :  90
+
+  # Length of diffusion for a single-finger transistor (nm).
+  # COFFE uses this when it calculates source/drain parasitic capacitances.
+  trans_diffusion_length  :  105
+
+  # Minimum-width transistor area (nm^2)
+  # Look in design rules, make me 1 fin, shortest gate, contact on both sides, no diffusion sharing, 1 space between next transistor
+  # Layout a single transistor pass DRC, look for sample layout
+  min_width_tran_area  :  169175
+
+  # SRAM area (in number of minimum width transistor areas)
+  sram_cell_area  :  6
+
+  # Path to SPICE device models file and library to use
+  model_path : third_party/spice_models/45nm_HP.l
+  model_library : 45NM_FINFET_HP
+
+  #######################################
+  ##### Metal data
+  ##### R in ohms/nm
+  ##### C in fF/nm
+  ##### format: metal : R,C
+  ##### ex: metal : 0.054825,0.000175
+  #######################################
+
+  # Each 'metal' statement defines a new metal layer. 
+  # COFFE uses two metal layers by default. The first metal layer is where COFFE 
+  # implements all wires except for the general routing wires. They are implemented
+  # in the second metal layer. 
+
+  # Mx and My for F7 node in https://dl.acm.org/doi/pdf/10.1145/3431920.3439300
+
+  metal : 
+  # All wires except the general routing wires are implemented in this layer.
+  # Free45 M1
+  - [0.00492, 0.00021]
+  
+  # General routing wires will be implemented in this layer 
+  # Free45 M4-M6
+  - [0.00079, 0.00021]
+
+  # General routing wires will be implemented in this layer 
+  # Free45 M4-M6
+  - [0.00079, 0.00021]
+
+  # If you wanted to, you could define more metal layers by adding more 'metal'
+  # statements but, by default, COFFE would not use them because it only uses 2 layers.
+  # The functionality of being able to add any number of metal layers is here to allow
+  # you to investigate the use of more than 2 metal layers if you wanted to. However,
+  # making use of more metal layers would require changes to the COFFE source code.
+
+  gen_routing_metal_pitch : 280 # From Free45 PDK M4-M6
+  gen_routing_metal_layers : 1
+
+
