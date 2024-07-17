@@ -67,9 +67,15 @@ def get_test_info(stack_lvl: int = 2) -> Tuple[rg_ds.Tree, str, str, str, str]:
 
 def get_fixture_info(stack_lvl = 3) -> Tuple[rg_ds.Tree, str, str, str]:
     tests_tree, test_grp_name, fixture_name, _, _ = get_test_info(stack_lvl)
-    fixture_out_fpath: str = os.path.join(
-        tests_tree.search_subtrees(f"tests.data.{test_grp_name}.fixtures", is_hier_tag = True)[0].path,
-        f"{fixture_name}.json"
+    
+    fixture_out_dpath: str = os.path.join(
+        tests_tree.search_subtrees(f"tests.data.{test_grp_name}", is_hier_tag = True)[0].path,
+        "fixtures"
+    )
+    os.makedirs(fixture_out_dpath, exist_ok=True)
+    fixture_out_fpath = os.path.join(
+        fixture_out_dpath,
+        f"{fixture_name}.json",
     )
     return tests_tree, test_grp_name, fixture_name, fixture_out_fpath
 
