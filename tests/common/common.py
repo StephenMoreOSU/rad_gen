@@ -55,7 +55,13 @@ def get_test_info(stack_lvl: int = 2) -> Tuple[rg_ds.Tree, str, str, str, str]:
     test_grp_name: str = os.path.splitext( os.path.basename(caller_file).replace('test_',''))[0]
     # We call the fn which gets current function name with level = 2 to get the name of the function which calls this function
     test_name: str = get_current_function_name(level = stack_lvl).replace('test_', '')
-    test_out_dpath: str = tests_tree.search_subtrees(f"tests.data.{test_grp_name}.outputs", is_hier_tag=True)[0].path 
+    test_out_dpath: str = os.path.join(
+        tests_tree.search_subtrees(f"tests.data", is_hier_tag = True)[0].path,
+        test_grp_name,
+        "outputs",
+    )
+    os.makedirs(test_out_dpath, exist_ok = True)
+    # test_out_dpath: str = tests_tree.search_subtrees(f"tests.data.{test_grp_name}.outputs", is_hier_tag=True)[0].path 
     assert os.path.exists(test_out_dpath), f"Test output path {test_out_dpath} does not exist"
     return tests_tree, test_grp_name, test_name, test_out_dpath, rg_home
 
