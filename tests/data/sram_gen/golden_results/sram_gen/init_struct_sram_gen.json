@@ -1,0 +1,232 @@
+{
+    "common": {
+        "just_config_init": true,
+        "override_outputs": true,
+        "manual_obj_dir": null,
+        "rad_gen_home_path": "~/Documents/rad_gen",
+        "hammer_home_path": "~/Documents/rad_gen/third_party/hammer",
+        "logger": null,
+        "log_verbosity": 1,
+        "obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/shared_resources/sram_lib/obj_dirs/sram_gen-2024--07--10--19--09--58--121",
+        "project_tree": null,
+        "project_name": null,
+        "res": {
+            "wspace_re": null,
+            "find_params_re": null,
+            "find_defines_re": null,
+            "grab_bw_soft_bkt": null,
+            "find_localparam_re": null,
+            "first_eq_re": null,
+            "find_soft_brkt_chars_re": null,
+            "find_verilog_fn_re": null,
+            "grab_verilog_fn_args": null,
+            "find_verilog_fn_hdr": null,
+            "decimal_re": null,
+            "signed_dec_re": null,
+            "sci_not_dec_re": null,
+            "inn_fp_grab_stdcell_density_re": null,
+            "int_re": null,
+            "sp_del_grab_info_re": null,
+            "sp_grab_print_vals_re": null,
+            "sp_grab_inv_pn_vals_re": null,
+            "sp_grab_tran_analysis_ub_str": "\\s*transient\\s*analysis.*?\\s*",
+            "sp_grab_tran_analysis_re": null,
+            "sp_grab_measure_re": null,
+            "sp_grab_param_re": null,
+            "sp_coffe_grab_params_re": null,
+            "coffe_key_w_spaces_rep_re": null
+        },
+        "report": {
+            "report_dir": "reports",
+            "unparse_report_dir": "unparse_reports",
+            "gds_area_fname": "gds_area.rpt",
+            "power_lookup": {
+                "W": 1.0,
+                "mW": 0.001,
+                "uW": 1e-06,
+                "nW": 1e-09,
+                "pW": 1e-12
+            }
+        }
+    },
+    "mode": {
+        "sweep_gen": true,
+        "result_parse": false,
+        "vlsi": {
+            "run": "serial",
+            "flow": "hammer",
+            "enable": false,
+            "config_pre_proc": null
+        }
+    },
+    "stdcell_lib": {
+        "pdk_name": "asap7",
+        "cds_lib": "asap7_TechLib",
+        "sram_lib_path": "~/Documents/rad_gen/third_party/hammer/hammer/technology/asap7/sram_compiler/memories",
+        "pdk_rundir_path": null
+    },
+    "scripts": {
+        "gds_to_area_fname": null,
+        "virtuoso_setup_path": null
+    },
+    "sweep_conf_fpath": "~/Documents/rad_gen/tests/data/sram_gen/inputs/sram_sweep.yml",
+    "result_search_path": "~/Documents/rad_gen/projects",
+    "common_asic_flow": {
+        "top_lvl_module": null,
+        "hdl_dpath": null,
+        "flow_conf_fpaths": null,
+        "tool_env_conf_fpaths": null,
+        "db_libs": [
+            "asap7_db_libs"
+        ],
+        "flow_stages": {
+            "build": {
+                "tag": "build",
+                "exec_idx": null,
+                "run": false,
+                "tool": "hammer"
+            },
+            "sram": {
+                "tag": "sram",
+                "exec_idx": null,
+                "run": false,
+                "tool": "custom"
+            },
+            "syn": {
+                "tag": "syn",
+                "exec_idx": null,
+                "run": true,
+                "tool": "cadence"
+            },
+            "par": {
+                "tag": "par",
+                "exec_idx": null,
+                "run": true,
+                "tool": "cadence"
+            },
+            "pt": {
+                "tag": "pt",
+                "exec_idx": null,
+                "run": true,
+                "tool": "synopsys"
+            }
+        }
+    },
+    "asic_flow_settings": {
+        "cli_driver_bpath": null,
+        "hammer_driver": null
+    },
+    "custom_asic_flow_settings": null,
+    "design_sweep_info": {
+        "base_config_path": "~/Documents/rad_gen/tests/data/sram_gen/inputs/sram.yml",
+        "top_lvl_module": null,
+        "hdl_dpath": null,
+        "type": "sram",
+        "flow_threads": 1,
+        "vlsi_params": null,
+        "sram_params": {
+            "sram_rtl_template_fpath": "~/Documents/rad_gen/shared_resources/sram_lib/rtl/src/sram_template.sv",
+            "mems": [
+                {
+                    "rw_ports": 2,
+                    "w": 1024,
+                    "d": 256
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 256,
+                    "d": 512
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 512,
+                    "d": 512
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 1024,
+                    "d": 512
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 256,
+                    "d": 1024
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 512,
+                    "d": 1024
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 1024,
+                    "d": 1024
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 256,
+                    "d": 2048
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 512,
+                    "d": 2048
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 1024,
+                    "d": 2048
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 256,
+                    "d": 64
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 512,
+                    "d": 64
+                },
+                {
+                    "rw_ports": 2,
+                    "w": 1024,
+                    "d": 64
+                }
+            ],
+            "rw_ports": [
+                1,
+                2
+            ],
+            "widths": [
+                8,
+                16,
+                32,
+                64,
+                128
+            ],
+            "depths": [
+                16,
+                128,
+                256,
+                512,
+                1024,
+                2048,
+                4096
+            ]
+        },
+        "rtl_params": null,
+        "tool_env_conf_fpaths": [
+            "~/Documents/rad_gen/tests/data/asic_dse/env.yml"
+        ],
+        "flow_conf_fpaths": [
+            "~/Documents/rad_gen/tests/data/asic_dse/pdks/asap7.yml",
+            "~/Documents/rad_gen/tests/data/asic_dse/cad_tools/cadence_tools.yml"
+        ]
+    },
+    "sram_compiler_settings": {
+        "rtl_out_dpath": "~/Documents/rad_gen/shared_resources/sram_lib/rtl/gen",
+        "config_out_dpath": "~/Documents/rad_gen/shared_resources/sram_lib/configs/gen",
+        "scripts_out_dpath": "~/Documents/rad_gen/shared_resources/sram_lib/scripts"
+    },
+    "design_out_tree": null
+}

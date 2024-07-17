@@ -17,10 +17,6 @@ import inspect
 import src.common.data_structs as rg_ds
 import tests.common.common as tests_common
 
-# import tests.test_alu_vlsi_sweep as test_alu_vlsi_sweep
-# import tests.test_sram_gen as test_sram_gen
-# import tests.test_noc_rtl_sweep as test_noc_rtl_sweep
-
 def asic_flow_gen(
     test_data_dpaths: str,
     pytest_fpaths: List[str],
@@ -89,6 +85,7 @@ def asic_flow_gen(
 
 def conf_init_gen(
     tests_dpath: str,
+    test_arg: str = None,
     init_markers: List[str] = None,
 ):
     """
@@ -103,7 +100,20 @@ def conf_init_gen(
     pytest_collect_args = ["pytest", "--collect-only"]
     if init_markers:
         markers_or: str = " or ".join([f"{marker}" for marker in init_markers])
-        test_args = [tests_dpath, "-m", markers_or]
+        if test_arg:
+            # If test arg is a path to a particular test file
+            if os.path.isfile(test_arg):
+                test_args = [test_arg, "-m", markers_or]
+            # If the test is a function in a test file
+            else:
+                test_args = [test_arg]
+        else:
+            # If no test arg is given, run all tests with the markers
+            test_args = [tests_dpath, "-m", markers_or]
+    # No markers provided but a test arg is given and its either a test file or a test function
+    elif test_arg and (os.path.isfile(test_arg) or os.path.isfile(test_arg.split("::")[0])):
+        test_args = [test_arg]
+    # If none of the above we run for all tests
     else:
         test_args = [tests_dpath]
     pytest_collect_args += test_args
@@ -119,18 +129,18 @@ def conf_init_gen(
     # They will output a json file with the arguments to run rad_gen
     # Lots of errors will be generated but it works if rg_args json files are written out
     tests_common.run_fixtures(rg_home, test_args = test_args)
+    
+    # Remove any 'conf_init' tests from the list
+    tests_info = [ test_info for test_info in tests_info if "conf_init" not in test_info[1] ]
 
     for test_info in tests_info:
         test_fn_name: str = test_info[1]
         test_dname: str = os.path.splitext(
             os.path.basename(test_info[0]).replace("_test","").replace("test_","")
         )[0]
-        # Don't do anything for tests which have 'conf_init' substr in them
-        if "conf_init" in test_fn_name:
-            continue
         golden_res_dname: str = test_info[1].replace("_test","").replace("test_","")
         # Get output path to write the new golden confs to and create test specific dir if doesn't exist
-        golden_res_out_dpath = os.path.join(tests_dpath, "data", test_dname, "golden_results", golden_res_dname) # golden_res_dname
+        golden_res_out_dpath = os.path.join(tests_dpath, "data", test_dname, "golden_results", golden_res_dname)
         os.makedirs(golden_res_out_dpath, exist_ok=True)
         # Parse the test -> test_fixture mapping file to determine which fixtures to call to generate the init struct for each tests
         test_fixture_mappings: dict = json.load(open(test_fixture_mapping_fpath))
@@ -181,6 +191,7 @@ def conf_init_gen(
             )
             with open(golden_res_out_fpath, "w") as f:
                 f.write(json_text)
+            print(f"Writing out golden result to '{golden_res_out_fpath}'")
             break
 
 
@@ -213,10 +224,6 @@ def clean_fixtures(tests_dpath: str):
             print(f"deleting '{json_file}'")
             os.remove(json_file)
 
-def run_pytest(*args):
-    print("-vv","-s", *args)
-    pytest.main(["-vv","-s", *args])
-
 def parse_args(arguments: Sequence | None = None) -> dict:
     parser = argparse.ArgumentParser(description="Update golden results for tests")
     parser.add_argument(
@@ -242,7 +249,12 @@ def parse_args(arguments: Sequence | None = None) -> dict:
         nargs="*",
         help="List of markers to pass to pytest to select"
     )
-
+    parser.add_argument(
+        "-t",
+        "--test_arg",
+        type=str,
+        help="Test argument to pass to pytest to select test file or test function"
+    )
     parsed_args: dict
     if arguments is None:
         parsed_args = vars(parser.parse_args())
@@ -285,21 +297,17 @@ def main(*args, **kwargs):
     if parsed_args.get("asic_flow"):
         asic_flow_gen(test_data_dpaths, pytest_fpaths)
     
-
     # For generating struct initialization golden results
     if parsed_args.get("struct_init"):
-        conf_init_gen(tests_dpath, init_markers = parsed_args.get("markers_or"))
+        conf_init_gen(
+            tests_dpath, 
+            test_arg = parsed_args.get("test_arg"),
+            init_markers = parsed_args.get("markers_or"))
     
     # Full cleanup of test + fixture outputs
     if parsed_args.get("clean_fixtures"):
         clean_fixtures(tests_dpath)
 
-    # "tests/test_alu_vlsi_sweep.py::test_alu_sw_pt_asic_flow"
-    # "tests/test_stratix_iv.py"
-    # "tests/test_noc_rtl_sweep.py::test_noc_sw_pt_asic_flow"
-    # "tests/test_noc_rtl_sweep.py::test_noc_sw_pt_parse"
-
-    # run_pytest("tests/test_noc_rtl_sweep.py::test_noc_sw_pt_parse")
     
 
 
