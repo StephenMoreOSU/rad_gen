@@ -8,7 +8,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import src.common.data_structs as rg_ds
 import src.common.utils as rg_utils
-import tests.common.driver as driver
 import tests.common.common as tests_common
 
 import copy
@@ -63,7 +62,8 @@ test_fixture_mapping = {}
 
 def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config, items: List[pytest.Item]):
     """
-    Pytest hook that runs during the collection phase of pytest.
+        Pytest hook that runs during the collection phase of pytest.
+        Will create a dict mapping names of tests to the names of fixtures
     """
     item: pytest.Item
     for item in items:
@@ -88,6 +88,10 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
 #                 fixture.execute(request=item._request)
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: pytest.ExitCode):
+    """
+        Pytest hook that runs after the test session finishes.
+        Will take the test2fixture mapping created in collection phase and dump it out
+    """
     # Mapping out fpath
     mapping_fpath: str = os.path.join(
         os.environ.get("RAD_GEN_HOME"),

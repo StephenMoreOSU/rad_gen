@@ -67,10 +67,12 @@ Overview
 
 
 The modules that make up RAD-Gen are organized into subdirectories based on their functionality. 
-The main subdirectories are asic_dse, coffe, ic_3d, and common. Each of these subdirectories contains a set of Python modules that implement the functionality of the subtool. 
+The main subdirectories are asic_dse, coffe, ic_3d, and common. 
+Each of these contain a set of Python modules implementing functionality of the subtool. 
 The rad_gen directory contains the main entry point for the RAD-Gen tool.
 
-It consists of the following submodules:
+Submodules
+-------------
 
 * ``rad_gen``: Contains the main entry point for the RAD-Gen tool in ``main.py``.
 * ``asic_dse``: Used for performing design space exploration and running designs through a standard cell ASIC flow.
@@ -90,17 +92,18 @@ Data structures, initialization, and utilities: common
 ASIC flow + SRAM compiler: ASIC-DSE
 --------------------------------------
 
-The following modules in this package are used to run a standard cell ASIC flow with the hammer backend.
+The following modules in this package are used to run a standard cell ASIC flow with the Hammer backend.
 
-* ``hammer_flow.py``: Functions to run a standard cell ASIC flow with the hammer backend.
-* ``custom_flow.py``: Functions to run a standard cell ASIC flow with custom tcl scripts backend, using design_compiler, innovus, and primetime.
+* ``hammer_flow.py``: Functions to run a standard cell ASIC flow with the Hammer backend.
+* ``custom_flow.py``: Functions to run a standard cell ASIC flow with custom tcl scripts backend, using Synopsys Design Compiler, Cadence Innovus, and Synopsys Primetime.
 * ``sram_compiler.py``: Functions for running SRAM macros through standard cell ASIC flow and generating larger SRAMs from smaller ones.
 * ``asic_dse.py``: Top level functionality for running standard cell ASIC flows, design space exploration, sweeps, and parsers.
 
 FPGA circuit level DSE + transistor sizing: COFFE
 --------------------------------------------------
 
-The following modules in this package are used to model circuitry that exists in the FPGA. 
+The following modules in this package are used to model circuitry that exists in the FPGA:
+
 They all are classes that inherit from the ``SizeableCircuit`` object.
 
 * ``mux.py``: Base implementation for mux circuits inherited by other mux circuits like (``cb_mux.py``, ``sb_mux.py``, ...).
@@ -115,23 +118,23 @@ They all are classes that inherit from the ``SizeableCircuit`` object.
 * ``ram.py``: BRAM and related circuitry & testbench implementation(s)
 
 Following modules are used to write out raw spice netlists for each legal mode of operation.
-The majority of COFFE creates the spice netlists libs from data structure objects, however, 
-because of time constraints to refactoring, the below files still write out raw spice.
+The majority of COFFE creates the spice netlists libraries from data structure objects, however, 
+as some refactoring remains to be done, the below files still write out raw spice.
 
-* ``basic_subcircuits.py``: Writes out basic subcircuits, like transistor, inverter, nand, etc primatives.
+* ``basic_subcircuits.py``: Writes out basic subcircuits, like transistor, inverter, nand, and other primitives.
 * ``ff_subcircuits.py``: flip-flop subcircuits.
 * ``lut_subcircuits.py``: lookup table subcircuits.
-* ``load_subcircuits.py``: load related subcircuits.
+* ``load_subcircuits.py``: subcircuits used to model FPGA loads.
 
 The following modules are for data structures used in COFFE
 
-* ``constants.py``: Constsants used in COFFE
+* ``constants.py``: Constants used in COFFE
 * ``data_structs.py``: Data structures used in COFFE
 * ``circuit_baseclasses.py``: Base classes for (legacy) circuit objects in COFFE 
 
 The following modules are for parsing outputs, plotting results, and debugging.
 
-* ``plotting.py``: Generates pie plots for area, delay, power breakdowns of COFFE results.
+* ``plotting.py``: Generates pie plots for PPA breakdowns of COFFE results.
 * ``parsing.py``: Parses the COFFE output report to be processed or plotted downstream.
 * ``debug.py``: Debugging functionality for COFFE.
 

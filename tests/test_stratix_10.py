@@ -63,6 +63,8 @@ def stratix_10() -> rg_ds.RadGenArgs:
     return rg_args
 
 
+@pytest.mark.rrg
+@skip_if_fixtures_only
 def test_stratix_10_rrg_parse():
     import src.common.rr_parse as rr_parse
     tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = tests_common.get_test_info()

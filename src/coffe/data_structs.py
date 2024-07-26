@@ -1135,12 +1135,114 @@ class SimTB():
         """
         return ".PRINT " + " ".join([node_probe.get_sp_str() for node_probe in self.node_prints])
 
+    def get_node_probes(
+            self,
+            trig_node: str,
+            targ_nodes: List[str],
+    ) -> List[SpNodeProbe]:
+        # Probe nodes
+        meas_probes: Set[str] = set()
+        meas_probes.add(trig_node)
+        for node in targ_nodes:
+            meas_probes.add(node)
+        node_prints: List[SpNodeProbe] = []
+        for probe in meas_probes:
+            node_prints.append(
+                SpNodeProbe(
+                    node = probe,
+                    type = "voltage",
+                )
+            )
+        return node_prints
+
+    def get_del_meas_pts(
+            self,
+            delay_names: List[str],
+            trig_node: str,
+            targ_nodes: List[str],
+            # arg to describe if measurements are associated with a new inverter TODO clean up
+            #   basically if we're doing new measurement but its only going across a load then we don't need to invert the meas statements
+            meas_inv_list: List[bool] | None = None,
+            init_inv_idx: int = 0,
+            # Custom meas points for edge case (lut driver w lut load requires RISE=2) on trig of tfall
+            # The below argument is only used in local_ble_output, but should probably be used for other edge cases in the number of inverters in a chain
+            rise_fall_states: List[Tuple[bool]] | None = None,
+    ) -> List[SpMeasure]:
+        meas_points: List[SpMeasure] = []
+        # Compressed format for generating measurement statements for each inverter and tfall / trise combo
+        # total trise / tfall is same as the last inverter
+        inv_idx: int | None = None
+        for i, meas_name in enumerate(delay_names):
+            # if meas_inv_list at i is true this means we increment the number of driver stages used, if its not we don't 
+            if meas_inv_list is not None:
+                if inv_idx is None:
+                    inv_idx = init_inv_idx + 1 if meas_inv_list[i] else init_inv_idx
+                else:
+                    inv_idx = inv_idx + 1 if meas_inv_list[i] else inv_idx
+            for trans_id, trans_state in enumerate(["rise", "fall"]):
+                # Define variables to determine which nodes to use for trig / targ in the case of rising / falling
+                trig_trans: bool = trans_state == "rise"
+                # Create delay index to deal with repeat of last inverter for total
+                delay_idx: int = i #if meas_name != "total" else len(delay_names) - 2
+                targ_node: str = targ_nodes[delay_idx]
+                # If we measure total delay we just use the index of the last inverter
+
+                if meas_inv_list is None:
+                    inv_idx = i + 1 if meas_name != "total" else i
+
+                if rise_fall_states is None:
+                    # Rise and fall combo, based on how many inverters in the chain
+                    # If its even we set both to rise or both to fall
+                    if inv_idx % 2 == 0:
+                        rise_fall_combo: Tuple[bool] = (trig_trans, trig_trans)
+                    else:
+                        rise_fall_combo: Tuple[bool] = (not trig_trans, trig_trans)
+                else:
+                    # multiply by 2 because each delay name has trise tfall
+                    rise_fall_combo: Tuple[bool] = (
+                        rise_fall_states[i * 2 + trans_id][0], 
+                        rise_fall_states[i * 2 + trans_id][1]
+                    )
+                delay_bounds: Dict[str, SpDelayBound] = {
+                    del_str: SpDelayBound(
+                        probe = SpNodeProbe(
+                            node = node,
+                            type = "voltage",
+                        ),
+                        eval_cond = self.delay_eval_cond,
+                        rise = rise_fall_combo[i],
+                    ) for (i, node), del_str in zip(enumerate([trig_node, targ_node]), ["trig", "targ"])
+                }
+                # Create measurement object
+                measurement: SpMeasure = SpMeasure(
+                    value = Value(
+                        name = f"{self.meas_val_prefix}_{meas_name}_t{trans_state}",
+                    ),
+                    trig = delay_bounds["trig"],
+                    targ = delay_bounds["targ"],
+                )
+                meas_points.append(measurement)
+        return meas_points
+
+    def get_pwr_meas_lines(
+            self,
+            dc_vsrc: SpVoltageSrc,
+            pwr_meas_interval: Value,
+            meas_name: str
+    ) -> List[str]:
+        pwr_meas_lines: List[str] = [
+            f"* Measure the power required to propagate a rise and a fall transition through the subcircuit at 250MHz",
+            f".MEASURE TRAN {self.meas_val_prefix}{meas_name}_current INTEGRAL I({dc_vsrc.get_sp_name()}) FROM=0ns TO={pwr_meas_interval.get_sp_val()}",
+            f".MEASURE TRAN {self.meas_val_prefix}{meas_name}_avg_power PARAM = '-(meas_current/{pwr_meas_interval.get_sp_val()})*{self.supply_v_param}'",
+        ]
+        return pwr_meas_lines
+
     def generate_top(
         self, 
-        delay_names: List[str], 
-        targ_nodes: List[str],
-        low_v_node: str, 
-        trig_node: str,
+        targ_nodes: List[str] | None = None,
+        trig_node: str | None = None ,
+        low_v_node: str | None = None, 
+        delay_names: List[str] | None = None, 
         # These two args used for edge cases (lut driver w lut load)
         tb_fname: str | None = None,
         pwr_meas_lines: List[str] | None = None,
@@ -1192,74 +1294,27 @@ class SimTB():
         dut_sp_name: str = self.dut_ckt.sp_name
         
         # Probe nodes
-        meas_probes: Set[str] = set()
-        meas_probes.add(trig_node)
-        for node in targ_nodes:
-            meas_probes.add(node)
-        self.node_prints = []
-        for probe in meas_probes:
-            self.node_prints.append(
-                SpNodeProbe(
-                    node = probe,
-                    type = "voltage",
-                )
+        if not self.node_prints or len(self.node_prints) == 0:
+            assert trig_node != None, "trig_node must be set to generate node prints"
+            assert targ_nodes != None and len(targ_nodes) > 0, "targ_nodes must be set to generate node prints"
+            self.node_prints = self.get_node_probes(
+                trig_node = trig_node,
+                targ_nodes = targ_nodes,
             )
-
+        
         # Only generate measures if they don't already exist
         if len(self.meas_points) == 0:
-            # Compressed format for generating measurement statements for each inverter and tfall / trise combo
-            # total trise / tfall is same as the last inverter
-            inv_idx: int = None
-            for i, meas_name in enumerate(delay_names):
-                # if meas_inv_list at i is true this means we increment the number of driver stages used, if its not we don't 
-                if meas_inv_list is not None:
-                    if inv_idx is None:
-                        inv_idx = init_inv_idx + 1 if meas_inv_list[i] else init_inv_idx
-                    else:
-                        inv_idx = inv_idx + 1 if meas_inv_list[i] else inv_idx
-                for trans_id, trans_state in enumerate(["rise", "fall"]):
-                    # Define variables to determine which nodes to use for trig / targ in the case of rising / falling
-                    trig_trans: bool = trans_state == "rise"
-                    # Create delay index to deal with repeat of last inverter for total
-                    delay_idx: int = i #if meas_name != "total" else len(delay_names) - 2
-                    targ_node: str = targ_nodes[delay_idx]
-                    # If we measure total delay we just use the index of the last inverter
-
-                    if meas_inv_list is None:
-                        inv_idx = i + 1 if meas_name != "total" else i
-
-                    if rise_fall_states is None:
-                        # Rise and fall combo, based on how many inverters in the chain
-                        # If its even we set both to rise or both to fall
-                        if inv_idx % 2 == 0:
-                            rise_fall_combo: Tuple[bool] = (trig_trans, trig_trans)
-                        else:
-                            rise_fall_combo: Tuple[bool] = (not trig_trans, trig_trans)
-                    else:
-                        # multiply by 2 because each delay name has trise tfall
-                        rise_fall_combo: Tuple[bool] = (
-                            rise_fall_states[i * 2 + trans_id][0], 
-                            rise_fall_states[i * 2 + trans_id][1]
-                        )
-                    delay_bounds: Dict[str, SpDelayBound] = {
-                        del_str: SpDelayBound(
-                            probe = SpNodeProbe(
-                                node = node,
-                                type = "voltage",
-                            ),
-                            eval_cond = self.delay_eval_cond,
-                            rise = rise_fall_combo[i],
-                        ) for (i, node), del_str in zip(enumerate([trig_node, targ_node]), ["trig", "targ"])
-                    }
-                    # Create measurement object
-                    measurement: SpMeasure = SpMeasure(
-                        value = Value(
-                            name = f"{self.meas_val_prefix}_{meas_name}_t{trans_state}",
-                        ),
-                        trig = delay_bounds["trig"],
-                        targ = delay_bounds["targ"],
-                    )
-                    self.meas_points.append(measurement)
+            assert delay_names != None, "delay_names must be set to generate measure points"
+            assert trig_node != None, "trig_node must be set to generate node prints"
+            assert targ_nodes != None and len(targ_nodes) > 0, "targ_nodes must be set to generate node prints"
+            self.meas_points = self.get_del_meas_pts(
+                delay_names = delay_names,
+                trig_node = trig_node,
+                targ_nodes = targ_nodes,
+                meas_inv_list = meas_inv_list,
+                init_inv_idx = init_inv_idx,
+                rise_fall_states = rise_fall_states,
+            )
         # Start by copying the period of the stimulus VSRC
         low_volt_time: Value = copy.deepcopy(self.stim_vsrc.period)
         # Seems like the low voltage measure is always 1n less than period
@@ -1267,6 +1322,7 @@ class SimTB():
 
         # For every node in measure points create a probe
         if not pwr_meas_lines:
+            assert low_v_node != None, "low_v_node must be set to generate power measurement lines"
             pwr_meas_lines: List[str] = [
                 f".MEASURE TRAN meas_logic_low_voltage FIND V({low_v_node}) AT={low_volt_time.get_sp_val()}",
                 f"",

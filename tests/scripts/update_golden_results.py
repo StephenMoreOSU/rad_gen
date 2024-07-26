@@ -42,7 +42,7 @@ def asic_flow_gen(
         test_names = [ match for match in grab_test_names_re.findall(result.stdout) ]
         all_tests.update( set(test_names))
         # Look at all the output directories for the test
-        for obj_dname in os.listdir(out_dpath):
+        for obj_dname in sorted(os.listdir(out_dpath), len):
             results_dpath: str = os.path.join(out_dpath, obj_dname, "reports")
             test_golden_res_dpaths = []
             for test_substr, obj_substr in test_2_obj_map.items():
@@ -86,10 +86,14 @@ def asic_flow_gen(
 def conf_init_gen(
     tests_dpath: str,
     test_arg: str = None,
-    init_markers: List[str] = None,
+    init_marker_str: str = None
 ):
     """
         Generates golden results for every test case that performs data structure initialization
+        If a test fixture writes out a .json file to its corresponding `fixtures` directory in format `<fixture_name>.json`, 
+        then a test case is considered to perform data structure initialization.
+
+        A side effect of assumptions in this function is that we expect there to be a fixture produce a rg_ds.RadGenArgs object and pass it to its corresponding test.
     """
     # TODO define created dirs with Tree data structures for flexibility into future
     rg_home: str = os.environ.get("RAD_GEN_HOME")
@@ -98,18 +102,18 @@ def conf_init_gen(
     tests_tree = tests_common.init_tests_tree()
     # Get all the tests which we want to generate a golden init struct for
     pytest_collect_args = ["pytest", "--collect-only"]
-    if init_markers:
-        markers_or: str = " or ".join([f"{marker}" for marker in init_markers])
+    if init_marker_str:
+        # markers_or: str = " or ".join([f"{marker}" for marker in init_markers])
         if test_arg:
             # If test arg is a path to a particular test file
             if os.path.isfile(test_arg):
-                test_args = [test_arg, "-m", markers_or]
-            # If the test is a function in a test file
+                test_args = [test_arg, "-m", init_marker_str]
+            # If the test is a function in a test file, markers don't do anything
             else:
                 test_args = [test_arg]
         else:
             # If no test arg is given, run all tests with the markers
-            test_args = [tests_dpath, "-m", markers_or]
+            test_args = [tests_dpath, "-m", init_marker_str]
     # No markers provided but a test arg is given and its either a test file or a test function
     elif test_arg and (os.path.isfile(test_arg) or os.path.isfile(test_arg.split("::")[0])):
         test_args = [test_arg]
@@ -121,8 +125,6 @@ def conf_init_gen(
     grab_test_info_re = re.compile(r"(.*)::(.*)")
     # List of tuples with [0] = relative path to test file and [1] = test function name 
     tests_info: List[Tuple[str, str]] = [ match for match in grab_test_info_re.findall(result.stdout) ]
-    # Convert tests_info into a dictionary to associate test function names with the test file they are in
-    # tests_info_dict: Dict[str, str] = { test_info[1]: test_info[0] for test_info in tests_info }
     test_fixture_mapping_fpath: str = os.path.join(tests_dpath, "data", "meta", "test_fixture_mapping.json")
 
     # Run all fixtures that are dependencies for test markers
@@ -145,7 +147,7 @@ def conf_init_gen(
         # Parse the test -> test_fixture mapping file to determine which fixtures to call to generate the init struct for each tests
         test_fixture_mappings: dict = json.load(open(test_fixture_mapping_fpath))
         fixtures: List[str] = test_fixture_mappings.get(test_fn_name)
-        
+        # Loop through fixture function names and search for the corresponding output json file (the dump of intialized data structures)
         for fixture_fn_name in fixtures:
             conf_gen_rg_args_fpath: str = os.path.join(
                 tests_tree.search_subtrees(
@@ -177,6 +179,7 @@ def conf_init_gen(
                 rg_args_dict["subtool_args"] = subtool_cli_cls(**rg_args_dict["subtool_args"])
                 test_rg_args = rg_ds.RadGenArgs(**rg_args_dict)
             else:
+                print(f"Fixture '{fixture_fn_name}' does not exist for test '{test_fn_name}'")
                 continue
             # Call main with the RadGenArgs obj to get the initialized data structures
             test_rg_args.just_config_init = True # Set flag to only init configs and exit early
@@ -192,6 +195,8 @@ def conf_init_gen(
             with open(golden_res_out_fpath, "w") as f:
                 f.write(json_text)
             print(f"Writing out golden result to '{golden_res_out_fpath}'")
+            # Break out of loop as we assume the first fixture arg is the only one that we compare against
+            # TODO validate above lines assumption
             break
 
 
@@ -225,6 +230,11 @@ def clean_fixtures(tests_dpath: str):
             os.remove(json_file)
 
 def parse_args(arguments: Sequence | None = None) -> dict:
+    """
+        In the future we should remove the various \<run_option\> flags and simply provide the test specification (directory/file/test) and marker filter string
+        as arguments s.t. based on the type of marker, the script will understand which directory structure it will have to traverse to obtain comparison results
+        and override the goldens.
+    """
     parser = argparse.ArgumentParser(description="Update golden results for tests")
     parser.add_argument(
         "--asic_flow",
@@ -244,10 +254,9 @@ def parse_args(arguments: Sequence | None = None) -> dict:
     )
     parser.add_argument(
         "-m",
-        "--markers_or",
+        "--markers",
         type=str,
-        nargs="*",
-        help="List of markers to pass to pytest to select"
+        help="Marker string to pass to pytest to select tests with specific markers, e.g. 'init or asic_flow'"
     )
     parser.add_argument(
         "-t",
@@ -302,7 +311,7 @@ def main(*args, **kwargs):
         conf_init_gen(
             tests_dpath, 
             test_arg = parsed_args.get("test_arg"),
-            init_markers = parsed_args.get("markers_or"))
+            init_markers = parsed_args.get("markers"))
     
     # Full cleanup of test + fixture outputs
     if parsed_args.get("clean_fixtures"):

@@ -2,6 +2,12 @@
 
 # WARNING: This function deletes everything in the previous pytest.ini after the 'env =' string
 
+if [ -z "${RAD_GEN_HOME}" ] 
+then
+    echo "RAD_GEN_HOME is not set. Please source env_setup.sh"
+    exit 1
+fi
+
 # Function to escape special characters in environment variable values
 escape_value() {
   echo "$1" #| sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -21,7 +27,7 @@ done
 # Special stuff for pythonpath
 # Echo our pythonpath replacing abspaths w relative ones (relative to RAD_GEN_HOME)
 pypath=$(echo $PYTHONPATH | sed -e 's|:|   |g' | sed -e 's|'$RAD_GEN_HOME/'||g')
-echo "pythonpath = ${pypath}" >> "$tmp_file"
+# echo "pythonpath = ${pypath}" >> "$tmp_file"
 
 # Replace the original pytest.ini with the modified one
 mv "$tmp_file" ${RAD_GEN_HOME}/pytest.ini

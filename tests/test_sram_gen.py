@@ -8,7 +8,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 import src.common.data_structs as rg_ds
 import src.common.utils as rg_utils
-import tests.common.driver as driver
 import tests.common.common as tests_common
 
 import tests.conftest as conftest

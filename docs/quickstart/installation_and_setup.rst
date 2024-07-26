@@ -9,8 +9,12 @@ Clone Repository
 
 .. code-block:: bash
 
-   $ cd ~ && git clone --recurse-submodules git@github.com:StephenMoreOSU/rad_gen.git
+   $ cd ~ && git clone git@github.com:StephenMoreOSU/rad_gen.git
    $ cd rad_gen
+   $ git submodule init
+   $ git submodule update
+
+We don't do a recursive clone as there are some modules from within hammer that require an NDA.
 
 
 Python Setup

@@ -1405,7 +1405,7 @@ def convert_namespace(in_namespace: argparse.Namespace) -> List[str] | None:
 
     return arg_list
 
-def parse_rad_gen_top_cli_args(in_args: argparse.Namespace = None) -> Tuple[argparse.Namespace, Dict[str, Any]]:
+def parse_rad_gen_top_cli_args(in_args: argparse.Namespace | None = None) -> Tuple[argparse.Namespace, Dict[str, Any]]:
     """ 
         Parses the top level RAD-Gen args
 
@@ -1509,7 +1509,7 @@ def parse_rad_gen_top_cli_args(in_args: argparse.Namespace = None) -> Tuple[argp
 
     return args, default_arg_vals
 
-def max_depth(d: dict) -> int:
+def max_depth(d: dict | Any) -> int:
     """
         returns the level of nesting of a particular dict
 
@@ -1525,9 +1525,9 @@ def max_depth(d: dict) -> int:
         return 0
 
 def merge_cli_and_config_args(
-    cli: Dict[str, Any],
-    config: Dict[str, Any],
-    default: Dict[str, Any],
+    cli: Dict[str, Any] | None,
+    config: Dict[str, Any] | None,
+    default: Dict[str, Any] ,
 ) -> Dict[str, Any]:
     """
         Merges the cli and config args into a single dictionary

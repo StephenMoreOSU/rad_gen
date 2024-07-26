@@ -444,7 +444,7 @@ class FlipFlop(c_ds.SizeableCircuit):
     def __hash__(self) -> int:
         return super().__hash__()
 
-    def __post__init__(self):
+    def __post_init__(self):
         self.sp_name = self.name # TODO update to sp_name
         # Initialize times to basically NULL for the cost function == 1
         if self.t_setup is None:

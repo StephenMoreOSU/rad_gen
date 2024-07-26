@@ -1652,7 +1652,7 @@ class AsicDSE:
 
         Attributes:
             common: common settings for RAD Gen from `Common`
-            mode: modes of operation in which RAD Gen can be / is running
+            mode: modes of operation in which asic_dse can be / is running
             stdcell_lib: technology information for the design
             scripts: script information for RAD Gen
             sweep_conf_fpath: path to sweep configuration file containing design parameters to sweep
@@ -1665,9 +1665,9 @@ class AsicDSE:
             design_out_tree: Tree for the design output directory structure        
     """
     common: Common # common settings for RAD Gen
-    mode: AsicDseMode # mode in which RAD Gen is running
+    mode: AsicDseMode # mode in which asic_dse is running
     stdcell_lib: StdCellLib # technology information for the design
-    scripts: ScriptInfo = None # script information for RAD Gen
+    scripts: ScriptInfo = None # script information for asic_dse
     sweep_conf_fpath: str = None # path to sweep configuration file containing design parameters to sweep
     result_search_path: str = None # path which will look for various output obj directories to parse results from
     common_asic_flow: CommonAsicFlow = None # common asic flow settings for all designs

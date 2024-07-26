@@ -54,6 +54,7 @@ extensions = [
     'sphinx.ext.viewcode',
     'sphinx.ext.autodoc',
     'sphinx.ext.autosectionlabel', # Does something for links in pages?
+    'sphinxcontrib.mermaid',
 ]
 
 # Add any paths that contain templates here, relative to this directory.

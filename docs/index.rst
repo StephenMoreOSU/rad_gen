@@ -4,9 +4,13 @@
    contain the root `toctree` directive.
 
 
-======================================
+
+######################################
 Welcome to RAD-Gen's Documentation
-======================================
+######################################
+
+.. ======================================
+
 
 RAD-Gen is a tool for silicon area/timing/power implementation results of hard (ASIC) components, FPGA fabric circuitry, and circuit modeling of 3D devices/packaging. It is part of the greater
 RAD Flow, which is an open source academic architecture exploration and evaluation flow for novel beyond-FPGA reconfigurable accelerator devices (RADs).
@@ -17,18 +21,32 @@ RAD-Gen is made up of three subtools: ASIC-DSE, COFFE, and IC-3D.
 RAD-Gen is under heavy development.
 
 
-+++++++++++++++++++++++++++++++++++
+***********************************
 Quick Start
-+++++++++++++++++++++++++++++++++++
+***********************************
 
 .. toctree::
    :maxdepth: 2
 
    quickstart/index
 
-+++++++++++++++++++++++++++++++++++
+
+***********************************
+Tools Overview
+***********************************
+
+.. toctree::
+   :maxdepth: 2
+   
+   common/index
+   asic_dse/index
+   ic_3d/index
+   coffe/index
+
+
+***********************************
 For Developers
-+++++++++++++++++++++++++++++++++++
+***********************************
 
 .. toctree::
    :maxdepth: 1
@@ -41,8 +59,14 @@ For Developers
    api/index
 
 
+
+
+
+
+
+
 How to Cite
------------
+***********************************
 
 The following paper may be used as a general citation for RAD-Gen:
 
@@ -56,25 +80,15 @@ The following paper may be used as a general citation for RAD-Gen:
    }
 
 
-+++++++++++++++++++++++++++++++++++
-RAD-Gen Tool Modes
-+++++++++++++++++++++++++++++++++++
-
-.. toctree::
-   :maxdepth: 4
-   :numbered:
-   
-   common/index
-   asic_dse/index
-   ic_3d/index
-   coffe/index
 
 Indices and tables
-==================
+***********************************
 
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
+
+
 
 
 

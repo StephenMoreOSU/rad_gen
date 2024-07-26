@@ -51,6 +51,7 @@ import src.coffe.ble as ble_lib
 import src.coffe.logic_block as lb_lib
 import src.coffe.carry_chain as cc_lib
 import src.coffe.ram as ram_lib
+# import src.coffe.new_ram as ram_lib
 import src.coffe.hardblock as hb_lib
 import src.coffe.constants as constants
 
@@ -138,7 +139,7 @@ def fpga_state_fmt(fpga_inst:'FPGA', tag: str) -> dict:
     }
     return row_data
 
-def fpga_state_to_csv(fpga_inst: 'FPGA', tag: str, catagory: str, ckt: Type[c_ds.SizeableCircuit] = None) -> None:
+def fpga_state_to_csv(fpga_inst: 'FPGA', tag: str, catagory: str, ckt: Type[c_ds.SizeableCircuit] | None = None) -> None:
     """ 
         Update the FPGA telemetry CSV file with the current FPGA telemetry, Create CSV if it doesnt exist     
 
@@ -247,7 +248,7 @@ def sim_tbs(
                 **{mp.value.name: [1]*len(list(parameter_dict.values())[0]) for mp in tb.meas_points}
             }
         
-        valid_delays: List[bool] = None
+        valid_delays: List[bool] | None = None
         # Account for additional measurements which are not explictly asked for
         for key in spice_meas.keys():
             # if key not in ["valid", "trise", "tfall", "power"]:
@@ -524,6 +525,15 @@ class FPGA:
         default_factory=lambda: []
     )
 
+    # BRAM TBs
+    # pgate_output_crossbar_tbs: List[ram_lib.PgateOutputCrossbarTB] = field(
+    #     default_factory=lambda: []
+    # )
+    # configurable_decoder_iii_tbs: List[ram_lib.ConfigurableDecoderIIITB] = field(
+    #     default_factory=lambda: []
+    # )
+
+
     # Dictionary of simulation testbenches hashed by thier dut ckt
     tb_lib: Dict[
         Type[c_ds.SizeableCircuit],
@@ -590,7 +600,16 @@ class FPGA:
     # Ram Circuits
     # TODO consolidate into a single object and conform to format used by other circuits
     RAM: ram_lib._RAM = None
+    # RAM: ram_lib.RAM = None
     
+    # Circuits contained within RAM
+    # pgate_output_crossbars: List[ram_lib.PgateOutputCrossbar] = None
+    # configurable_decoder_iiis: List[ram_lib.ConfigurableDecoderIII] = None
+    # configurable_decoder_2iis: List[ram_lib.ConfigurableDecoderII] = None
+    # configurable_decoder_3iis: List[ram_lib.ConfigurableDecoderII] = None
+
+
+
     # Hard Block Circuits
     hardblocklist: List[hb_lib._hard_block] = None
 
@@ -916,7 +935,7 @@ class FPGA:
                         drv_2_seg_lookup[mux_stat.drv_type] = seg.name
                         seg_2_drv_lookup[seg.name] = mux_stat.drv_type
                         # Convert mux_stat to use sb_mux ids rather than wire / drv names from RRG
-                        gen_r_wire: c_ds.GenRoutingWire = c_ds.GenRoutingWire(
+                        gen_r_wire = c_ds.GenRoutingWire(
                             id=i, # Uses index of this wire_type in conf.yml file
                             length=seg.length,
                             type=seg.name,
@@ -934,7 +953,7 @@ class FPGA:
                     # TODO fix this to work if the key is different than lb_opin from CSV (this was an arbitrary choice in rr_parse.py)
                     if mux_ipin.drv_type == "lb_opin":
                         # LB output pin type
-                        src_wire: c_ds.Wire = c_ds.Wire(
+                        src_wire = c_ds.Wire(
                             id=0,
                             name="wire_general_ble_output_load",
                             layer=constants.LOCAL_WIRE_LAYER,
@@ -946,7 +965,7 @@ class FPGA:
                         sb_muxes_src_wires[mux_stat.wire_type][src_wire] = mux_ipin.freq
             
             # NOTE: After this point we no longer use any RRG specific information, except for general routing wire names which are required in COFFE config file
-
+        
             ##################################
             ### CREATE SWITCH BLOCK OBJECT ###
             ##################################
@@ -964,7 +983,7 @@ class FPGA:
 
                 # Required size inferred from src_wires
                 # num_sb_per_tile inferred from sink_wire.num_starting_per_tile -> from RRG
-                sb_mux: sb_mux_lib.SwitchBlockMux = sb_mux_lib.SwitchBlockMux(
+                sb_mux = sb_mux_lib.SwitchBlockMux(
                     id = i,
                     src_wires = sb_muxes_src_wires[wire_type],
                     sink_wire = self.gen_r_wires[wire_type],
@@ -1263,9 +1282,34 @@ class FPGA:
             # TODO update to dataclasses
             RAM_local_mux_size_required = float(self.specs.ram_local_mux_size)
             RAM_num_mux_per_tile = (3 + 2*(self.specs.row_decoder_bits + self.specs.col_decoder_bits + self.specs.conf_decoder_bits ) + 2** (self.specs.conf_decoder_bits))
+            # NEW INST
+            # self.RAM = ram_lib.RAM(
+            #     use_tgate = self.specs.use_tgate,
+            #     cspecs = self.specs,
+            #     # SRAM params
+            #     row_decoder_bits = self.specs.row_decoder_bits, 
+            #     col_decoder_bits = self.specs.col_decoder_bits,
+            #     conf_decoder_bits = self.specs.conf_decoder_bits,
+            #     sram_area = self.specs.sram_cell_area * self.specs.min_width_tran_area,
+            #     number_of_banks = self.specs.number_of_banks,
+            #     process_data_filename = self.process_data_filename,
+            #     memory_technology = self.specs.memory_technology,
+            #     read_to_write_ratio = self.specs.read_to_write_ratio,
+            #     # Local Mux Params
+            #     RAM_local_mux_size_required = RAM_local_mux_size_required,
+            #     RAM_num_local_mux_per_tile = RAM_num_mux_per_tile,
+            # )
+            # # Putting BRAM subcircuits into `FPGA` fields
+            # # TODO bring these data structures back into top level of FPGA class to allow for full functionality
+            # self.pgate_output_crossbars = [self.RAM.pgateoutputcrossbar]
+            # self.configurable_decoder_3iis = [self.RAM.configurabledecoder3ii]
+            # self.configurable_decoder_2iis = [self.RAM.configurabledecoder2ii]
+            # self.configurable_decoder_iiis = [self.RAM.configurabledecoderiii]
+
+            # OLD INST
             self.RAM = ram_lib._RAM(self.specs.row_decoder_bits, self.specs.col_decoder_bits, self.specs.conf_decoder_bits, RAM_local_mux_size_required, 
-                            RAM_num_mux_per_tile , self.specs.use_tgate, self.specs.sram_cell_area*self.specs.min_width_tran_area, self.specs.number_of_banks,
-                            self.specs.memory_technology, self.specs, self.process_data_filename, self.specs.read_to_write_ratio)
+                RAM_num_mux_per_tile , self.specs.use_tgate, self.specs.sram_cell_area*self.specs.min_width_tran_area, self.specs.number_of_banks,
+                self.specs.memory_technology, self.specs, self.process_data_filename, self.specs.read_to_write_ratio)
             self.number_of_banks = self.specs.number_of_banks
 
             
@@ -1280,6 +1324,68 @@ class FPGA:
                 for hb_conf in coffe_info.hardblocks:
                     hard_block = hb_lib._hard_block(hb_conf, self.specs.use_tgate)
                     self.hardblocklist.append(hard_block)
+
+        elif self.specs.wire_types:
+            raise NotImplementedError("NON RRG specified wire types has not been fully supported yet")
+            # TODO verify and integrate all below options to get legacy functionality back into COFFE without having to specify a RRG directory.
+            # If user specifies sb muxes explicitly priorize that
+            if self.specs.sb_muxes: 
+                for i, sb_mux_conf in enumerate(self.specs.sb_muxes):
+                    # How many inputs does this mux have
+                    sb_mux_size_required: int = sum(int(val) for val in sb_mux_conf["srcs"].values()) + int(sb_mux_conf["lb_inputs"])
+                    # Make sure its equal to user specified size
+                    assert sb_mux_size_required == sb_mux_conf["size"]
+                    # How many muxes drive this wire type
+                    dst_wire: dict = self.specs.wire_types[sb_mux_conf["dst"]]
+                    # Counting the number of muxes in the config with the same dst wire type
+                    num_muxes_per_dst_wire: int = sum(1 for sb_mux_cmp in self.specs.sb_muxes if sb_mux_cmp["dst"] == sb_mux_conf["dst"])
+                    # How many tracks is this mux type driving per SB
+                    # TODO change name this is number of tracks per SB type
+                    num_driven_tracks: int = int(dst_wire["num_tracks"] / num_muxes_per_dst_wire )
+                    # I Don't think we need to consider the switch points in a wire type, those should be accounted for in the MUX size from user
+                    # How many muxes of this type in a tile?
+                    num_sb_mux_per_tile: int = int( 4 * num_driven_tracks // (2 * dst_wire["len"]) )
+                    # Create the switch block mux
+                    sb_mux_name = f"sb_mux_uid{i}"
+                    self.sb_muxes.append(
+                        _SwitchBlockMUX(sb_mux_conf["size"], num_sb_mux_per_tile, self.specs.use_tgate, sb_mux_name, self.specs.wire_types[sb_mux_conf["srcs"]], dst_wire)
+                    )
+            # if we specify multiple wire types, we need an Fs_mtx of quadratic length to specify each wire type Fs in switch block
+            elif len(self.specs.wire_types)**2 == len(self.specs.Fs_mtx):
+                # We create this many muxes that exist in the FPGA
+                # <TAG><SWEEP GENERATE>
+                No = self.specs.num_cluster_outputs
+                # Calculate Mux size for each combination of wire types
+                for i, Fs_ele in enumerate(self.specs.Fs_mtx):
+                    # If the Fs is 0, it means we don't have a SB for this wire to wire connection type, ie don't create an SB mux 
+                    if Fs_ele["Fs"] == 0:
+                        continue
+                    # use wire index of source wire for wire length
+                    # This determines number of starting / non starting connections 
+                    src_wire_length = self.specs.wire_types[Fs_ele["src"]]["len"] # wire going into SB
+                    dst_wire_length = self.specs.wire_types[Fs_ele["dst"]]["len"] # wire driven from SB mux
+                    r_to_r_sb_mux_size = self.specs.Fs + (self.specs.Fs-1) * (src_wire_length-1) # use the src wire length, as this determines the number of starting wires @ SB
+                    # To calculate the num of sb muxes per side we first calculate the number of logic cluster opins per side
+                    # dst_chan_width = dst_wire_type_fraction_of_channel * channel_width
+                    # num_opins_per_side = cluster_outputs * Fcout * dst_chan_width / 2
+                    # the above div by 2 is coming from half the cluster outputs being sent to SBs on each side of the LC (think of the channel above it)
+                    # num_sb_muxes_per_side = dst_chan_width / 2 * src_wire_length
+                    # the above div by 2 is from the unidirectional routing, meaning half of channel width is being driven 
+                    # Below division by two is because we send our outputs to SBs on both sides (L/R) of the LC
+                    clb_to_r_sb_mux_size = No * self.specs.Fcout * src_wire_length / 2 # should this be ceiled? TODO this needs to be updated to distribute these connections to the SBs
+                    sb_mux_size_required = int(r_to_r_sb_mux_size + clb_to_r_sb_mux_size)
+                    # Num tracks driven by this type of SB, if there are N wire types then there will be N^2 SBs, the sum of all SBs driving the same wire type should 
+                    #       be equal to the number of tracks of that wire type, so we divide by the sqrt of the number of SBs to get the number of tracks driven by each SB
+                    num_driven_tracks = int( self.specs.wire_types[Fs_ele["dst"]]["num_tracks"] / math.sqrt(len(self.specs.Fs_mtx)) )
+                    # Calculate number of this switch block mux per tile
+                    num_sb_mux_per_tile = 4 * num_driven_tracks // (2 * src_wire_length)
+                    # above 4 factor is from number of sides of SB driving wires, 2 is from the unidirectional routing
+                    # Sb mux names are based on wire type they are driving
+                    sb_mux_name = f"sb_mux_uid{i}" # f"sb_mux_L{dst_wire_length}_Fs_uid{i}"
+                    # Initialize the switch block, pass in our dst wire for the load
+                    self.sb_muxes.append(
+                        _SwitchBlockMUX(sb_mux_size_required, num_sb_mux_per_tile, self.specs.use_tgate, sb_mux_name, self.specs.wire_types[Fs_ele["src"]], self.specs.wire_types[Fs_ele["dst"]])
+                    )
 
     def generate(self, size_hb_interfaces: bool):
         """ This function generates all SPICE netlists and library files. """
@@ -2044,7 +2150,63 @@ class FPGA:
                     )
                     self.carry_chain_skip_mux_tbs.append(cc_skip_mux_tb)
 
+        #   ___ ___    _   __  __ 
+        #  | _ ) _ \  /_\ |  \/  |
+        #  | _ \   / / _ \| |\/| |
+        #  |___/_|_\/_/ \_\_|  |_|
+
+        # Kept same format as others for consistency
         
+        # Pass gate output crossbar
+        # pgate_crossbar_tb_in_ckts = list(
+        #     itertools.product(
+        #         self.pgate_output_crossbars,
+        #         self.flip_flops,
+        #     )
+        # )
+        # for tb_idx, in_ckt_combo in enumerate(pgate_crossbar_tb_in_ckts):
+        #     pgate_crossbar: ram_lib.PgateOutputCrossbar = in_ckt_combo[0]
+        #     ff: ble_lib.FlipFlop = in_ckt_combo[1]
+        #     pgate_crossbar_tb = ram_lib.PgateOutputCrossbarTB(
+        #         id = tb_idx,
+        #         # TB Circuits
+        #         pgate_output_crossbar = pgate_crossbar,
+        #         flip_flop = ff,
+        #         # General SimTB args
+        #         inc_libs = inc_libs,
+        #         mode = gen_sim_mode,
+        #         options = sim_options,
+        #         # Pass in library of all subckts 
+        #         subckt_lib = self.subckt_lib,
+        #     )
+        #     self.pgate_output_crossbar_tbs.append(pgate_crossbar_tb)
+        
+        # # Configurable decoder III
+        # config_decoder_tb_in_ckts = list(
+        #     itertools.product(
+        #         self.configurable_decoder_3iis,
+        #         self.configurable_decoder_2iis,
+        #         self.configurable_decoder_iiis,
+        #     )
+        # )
+        # for tb_idx, in_ckt_combo in enumerate(config_decoder_tb_in_ckts):
+        #     configurable_decoder_3ii: ram_lib.ConfigurableDecoderII = in_ckt_combo[0]
+        #     configurable_decoder_2ii: ram_lib.ConfigurableDecoderII = in_ckt_combo[1]
+        #     configurable_decoder_iii: ram_lib.ConfigurableDecoderIII = in_ckt_combo[2]
+        #     config_decoder_tb = ram_lib.ConfigurableDecoderIIITB(
+        #         id = tb_idx,
+        #         # TB Circuits
+        #         configurable_decoder_ii_1 = configurable_decoder_3ii,
+        #         configurable_decoder_ii_2 = configurable_decoder_2ii,
+        #         configurable_decoder_iii = configurable_decoder_iii,
+        #         # General SimTB args
+        #         inc_libs = inc_libs,
+        #         mode = gen_sim_mode,
+        #         options = sim_options,
+        #         # Pass in library of all subckts 
+        #         subckt_lib = self.subckt_lib,
+        #     )
+        #     self.configurable_decoder_iii_tbs.append(config_decoder_tb)
         
         # Generate top-level files. These top-level files are the files that COFFE uses to measure 
         # the delay of FPGA circuitry
@@ -2101,6 +2263,10 @@ class FPGA:
         # RAM
         if self.specs.enable_bram_block == 1:
             self.RAM.generate_top()
+            # for pgate_crossbar_tb in self.pgate_output_crossbar_tbs:
+            #     pgate_crossbar_tb.generate_top()
+            # for config_decoder_tb in self.configurable_decoder_iii_tbs:
+            #     config_decoder_tb.generate_top()
 
         for hardblock in self.hardblocklist:
             hardblock.generate_top(size_hb_interfaces)
