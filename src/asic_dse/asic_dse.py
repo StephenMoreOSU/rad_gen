@@ -91,8 +91,7 @@ def design_sweep(asic_dse: rg_ds.AsicDSE) -> List[rg_ds.MetaDataclass]:
 
     # Output to current project directory output "scripts" directory
     
-    # TODO remove the multi sweep files, or allow for multiple sweeps with single top_lvl_module & associated RTL
-    # Once above TODO is done moove below intializations to asic_dse init function, should not be here
+    # TODO move below intializations to asic_dse init function, should not be here
     if design_sweep.type == "rtl" or design_sweep.type == "vlsi":
         scripts_out_dpath = asic_dse.common.project_tree.search_subtrees(
             f"{asic_dse.common.project_name}.outputs.{design_sweep.top_lvl_module}.script", is_hier_tag = True
@@ -127,6 +126,8 @@ def design_sweep(asic_dse: rg_ds.AsicDSE) -> List[rg_ds.MetaDataclass]:
                 sweep_pt_val = field_val[sweep_idx]
                 # For any custom mapped fields implement the logic here
                 if field.name == "period":
+                    # <TAG> <HAMMER-IR-PARSE TODO> , This is looking for the period in parameters and will set the associated hammer IR to that value 
+                    # TODO support multiple clocks
                     mod_base_config["vlsi.inputs.clocks"][0]["period"] = sweep_pt_val
                 # TODO remove innovus specific stuff
                 elif field.name == "core_util":
@@ -163,31 +164,6 @@ def design_sweep(asic_dse: rg_ds.AsicDSE) -> List[rg_ds.MetaDataclass]:
                 continue
             rg_sw_pt_drivers.append(rg_args)
             sweep_script_lines += cmd_lines
-
-        # for param_sweep_key, param_sweep_vals in design_sweep.type_info.params.items():
-            
-        #     # TODO Check to make sure the sweeep param is in the hammer.vlsi params
-        #     # <TAG> <HAMMER-IR-PARSE TODO> , This is looking for the period in parameters and will set the associated hammer IR to that value 
-        #     if "period" in param_sweep_key:
-        #         for period in design_sweep.type_info.params[param_sweep_key]:
-        #             mod_base_config["vlsi.inputs.clocks"][0]["period"] = f'{str(period)} ns' # TODO allow for multiple clocks                        
-        #             modified_config_fname = os.path.basename(os.path.splitext(design_sweep.base_config_path)[0]) + f'_period_{str(period)}.json' # TODO make paramater based naming optional 
-        #             sweep_point_config_fpath = os.path.join( 
-        #                 asic_dse.common.project_tree.search_subtrees(f"{asic_dse.common.project_name}.configs.gen", is_hier_tag = True)[0].path,
-        #                 modified_config_fname
-        #             )
-        #             asic_hammer.mod_n_write_config_file(
-        #                 hdl_dpath = design_sweep.hdl_dpath,
-        #                 top_lvl_module = design_sweep.top_lvl_module,
-        #                 mod_conf_out_fpath = sweep_point_config_fpath,
-        #                 template_conf = mod_base_config
-        #             )
-                    
-        #             cmd_lines, sweep_idx, rg_args = asic_hammer.get_hammer_flow_sweep_point_lines(asic_dse, id, sweep_idx, sweep_point_config_fpath)
-        #             if cmd_lines == None:
-        #                 continue
-        #             rg_sw_pt_drivers.append(rg_args)
-        #             sweep_script_lines += cmd_lines
 
         # Get the path to write out script to, if the -l (override) flag is provided we will overwrite the script
         script_path = None

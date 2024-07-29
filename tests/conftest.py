@@ -11,13 +11,16 @@ import src.common.utils as rg_utils
 import tests.common.common as tests_common
 
 import copy
-
+import json
 import pytest
 from functools import wraps
 
 def pytest_addoption(parser: pytest.Parser):
     parser.addoption(
         "--fixtures-only", action="store_true", help="Run all fixtures (current tests depend on) without running tests"
+    )
+    parser.addoption(
+        "--collect-only-with-markers", action="store_true", help="Only collect tests, also return marker information"
     )
 
 def skip_if_fixtures_only(func):
@@ -37,7 +40,7 @@ def create_rg_fixture(
 ):
     @pytest.fixture
     @skip_if_fixtures_only
-    def parse_fixture(request):
+    def parse_fixture(request: pytest.FixtureRequest):
         input_data = request.getfixturevalue(input_fixture)
         rg_args = copy.deepcopy(input_data)
         # rg_args.subtool_args.compile_results = True
@@ -46,7 +49,7 @@ def create_rg_fixture(
     
     @pytest.fixture
     @skip_if_fixtures_only
-    def conf_init_fixture(request):
+    def conf_init_fixture(request: pytest.FixtureRequest):
         input_data = request.getfixturevalue(input_fixture)
         rg_args = copy.deepcopy(input_data)
         rg_args.just_config_init = True
@@ -65,16 +68,34 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
         Pytest hook that runs during the collection phase of pytest.
         Will create a dict mapping names of tests to the names of fixtures
     """
-    item: pytest.Item
-    for item in items:
-        # Get the test name
-        test_name = item.name
-        # Get the fixture names used by the test
-        fixture_names = item.fixturenames
-        # print(f"Collected test {test_name} uses fixtures: {fixture_names}")
-        # Store the mapping
-        test_fixture_mapping[test_name] = fixture_names
+    if config.getoption("--collect-only-with-markers"):
+        data_list = []
+        for item in items:
+            data = {}
+            # Collect some general information
+            if item.cls:
+                data['class'] = item.cls.__name__
+            data['name'] = item.name
+            if item.originalname:
+                data['originalname'] = item.originalname
+            data['file'] = item.location[0]
+            data['markers'] = [marker.name for marker in item.own_markers]
+            data_list.append(data)
+        print(json.dumps(data_list))
+        # Remove all items (we don't want to execute the tests)
+        items.clear()
 
+    else:
+        item: pytest.Item
+        for item in items:
+            # Get the test name
+            test_name = item.name
+            # Get the fixture names used by the test
+            fixture_names = item.fixturenames
+            # print(f"Collected test {test_name} uses fixtures: {fixture_names}")
+            # Store the mapping
+            test_fixture_mapping[test_name] = fixture_names
+    
 # def pytest_runtest_setup(item: pytest.Item):
 #     # Kinda a hacky way to get fixtures to run for specific tests yet it seems to work
 #     # Errors are thrown when running pytest with --fixtures-only 

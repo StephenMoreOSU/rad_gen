@@ -180,21 +180,22 @@ def gen_hammer_flow_rg_args(
     hammer_flow_template,
     proj_name: str, 
     design_conf_fpath: str,
-    top_lvl_module: str = None,
-    manual_obj_dpath: str = None, 
+    top_lvl_module: str | None = None ,
+    manual_obj_dpath: str | None = None , 
     subtool_fields: dict = {},
     rg_fields: dict = {},
-    proj_tree: rg_ds.Tree = None,
+    proj_tree: rg_ds.Tree | None = None,
 ):
-    _, _, _, test_out_dpath, _ = get_test_info(stack_lvl = 3)
+    _, _, fixture_name, test_out_dpath, _ = get_test_info(stack_lvl = 3)
     # Unique case for parse tests, we want to make sure we still parse the golden results correctly and compare with asic flow
     dummy_hammer_flow_args, template_proj_tree = hammer_flow_template
     if proj_tree is None:
         proj_tree = template_proj_tree
+    test_name: str = fixture_name.replace("_tb", "")
     # Inputs
     if manual_obj_dpath is None and top_lvl_module is not None:
         manual_obj_dpath = os.path.join(
-            test_out_dpath, top_lvl_module
+            test_out_dpath, test_name, top_lvl_module
         )
     else:
         assert manual_obj_dpath is not None, "manual_obj_dpath must be provided if top_lvl_module is None"
@@ -298,6 +299,9 @@ def dataclass_2_json(in_dataclass: Any, out_fpath: str):
         f.write(json_text)
 
 def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
+    """
+        Runs args for a 'init' marked test and does a deepdict comparison
+    """
     tests_tree, test_grp_name, tests_name, _, _ = get_test_info(stack_lvl = 3)
     rg_info, _ = run_rad_gen(
         rg_args, 

@@ -58,7 +58,7 @@ noc_rtl_sweep_conf_init_tb = conftest.create_rg_fixture(
 @pytest.mark.asic_sweep
 @pytest.mark.init
 @skip_if_fixtures_only
-def test_noc_rtl_sweep_conf_init(noc_rtl_sweep_conf_init_tb, request):
+def test_noc_rtl_sweep_gen_conf_init(noc_rtl_sweep_conf_init_tb, request):
     tests_common.run_and_verif_conf_init(noc_rtl_sweep_conf_init_tb)
 
 
@@ -121,7 +121,7 @@ def get_sw_info(noc_rtl_sweep_output) -> Tuple[List[str], List[str]]:
 @pytest.mark.noc
 @pytest.mark.asic_sweep
 @skip_if_fixtures_only
-def test_noc_rtl_sweep(get_sw_info, request):
+def test_noc_rtl_sweep_gen(get_sw_info, request):
     conf_fpaths, rtl_param_fpaths = get_sw_info
     for conf_fpath, rtl_param_fpath in zip(conf_fpaths, rtl_param_fpaths):
         assert os.path.exists(conf_fpath), f"Configuration file {conf_fpath} does not exist"

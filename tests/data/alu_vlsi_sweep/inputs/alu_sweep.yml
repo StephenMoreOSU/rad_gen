@@ -5,7 +5,7 @@ flow_conf_fpaths: [ ${RAD_GEN_HOME}/tests/data/asic_dse/pdks/asap7.yml, ${RAD_GE
 base_config_path: ${RAD_GEN_HOME}/tests/data/alu_vlsi_sweep/inputs/alu_base.yml
 # These two args are required for each run of hammer flow
 top_lvl_module: alu_ver
-hdl_dpath:  ${RAD_GEN_HOME}/unit_tests/inputs/asic_dse/alu/rtl
+hdl_dpath:  ${RAD_GEN_HOME}/tests/data/alu_vlsi_sweep/inputs/rtl
 flow_threads: 2
 type: vlsi
 vlsi_params:
@@ -39,14 +39,3 @@ vlsi_params:
         ]
       }
   }
-
-
-  # type: "vlsi_params"
-  # params:
-  #   {
-  #     "clocks": [{
-  #       "name": "clk",
-  #       "periods": ["0 ns", "2 ns"] # List of periods to sweep over
-  #     }, 
-  #     ]
-  #   }

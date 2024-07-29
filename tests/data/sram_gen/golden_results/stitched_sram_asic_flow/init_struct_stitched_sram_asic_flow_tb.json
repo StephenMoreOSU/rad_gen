@@ -2,12 +2,12 @@
     "common": {
         "just_config_init": true,
         "override_outputs": false,
-        "manual_obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/sram_gen/outputs/sram_macro_map_2x256x512",
+        "manual_obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/sram_gen/outputs/stitched_sram_asic_flow/sram_macro_map_2x256x512",
         "rad_gen_home_path": "~/Documents/rad_gen",
         "hammer_home_path": "~/Documents/rad_gen/third_party/hammer",
         "logger": null,
         "log_verbosity": 1,
-        "obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/sram_gen/outputs/sram_macro_map_2x256x512",
+        "obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/sram_gen/outputs/stitched_sram_asic_flow/sram_macro_map_2x256x512",
         "project_tree": null,
         "project_name": "sram",
         "res": {

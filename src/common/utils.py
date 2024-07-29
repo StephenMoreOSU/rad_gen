@@ -319,8 +319,8 @@ def rec_convert_dataclass_to_dict(obj, key: str = None):
     elif not isinstance(obj, (str, int, float, bool)) and obj is not None:
         return None
     # Case for exporting paths so tests can be non system specific
-    elif isinstance(obj, str) and key != None and 'path' in key:
-        return obj.replace(os.path.expanduser('~'), '~')
+    elif isinstance(obj, str) and key != None:
+        return obj.replace(os.environ.get("RAD_GEN_HOME"), "${RAD_GEN_HOME}")
     else:
         return obj
 
@@ -1846,8 +1846,8 @@ def init_common_structs(common_conf: Dict[str, Any]) -> rg_ds.Common:
 
 def init_asic_obj_dir(
         common: rg_ds.Common,
-        out_tree: rg_ds.Tree = None,
-        top_lvl_module: str = None,
+        out_tree: rg_ds.Tree | None = None,
+        top_lvl_module: str | None = None,
         sweep_flag: bool = False,
         sram_gen_flag: bool = False,
 ) -> str:
@@ -1906,6 +1906,9 @@ def init_asic_obj_dir(
         if os.path.islink(project_obj_dpath) and os.readlink(project_obj_dpath) == obj_dir_path:
             rad_gen_log(f"Symlink already exists @ {project_obj_dpath}", rad_gen_log_fd)
         else:
+            # If symlink exists but points to wrong location, remove it (just unlinks doesn't delete the directory)
+            if os.readlink(project_obj_dpath) != obj_dir_path:
+                os.unlink(project_obj_dpath)
             os.symlink(obj_dir_path, project_obj_dpath)
     # If we don't specify a manual obj directory we can directly append our new obj directory to the project tree to create it + add to data structure
     # Won't create it if symlink already exists

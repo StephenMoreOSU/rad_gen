@@ -17,70 +17,147 @@ import inspect
 import src.common.data_structs as rg_ds
 import tests.common.common as tests_common
 
-def asic_flow_gen(
-    test_data_dpaths: str,
-    pytest_fpaths: List[str],
-):
-    # Need to map the obj dirs substrs (named with top_lvl_modules) to a substr of test names
-    test_2_obj_map: dict = {
-        "noc_sw_pt": "router_wrap_bk",
-        "alu_sw_pt": "alu_ver",
-        "single_macro": "wrapper", # Will just look for dir with _wrapper in it (should only be 1)
-        "stitched_sram": "sram_macro_map",
-    }
-    all_tests = set()
-    evald_tests = set()
-    for test_idx, data_dpath in enumerate(test_data_dpaths):
-        out_dpath = os.path.join(data_dpath, "outputs")
-        if not os.path.exists(out_dpath):
-            continue
-        # There should be a golden result dir for each test in the file, we can find these tests with a pytest command
-        test_fpath = pytest_fpaths[test_idx]
-        # Find all the names of tests in the file
-        result = sp.run(["pytest", "--collect-only", test_fpath], stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, text=True)
-        grab_test_names_re = re.compile(r"(?<=::)test_(\w+)")
-        test_names = [ match for match in grab_test_names_re.findall(result.stdout) ]
-        all_tests.update( set(test_names))
-        # Look at all the output directories for the test
-        for obj_dname in sorted(os.listdir(out_dpath), len):
-            results_dpath: str = os.path.join(out_dpath, obj_dname, "reports")
-            test_golden_res_dpaths = []
-            for test_substr, obj_substr in test_2_obj_map.items():
-                # Check to see if the obj_dname has a test mapping
-                if obj_substr in obj_dname:
-                    # If it does we use that test mapping to find the golden result directory
-                    golden_res_dnames = os.listdir(os.path.join(data_dpath, "golden_results"))
-                    test_golden_res_dpath = [
-                        os.path.join(
-                            data_dpath,
-                            "golden_results",
-                            golden_res_dname
-                        ) for golden_res_dname in golden_res_dnames if test_substr in golden_res_dname
-                    ]
-                    obj_test_names = [ test_name for test_name in test_names if test_substr in test_name ]
-                    if len(test_golden_res_dpath) != 0:
-                        test_golden_res_dpaths.append(test_golden_res_dpath[0])
-                    else:
-                        print(f"No golden results directory found for {obj_dname}")
-                    break
-            evald_tests_set = set()
-            # Check to see if there is a mapping between the obj_dname and the test name
-            if test_golden_res_dpaths:
-                print("Overriding golden results for the following tests:")
-                for test_name in obj_test_names:
-                    evald_tests_set.add(test_name)
-                    print(f"*\t{test_name}")
-                for dpath in test_golden_res_dpaths:
-                    print(f"{results_dpath} --> {dpath}")
-                    csv_fpaths = glob.glob(f"{results_dpath}/*.csv")
-                    for csv_fpath in csv_fpaths:
-                        shutil.copy(csv_fpath, dpath)
+
+
+def get_tests_info(
+    tests_dpath: str,
+    test_arg: str = None,
+    init_marker_str: str = None
+) -> list[dict]:
+    # Get all the tests which we want to generate a golden init struct for
+    pytest_collect_args = ["pytest", "--collect-only-with-markers", "--disable-pytest-warnings"]
+    if init_marker_str:
+        # markers_or: str = " or ".join([f"{marker}" for marker in init_markers])
+        if test_arg:
+            # If test arg is a path to a particular test file
+            if os.path.isfile(test_arg):
+                test_args = [test_arg, "-m", init_marker_str]
+            # If the test is a function in a test file, markers don't do anything
             else:
-                print(f"echo 'No golden results directory found for {obj_dname}'")
-            evald_tests.update(evald_tests_set)
-    print("Tests without golden results directories:")
-    for test_name in all_tests.difference(evald_tests):
-        print(f"*\t{test_name}")
+                test_args = [test_arg]
+        else:
+            # If no test arg is given, run all tests with the markers
+            test_args = [tests_dpath, "-m", init_marker_str]
+    # No markers provided but a test arg is given and its either a test file or a test function
+    elif test_arg and (os.path.isfile(test_arg) or os.path.isfile(test_arg.split("::")[0])):
+        test_args = [test_arg]
+    # If none of the above we run for all tests
+    else:
+        test_args = [tests_dpath]
+    pytest_collect_args += test_args
+    result = sp.run(pytest_collect_args, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, text=True)
+
+    # Grabs all text before the last ']' character (should all be json parsable)
+    grab_test_info_re = re.compile(r".*\]", re.DOTALL)
+    test_info_json_text = grab_test_info_re.findall(result.stdout)[0]
+
+    tests_info: list[dict] = json.loads(test_info_json_text)
+
+    # Remove any 'conf_init' tests from the list
+    tests_info = [ test_info for test_info in tests_info if "conf_init" not in test_info["name"] ]
+
+    return tests_info
+
+
+def update_golden_results(
+    tests_info: list[dict],
+    tests_dpath: str,
+):
+    # Tests follow naming convension so if we strip "test_" and each of possible type fn strs we get name to group tests by
+    test_type_fn_strs = [
+        # Common
+        "parse",
+        "conf_init",
+        # ASIC DSE
+        "asic_flow",
+    ]
+    # Find a string for each group of tests.
+    # Group defined currently as test + parse + conf_init of a single test
+    test_group_tags: set = set()
+    for test_info in tests_info:
+        group_name = str(test_info["name"]).replace("test_", "")
+        for type_fn_str in test_type_fn_strs:
+            group_name = group_name.replace(f"_{type_fn_str}", "")
+        test_group_tags.add(group_name)
+    # Create the test groups
+    test_groups: dict = {}
+    for tag in test_group_tags:
+        # Get all tests that have the tag in their name, put them in a dict entry
+        test_groups[tag] = [ test_info for test_info in tests_info if tag in test_info["name"] ]
+    
+    group_test_infos: list[dict]
+    for tag, group_test_infos in test_groups.items():
+        # Find the non "conf_init" and non "parse" test
+        core_test: list[dict] = [ 
+            test_info for test_info in group_test_infos 
+                if all(marker not in test_info["markers"] for marker in ["init", "parse"])  
+        ]
+        parse_test: list[dict] = [ 
+            test_info for test_info in group_test_infos 
+                if any(marker in test_info["markers"] for marker in ["parse"])  
+        ]
+        init_test: list[dict] = [
+            test_info for test_info in group_test_infos 
+                if any(marker in test_info["markers"] for marker in ["init"])
+        ]
+
+        if not core_test:
+            print(f"No core test found for group '{tag}'")
+            continue
+
+        core_test: dict = core_test[0]
+        parse_test: dict = parse_test[0] if len(parse_test) > 0 else None
+        init_test: dict = init_test[0] if len(init_test) > 0 else None
+
+        # Tests which don't have a golden result directory
+        if any( marker in core_test["markers"] for marker in ["asic_sweep", "buff_3d", ""]):
+            print(f" {core_test['markers']} marked tests do not have a golden result directory")
+            continue
+
+
+        core_test_fname: str = os.path.basename(core_test["file"])
+        core_test_dname: str = str(os.path.splitext(core_test_fname)[0]).replace("test_","")
+        # Where we get our golden results from 
+        core_test_data_dpath: str = os.path.join(
+            tests_dpath, 
+            "data", 
+            core_test_dname
+        )
+        os.makedirs(core_test_data_dpath, exist_ok=True)
+        core_out_dpath = os.path.join(core_test_data_dpath, "outputs", str(core_test["name"]).replace("test_",""))
+        # Paths we are will be sending output results to
+        golden_res_dpaths: list[str] = []
+        for test_info in [core_test, parse_test]:
+            # If there is not a parse test just skip that part
+            if not test_info:
+                continue
+            test_fname = os.path.basename(test_info["file"])
+            test_dname = str(os.path.splitext(test_fname)[0]).replace("test_","")
+            test_data_dpath: str = os.path.join(tests_dpath, "data", test_dname)
+            golden_res_dpath = os.path.join(test_data_dpath, "golden_results", str(test_info["name"]).replace("test_",""))
+            golden_res_dpaths.append(golden_res_dpath)
+
+        if not os.path.isdir(core_test_data_dpath):
+            print(f"No data directory found for test '{test_fname}'")
+            continue
+        elif not os.path.exists(core_out_dpath):
+            print(f"No output directory found for test '{test_fname}'")
+            continue
+        
+        # Depending on the core test type we will copy over golden results from the output directory
+        if "asic_flow" in core_test["markers"]:
+            # Take obj dir w shortest name as this one will be the newest version if backups exist
+            obj_dname: str = sorted(os.listdir(core_out_dpath), key=len)[0]
+            results_dpath: str = os.path.join(core_out_dpath, obj_dname, "reports")
+            for dpath in golden_res_dpaths:
+                print(f"{results_dpath} --> {dpath}")
+                csv_fpaths = glob.glob(f"{results_dpath}/*.csv")
+                for csv_fpath in csv_fpaths:
+                    shutil.copy(csv_fpath, dpath)
+        elif "coffe" in core_test["markers"]:
+            raise NotImplementedError("COFFE test golden result updating not implemented")
+        elif "ic_3d" in core_test["markers"]:
+            raise NotImplementedError("IC 3D test golden result updating not implemented")
 
 
 def conf_init_gen(
@@ -194,6 +271,7 @@ def conf_init_gen(
             )
             with open(golden_res_out_fpath, "w") as f:
                 f.write(json_text)
+            repl_script_result = sp.run([os.path.join(rg_home, "scripts", "rg_home_path_repl.sh"), golden_res_out_fpath], stdout=sp.PIPE, stderr=sp.PIPE, text=True)
             print(f"Writing out golden result to '{golden_res_out_fpath}'")
             # Break out of loop as we assume the first fixture arg is the only one that we compare against
             # TODO validate above lines assumption
@@ -201,7 +279,9 @@ def conf_init_gen(
 
 
 def clean_fixtures(tests_dpath: str):
-    # Remove all the fixture json files generated by running pytest --fixtures-only
+    """
+        Remove all the fixture json files generated by running pytest --fixtures-only
+    """
     for root, dirs, files in os.walk(tests_dpath):
         for file in files:
             if file.endswith(".json") and os.path.basename(root) == "fixtures":
@@ -231,7 +311,7 @@ def clean_fixtures(tests_dpath: str):
 
 def parse_args(arguments: Sequence | None = None) -> dict:
     """
-        In the future we should remove the various \<run_option\> flags and simply provide the test specification (directory/file/test) and marker filter string
+        In the future we should remove the various <run_option> flags and simply provide the test specification (directory/file/test) and marker filter string
         as arguments s.t. based on the type of marker, the script will understand which directory structure it will have to traverse to obtain comparison results
         and override the goldens.
     """
@@ -245,7 +325,6 @@ def parse_args(arguments: Sequence | None = None) -> dict:
         "--struct_init",
         action="store_true",
         help="Update golden results for struct initialization tests",
-        default = True
     )
     parser.add_argument(
         "--clean_fixtures",
@@ -284,47 +363,29 @@ def main(*args, **kwargs):
     rg_home = os.environ.get("RAD_GEN_HOME")
     tests_dpath = os.path.join(rg_home, "tests")
     
-    # Search through files in test dir and see if they have a corresponding dir in data dir
-    test_data_dpaths: List[str] = []
-    pytest_fpaths: List[str] = []
-    for fname in os.listdir(tests_dpath):
-        test_data_dpath: str = os.path.join(
-            tests_dpath, 
-            "data", 
-            os.path.splitext(fname)[0].replace("_test","").replace("test_","")
-        )
-        if os.path.isdir(test_data_dpath):
-            test_data_dpaths.append(test_data_dpath)
-            # Append corresponding pytest fpath to same index as test_data_dpath
-            pytest_fpaths.append(
-                os.path.join(
-                    tests_dpath,
-                    fname
-                )
-            )
-    # For generating golden results for ASIC flow tests
-    if parsed_args.get("asic_flow"):
-        asic_flow_gen(test_data_dpaths, pytest_fpaths)
+
     
     # For generating struct initialization golden results
     if parsed_args.get("struct_init"):
         conf_init_gen(
             tests_dpath, 
             test_arg = parsed_args.get("test_arg"),
-            init_markers = parsed_args.get("markers"))
-    
+            init_marker_str = parsed_args.get("markers"))
+    else:
+        # Get test info from collecting pytests
+        tests_info: list[dict] = get_tests_info(
+            tests_dpath,
+            test_arg = parsed_args.get("test_arg"),
+            init_marker_str = parsed_args.get("markers")
+        )
+        update_golden_results(tests_info, tests_dpath)
+
+
     # Full cleanup of test + fixture outputs
     if parsed_args.get("clean_fixtures"):
         clean_fixtures(tests_dpath)
 
     
-
-
-
-
-
-
-
 
 if __name__ == "__main__":
     # Called from cmd line

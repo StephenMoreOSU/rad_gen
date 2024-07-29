@@ -2,12 +2,12 @@
     "common": {
         "just_config_init": true,
         "override_outputs": false,
-        "manual_obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/noc_rtl_sweep/outputs/router_wrap_bk",
+        "manual_obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/noc_rtl_sweep/outputs/noc_sw_pt_asic_flow/router_wrap_bk",
         "rad_gen_home_path": "~/Documents/rad_gen",
         "hammer_home_path": "~/Documents/rad_gen/third_party/hammer",
         "logger": null,
         "log_verbosity": 1,
-        "obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/noc_rtl_sweep/outputs/router_wrap_bk",
+        "obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/noc_rtl_sweep/outputs/noc_sw_pt_asic_flow/router_wrap_bk",
         "project_tree": null,
         "project_name": "NoC",
         "res": {

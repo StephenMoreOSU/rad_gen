@@ -1068,10 +1068,11 @@ def sram_sweep_gen(asic_dse: rg_ds.AsicDSE) -> List[ Type[rg_ds.MetaDataclass] ]
                         top_lvl_idx = pc_idx
                 
                 # Determine side of pin placement for top level module
-                if (mod_base_config["vlsi.inputs.placement_constraints"][top_lvl_idx]["width"] > mod_base_config["vlsi.inputs.placement_constraints"][top_lvl_idx]["height"]):
-                    mod_base_config["vlsi.inputs.pin.assignments"][0]["side"] = "bottom"
-                else:
-                    mod_base_config["vlsi.inputs.pin.assignments"][0]["side"] = "left"
+                # TODO remove or integrate this, it breaks stuff as the metal layer being used also as to match side of pins I suppose
+                # if (mod_base_config["vlsi.inputs.placement_constraints"][top_lvl_idx]["width"] > mod_base_config["vlsi.inputs.placement_constraints"][top_lvl_idx]["height"]):
+                #     mod_base_config["vlsi.inputs.pin.assignments"][0]["side"] = "bottom"
+                # else:
+                #     mod_base_config["vlsi.inputs.pin.assignments"][0]["side"] = "left"
 
                 # TASKS WHICH ALLOW CONFIG TO BE RUN DIRECTLY WITHOUT PRE PROCESSING
                 # Such as

@@ -2,12 +2,12 @@
     "common": {
         "just_config_init": true,
         "override_outputs": false,
-        "manual_obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/sram_gen/outputs/SRAM2RW128x32_wrapper",
+        "manual_obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/sram_gen/outputs/single_macro_asic_flow/SRAM2RW128x32_wrapper",
         "rad_gen_home_path": "~/Documents/rad_gen",
         "hammer_home_path": "~/Documents/rad_gen/third_party/hammer",
         "logger": null,
         "log_verbosity": 1,
-        "obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/sram_gen/outputs/SRAM2RW128x32_wrapper",
+        "obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/sram_gen/outputs/single_macro_asic_flow/SRAM2RW128x32_wrapper",
         "project_tree": null,
         "project_name": "sram",
         "res": {

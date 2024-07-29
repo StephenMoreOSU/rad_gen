@@ -2,12 +2,12 @@
     "common": {
         "just_config_init": true,
         "override_outputs": false,
-        "manual_obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/sram_gen/outputs/sram_macro_map_2x256x512",
-        "rad_gen_home_path": "~/Documents/rad_gen",
-        "hammer_home_path": "~/Documents/rad_gen/third_party/hammer",
+        "manual_obj_dir": "${RAD_GEN_HOME}/tests/data/sram_gen/outputs/stitched_sram_asic_flow/sram_macro_map_2x256x512",
+        "rad_gen_home_path": "${RAD_GEN_HOME}",
+        "hammer_home_path": "${RAD_GEN_HOME}/third_party/hammer",
         "logger": null,
         "log_verbosity": 1,
-        "obj_dir": "/fs1/eecg/vaughn/morestep/Documents/rad_gen/tests/data/sram_gen/outputs/sram_macro_map_2x256x512",
+        "obj_dir": "${RAD_GEN_HOME}/tests/data/sram_gen/outputs/stitched_sram_asic_flow/sram_macro_map_2x256x512",
         "project_tree": null,
         "project_name": "sram",
         "res": {
@@ -62,7 +62,7 @@
     "stdcell_lib": {
         "pdk_name": "asap7",
         "cds_lib": "asap7_TechLib",
-        "sram_lib_path": "~/Documents/rad_gen/third_party/hammer/hammer/technology/asap7/sram_compiler/memories",
+        "sram_lib_path": "${RAD_GEN_HOME}/third_party/hammer/hammer/technology/asap7/sram_compiler/memories",
         "pdk_rundir_path": null
     },
     "scripts": {
@@ -70,7 +70,7 @@
         "virtuoso_setup_path": null
     },
     "sweep_conf_fpath": null,
-    "result_search_path": "~/Documents/rad_gen/projects",
+    "result_search_path": "${RAD_GEN_HOME}/projects",
     "common_asic_flow": {
         "top_lvl_module": "sram_macro_map_2x256x512",
         "hdl_dpath": null,
@@ -131,9 +131,9 @@
         "flow_conf_fpaths": null
     },
     "sram_compiler_settings": {
-        "rtl_out_dpath": "~/Documents/rad_gen/shared_resources/sram_lib/rtl/gen",
-        "config_out_dpath": "~/Documents/rad_gen/shared_resources/sram_lib/configs/gen",
-        "scripts_out_dpath": "~/Documents/rad_gen/shared_resources/sram_lib/scripts"
+        "rtl_out_dpath": "${RAD_GEN_HOME}/shared_resources/sram_lib/rtl/gen",
+        "config_out_dpath": "${RAD_GEN_HOME}/shared_resources/sram_lib/configs/gen",
+        "scripts_out_dpath": "${RAD_GEN_HOME}/shared_resources/sram_lib/scripts"
     },
     "design_out_tree": null
 }
