@@ -40,12 +40,27 @@ for flow_stage in "${flow_stages[@]}"; do
 done
 
 # Copy the newly set env to pytest.ini
-# ${RAD_GEN_HOME}/scripts/cur_env_to_pytest.sh
-
+${RAD_GEN_HOME}/scripts/cur_env_to_pytest.sh
 
 ## Conda env setup
-conda deactivate && conda activate rad-gen-env 
-#-py-12
+which conda > /dev/null
+if [ "$?" -eq "0" ]; then
+    conda deactivate && conda activate rad-gen-env
+else
+    echo "Conda not found. Please install conda and try again"
+    exit 1
+fi
+
+# Check if hammer already installed
+python3 -m pip show hammer-vlsi > /dev/null
+if [ "$?" -ne "0" ]; then
+    # Install hammer as editable repo within conda env
+    cd $HAMMER_HOME
+    python3 -m pip install -e .
+    cd - 
+fi
+
+
 
 
 ################################ This is not needed anymore (to the best of my knowledge)  ##########################
