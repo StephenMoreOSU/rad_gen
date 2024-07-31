@@ -1,0 +1,28 @@
+# ASIC DSE
+gdspy == 1.4
+gdstk
+matplotlib
+pandas
+numpy
+pyYAML
+pandas
+pip
+# IC 3D 
+plotly
+shapely
+# COFFE
+scipy
+xmltodict
+lxml
+# Unit Testing
+deepdiff
+pytest
+pytest-cov
+pytest-env
+pytest-sugar
+# Docs
+Sphinx
+sphinx_rtd_theme
+sphinxcontrib-mermaid
+# Development
+esbonio

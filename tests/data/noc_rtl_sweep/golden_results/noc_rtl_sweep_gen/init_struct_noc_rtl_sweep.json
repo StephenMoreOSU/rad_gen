@@ -1,13 +1,13 @@
 {
     "common": {
         "just_config_init": true,
-        "override_outputs": false,
-        "manual_obj_dir": "${RAD_GEN_HOME}/tests/data/noc_rtl_sweep/outputs/noc_sw_pt_asic_flow/router_wrap_bk",
+        "override_outputs": true,
+        "manual_obj_dir": null,
         "rad_gen_home_path": "${RAD_GEN_HOME}",
         "hammer_home_path": "${RAD_GEN_HOME}/third_party/hammer",
         "logger": null,
         "log_verbosity": 1,
-        "obj_dir": "${RAD_GEN_HOME}/tests/data/noc_rtl_sweep/outputs/noc_sw_pt_asic_flow/router_wrap_bk",
+        "obj_dir": "${RAD_GEN_HOME}/projects/NoC/outputs/router_wrap_bk/obj_dirs/router_wrap_bk-sweep-2024--07--10--20--07--03--833",
         "project_tree": null,
         "project_name": "NoC",
         "res": {
@@ -50,13 +50,13 @@
         }
     },
     "mode": {
-        "sweep_gen": false,
+        "sweep_gen": true,
         "result_parse": false,
         "vlsi": {
             "run": "serial",
             "flow": "hammer",
-            "enable": true,
-            "config_pre_proc": true
+            "enable": false,
+            "config_pre_proc": null
         }
     },
     "stdcell_lib": {
@@ -69,11 +69,11 @@
         "gds_to_area_fname": "get_area",
         "virtuoso_setup_path": null
     },
-    "sweep_conf_fpath": null,
+    "sweep_conf_fpath": "${RAD_GEN_HOME}/tests/data/noc_rtl_sweep/inputs/noc_sweep.yml",
     "result_search_path": "${RAD_GEN_HOME}/projects",
     "common_asic_flow": {
-        "top_lvl_module": "router_wrap_bk",
-        "hdl_dpath": "${RAD_GEN_HOME}/projects/NoC/rtl/src",
+        "top_lvl_module": null,
+        "hdl_dpath": null,
         "flow_conf_fpaths": null,
         "tool_env_conf_fpaths": null,
         "db_libs": [
@@ -95,39 +95,83 @@
             "syn": {
                 "tag": "syn",
                 "exec_idx": null,
-                "run": false,
+                "run": true,
                 "tool": "cadence"
             },
             "par": {
                 "tag": "par",
                 "exec_idx": null,
-                "run": false,
+                "run": true,
                 "tool": "cadence"
             },
             "pt": {
                 "tag": "pt",
                 "exec_idx": null,
-                "run": false,
+                "run": true,
                 "tool": "synopsys"
             }
         }
     },
     "asic_flow_settings": {
-        "cli_driver_bpath": "hammer-vlsi",
+        "cli_driver_bpath": null,
         "hammer_driver": null
     },
     "custom_asic_flow_settings": null,
     "design_sweep_info": {
-        "base_config_path": null,
-        "top_lvl_module": null,
-        "hdl_dpath": null,
-        "type": null,
-        "flow_threads": 1,
+        "base_config_path": "${RAD_GEN_HOME}/tests/data/asic_dse/dummy/dummy_base.yml",
+        "top_lvl_module": "router_wrap_bk",
+        "hdl_dpath": "${RAD_GEN_HOME}/tests/data/noc_rtl_sweep/inputs/rtl/src",
+        "type": "rtl",
+        "flow_threads": 2,
         "vlsi_params": null,
         "sram_params": null,
-        "rtl_params": null,
-        "tool_env_conf_fpaths": null,
-        "flow_conf_fpaths": null
+        "rtl_params": {
+            "base_header_fpath": "${RAD_GEN_HOME}/tests/data/noc_rtl_sweep/inputs/rtl/parameters.v",
+            "sweep": {
+                "num_ports": [],
+                "flit_data_width": [],
+                "buffer_size": [],
+                "num_vcs": {
+                    "vals": [
+                        5,
+                        5,
+                        5
+                    ],
+                    "num_message_classes": [
+                        5,
+                        5,
+                        5
+                    ],
+                    "buffer_size": [
+                        20,
+                        40,
+                        80
+                    ],
+                    "num_nodes_per_router": [
+                        1,
+                        1,
+                        1
+                    ],
+                    "num_dimensions": [
+                        2,
+                        2,
+                        2
+                    ],
+                    "flit_data_width": [
+                        124,
+                        196,
+                        342
+                    ]
+                }
+            }
+        },
+        "tool_env_conf_fpaths": [
+            "${RAD_GEN_HOME}/tests/data/asic_dse/env.yml"
+        ],
+        "flow_conf_fpaths": [
+            "${RAD_GEN_HOME}/tests/data/asic_dse/pdks/asap7.yml",
+            "${RAD_GEN_HOME}/tests/data/asic_dse/cad_tools/cadence_tools.yml"
+        ]
     },
     "sram_compiler_settings": {
         "rtl_out_dpath": "${RAD_GEN_HOME}/shared_resources/sram_lib/rtl/gen",

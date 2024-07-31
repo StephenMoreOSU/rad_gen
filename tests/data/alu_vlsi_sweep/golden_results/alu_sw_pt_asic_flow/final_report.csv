@@ -1,2 +1,2 @@
 Target Freq,Slack,Delay,Timing SRC,Top Level Inst,Total Area,Area SRC,Total Power,Power SRC,GDS Area
-0 ns,-356.45,357.45,pt,alu_ver,1743.768,par,0.0609,pt,341.194428
+0 ns,-356.7,357.7,pt,alu_ver,1845.245,par,0.1215,pt,349.98687

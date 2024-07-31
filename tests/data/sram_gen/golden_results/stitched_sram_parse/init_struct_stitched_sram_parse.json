@@ -66,7 +66,7 @@
         "pdk_rundir_path": null
     },
     "scripts": {
-        "gds_to_area_fname": null,
+        "gds_to_area_fname": "get_area",
         "virtuoso_setup_path": null
     },
     "sweep_conf_fpath": null,

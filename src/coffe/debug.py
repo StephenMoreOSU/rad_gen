@@ -751,7 +751,7 @@ def subckt_meas_cmp(
                 sp_tb_fpaths = [sp_tb_fpath for sp_tb_fpath in sp_tb_fpaths if "with" in sp_tb_fpath]
         # hacky filtering for carry chains
         if sp_tb_key == "carry_chain":
-            sp_tb_fpaths = [sp_tb_fpath for sp_tb_fpath in sp_tb_fpaths if ("carry_chain.sp" in sp_tb_fpath) or ("FA" in sp_tb_fpath) ] 
+            sp_tb_fpaths = [sp_tb_fpath for sp_tb_fpath in sp_tb_fpaths if ("carry_chain.sp" in sp_tb_fpath) or ("FA" in sp_tb_fpath) or ("fa" in sp_tb_fpath) ] 
         if sp_tb_key == "carry_chain_mux":
             sp_tb_fpaths = [sp_tb_fpath for sp_tb_fpath in sp_tb_fpaths if "xcarry" not in sp_tb_fpath]
         cmp_measurements = {}
@@ -981,15 +981,19 @@ def debug_key_cmp(ctrl_outdir: str, dut_outdir: str, cat: str, key_pairs: List[T
     dut_det_csv_fpath: str = os.path.join(dut_outdir, debug_dir, detailed_csv)
     ctrl_det_dicts = rg_utils.read_csv_to_list(ctrl_det_csv_fpath)
     dut_det_dicts = rg_utils.read_csv_to_list(dut_det_csv_fpath)
+    ctrl_det_dicts = [ {k.lower(): v for k, v in ctrl_det_dict.items()} for ctrl_det_dict in ctrl_det_dicts ]
+    dut_det_dicts = [ {k.lower(): v for k, v in dut_det_dict.items()} for dut_det_dict in dut_det_dicts ]
     # Across all rows lets do a comparison and output abs and % diff to a new csv
     os.makedirs(os.path.join(dut_outdir, debug_dir, "compares"), exist_ok=True)
     cmp_outfpath = os.path.join(dut_outdir, debug_dir, "compares", f"{cat}_detailed_dut_vs_ctrl_cmp")
     out_rows = []
     for ctrl_row, dut_row in zip(ctrl_det_dicts, dut_det_dicts):
+        # convert row keys to lower case for comparison
+        ctrl_row
         out_row = {}
         for key_pair in key_pairs:
-            ctrl_key = key_pair[0]
-            dut_key = key_pair[1]
+            ctrl_key = (key_pair[0]).lower()
+            dut_key = (key_pair[1]).lower()
             ctrl_val = ctrl_row.get(ctrl_key)
             dut_val = dut_row.get(dut_key)
             perc_diff = round(
@@ -1004,7 +1008,7 @@ def debug_key_cmp(ctrl_outdir: str, dut_outdir: str, cat: str, key_pairs: List[T
         
         out_rows.append(out_row)
     rg_utils.write_dict_to_csv(out_rows, cmp_outfpath)
-    print(f"Finished comparing {cat} keys between {ctrl_outdir} and {dut_outdir} and saved to {cmp_outfpath}.csv")
+    print(f"Finished comparing {cat} keys between {ctrl_outdir} and {dut_outdir} and saved to \n{cmp_outfpath}.csv")
          
 
 
@@ -1015,7 +1019,7 @@ def parse_cli_args():
     )
     parser.add_argument(
         "-c", '--ctrl_dir', type=str, help="Legacy COFFE dir to compare against", 
-        default = "/fs1/eecg/vaughn/morestep/Documents/rad_gen/unit_tests/outputs/coffe/CTRL/stratix_iv"
+        default = "/fs1/eecg/vaughn/morestep/Documents/rad_gen/archive/unit_tests/outputs/coffe/CTRL/stratix_iv"
     )
     return parser.parse_args()
 
@@ -1081,10 +1085,10 @@ def main(argv: List[str] = [], kwargs: Dict[str, Any] = {}):
 
     # Which subckts will we run and compare against one another
     testing_subckts: List[str] = [
-        # "sb_mux",
+        "sb_mux",
         # "cb_mux",
         # "local_mux",
-        "local_ble_output",
+        # "local_ble_output",
         # "general_ble_output",
         # "flut_mux",
         # "lut",

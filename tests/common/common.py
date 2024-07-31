@@ -18,6 +18,7 @@ import shutil
 import json
 from deepdiff import DeepDiff
 import re
+import subprocess as sp
 
 def get_rg_home() -> str:
     return os.environ.get("RAD_GEN_HOME")
@@ -246,40 +247,6 @@ def run_verif_hammer_asic_flow(
             verify_flow_stage(manual_obj_dpath, golden_results_dpath, stage)
     return ret_val
 
-def rec_convert_dataclass_to_dict(obj, key: str = None):
-    """
-        Converts a dict / dataclass of nested dicts / dataclasses into a dictionary object
-    """
-    # Checks if its a type we should skip
-    skip_tup = (rg_ds.HammerDriver,)
-    if isinstance(obj, skip_tup):
-        return None
-    elif dataclasses.is_dataclass(obj):
-        try:
-            # If there is a module that's not serializable we will convert manually instead
-            return {k: rec_convert_dataclass_to_dict(v, k) for k, v in dataclasses.asdict(obj).items()}
-        except: 
-            # manually traversing the dataclass fields
-            result = {}
-            for field in dataclasses.fields(obj):
-                field_val = getattr(obj, field.name)
-                result[field.name] = rec_convert_dataclass_to_dict(field_val, field.name)
-            return result
-
-    elif isinstance(obj, list):
-        return [rec_convert_dataclass_to_dict(i, key) for i in obj]
-    elif isinstance(obj, dict):
-        return {k: rec_convert_dataclass_to_dict(v, k) for k, v in obj.items()}
-    # checks if instance is any primitive type, if its not then its a non dataclass class so we have to ignore for now
-    elif not isinstance(obj, (str, int, float, bool)) and obj is not None:
-        return None
-    # Case for exporting paths so tests can be non system specific
-    elif isinstance(obj, str) and key != None and 'path' in key:
-        return obj.replace(os.path.expanduser('~'), '~')
-    else:
-        return obj
-    
-
 class EnhancedJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if dataclasses.is_dataclass(obj):
@@ -294,9 +261,58 @@ def run_fixtures(rg_home: str, test_args: List[str]):
     os.chdir(prev_cwd)
 
 def dataclass_2_json(in_dataclass: Any, out_fpath: str):
-    json_text = json.dumps(rec_convert_dataclass_to_dict(in_dataclass), cls=EnhancedJSONEncoder, indent=4)
+    json_text = json.dumps(rg_utils.rec_convert_dataclass_to_dict(in_dataclass), cls=EnhancedJSONEncoder, indent=4)
     with open(out_fpath, "w") as f:
         f.write(json_text)
+
+
+def write_out_test_cmp(
+    cmp_dict: dict,
+    test_name: str,
+    result_dpath: str,
+    diff_tag: str,
+) -> str:
+    hier_key_re = re.compile(r"(?<=')\w+(?=')")
+    # Write out to a csv for debugging
+    # Format of csv cols
+    if diff_tag in ["added" , "removed"]:
+        csv_data: list[list[str]] = [['KEY', 'VALUE']]
+    elif diff_tag in ["vals_changed"]:
+        csv_data: list[list[str]] = [['KEY', 'TEST VALUE', 'GOLDEN VALUE']]
+    elif diff_tag in ["types_changed"]:
+        csv_data: list[list[str]] = [['KEY', 'TEST TYPE', 'GOLDEN TYPE', 'TEST VALUE', 'GOLDEN VALUE']]
+    else:
+        assert False, f"Unknown diff_tag {diff_tag}"
+    
+    for k, v in cmp_dict.items():
+        hier_key = '.'.join( hier_key_re.findall(k) )
+        if diff_tag in ["added" , "removed"]:
+            csv_data.append([hier_key, v])
+        elif diff_tag in "vals_changed":
+            csv_data.append([hier_key, v['old_value'], v['new_value']])
+        elif diff_tag in "types_changed":
+            csv_data.append([hier_key, v['old_type'], v['new_type'], v['old_value'], v['new_value']])
+    out_csv_fpath = os.path.join(result_dpath, f"{test_name}_{diff_tag}.csv")
+    rg_utils.write_csv_file(out_csv_fpath, csv_data)
+    return out_csv_fpath
+
+def rec_get_human_readable_csv(
+    csv_path: str,
+    tests_tree: rg_ds.Tree,
+) -> str:
+    """
+        csv_path can be directory or file
+    """
+    assert os.path.exists(csv_path), f"CSV file {csv_path} does not exist"
+    if os.path.isfile(csv_path):
+        assert csv_path.endswith(".csv"), f"Expected a csv file, got {csv_path}"
+    rec_csv_print_fpath: str = os.path.join(
+        tests_tree.search_subtrees("tests.scripts", is_hier_tag=True)[0].path,
+        "rec_csvs_print.sh",
+    )
+    csv_print_result = sp.run([rec_csv_print_fpath, csv_path], stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, text=True)
+    assert csv_print_result.returncode == 0, f"Error running {rec_csv_print_fpath}: {csv_print_result.stderr}"
+    return csv_print_result.stdout
 
 def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
     """
@@ -309,7 +325,7 @@ def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
     )
     subtool: str = rg_args.subtools[0]
     init_struct = rg_info[subtool]
-    test_init: dict = rec_convert_dataclass_to_dict(init_struct)
+    test_init: dict = rg_utils.rec_convert_dataclass_to_dict(init_struct)
     
     # Get golden ref to compare against
     golden_results_dpath: str = tests_tree.search_subtrees(
@@ -329,60 +345,39 @@ def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
             golden_init_struct_fpath: str = init_struct_fpaths[0]
             break
     assert golden_init_struct_fpath is not None, f"Could not find golden init struct file in {golden_results_dpath}"
-    golden_init: dict = json.load(open(golden_init_struct_fpath,"r"))
+    golden_init: dict = json.load(open(golden_init_struct_fpath, "r"))
     # Compare the two
     ddiff = DeepDiff(test_init, golden_init, ignore_order=True, verbose_level = 2)
-    col_width = 50
-    # na_ele = f"{'N/A':<{col_width}}"
+    test_data_dpath: str = tests_tree.search_subtrees(
+        f"tests.data.{test_grp_name}", is_hier_tag = True
+    )[0].path
+    
     # If there are any differences iterate over them
     if ddiff:
-        hier_key_re = re.compile(r"(?<=')\w+(?=')")
+        result_dpath = os.path.join(test_data_dpath, "results")
+        os.makedirs(result_dpath, exist_ok = True)
         # Any values exist in golden but not in test?
         items_added_dict: dict = ddiff.get("dictionary_item_added")
         if items_added_dict:
-            golden_added_subhdr = rg_utils.create_bordered_str("GOLDEN Key : Value pairs not found in TEST")
-            print(golden_added_subhdr[1])
-            diff_cols = f"{'Key':<{col_width}}{'Value':<{col_width}}"
-            print(diff_cols)
-            for k, v in items_added_dict.items():
-                hier_key = '.'.join( hier_key_re.findall(k) )
-                row = f"{hier_key:<{col_width}}{v:<{col_width}}"
-                print(row)
+            rm_csv_fpath: str = write_out_test_cmp(items_added_dict, tests_name, result_dpath, "removed")
+            print(rec_get_human_readable_csv(rm_csv_fpath, tests_tree))
         # Any values exist in test but not in golden?
         items_removed_dict: dict = ddiff.get("dictionary_item_removed")
         if items_removed_dict:
-            items_removed_subhdr = rg_utils.create_bordered_str("TEST Key : Value pairs not found in GOLDEN")
-            print(items_removed_subhdr[1])
-            diff_cols = f"{'Key':<{col_width}}{'Value':<{col_width}}"
-            print(diff_cols)
-            for k, v in items_removed_dict.items():
-                hier_key = '.'.join( hier_key_re.findall(k) )
-                row = f"{hier_key:<{col_width}}{v:<{col_width}}"
-                print(row)
+            add_csv_fpath: str = write_out_test_cmp(items_removed_dict, tests_name, result_dpath, "added")
+            print(rec_get_human_readable_csv(add_csv_fpath, tests_tree))
         # Any values exist in both but are different?
         items_changed_dict: dict = ddiff.get("values_changed")
         if items_changed_dict:
-            items_changed_subhdr = rg_utils.create_bordered_str("Differences")
-            print(items_changed_subhdr[1])
-            diff_cols = f"{'Key':<{col_width}}{'Test Value':<{col_width}}{'Golden Value':<{col_width}}"
-            print(diff_cols)
-            for k, v in items_changed_dict.items():
-                hier_key = '.'.join( hier_key_re.findall(k) )
-                row = f"{hier_key:<{col_width}}{v['old_value']:<{col_width}}{v['new_value']:<{col_width}}"
-                print(row)
-        assert False, "Differences found between test and golden init struct"
+            # Write out to a csv for debugging
+            val_ch_csv_fpath: str = write_out_test_cmp(items_changed_dict, tests_name, result_dpath, "vals_changed")
+            print(rec_get_human_readable_csv(val_ch_csv_fpath, tests_tree))
+        type_changes_dict: dict = ddiff.get("type_changes")
+        if type_changes_dict:
+            # Write out to a csv for debugging
+            type_ch_csv_fpath: str = write_out_test_cmp(type_changes_dict, tests_name, result_dpath, "types_changed")
+            print(rec_get_human_readable_csv(type_ch_csv_fpath, tests_tree))
+        assert False, f"Differences found between test and golden init struct, see {result_dpath} for more detail"
     else:
         print("No differences found between test and golden init struct")
 
-
-
-# def run_verif_coffe(rg_args: rg_ds.RadGenArgs):
-#     tests_tree, test_grp_name, tests_name, _, _ = get_test_info(stack_lvl = 3)
-#     rg_info, _ = run_rad_gen(
-#         rg_args, 
-#         get_rg_home()
-#     )
-#     subtool: str = rg_args.subtools[0]
-#     coffe_info = rg_info[subtool]
-
-# def run_verif_ic_3d(rg_args: rg_ds.RadGenArgs):

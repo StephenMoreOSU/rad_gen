@@ -21,7 +21,7 @@ import copy
 from collections import OrderedDict
 
 
-@pytest.fixture()
+@pytest.fixture(scope='session')
 def noc_rtl_sweep() -> rg_ds.RadGenArgs:
     """
         Returns:
@@ -62,7 +62,7 @@ def test_noc_rtl_sweep_gen_conf_init(noc_rtl_sweep_conf_init_tb, request):
     tests_common.run_and_verif_conf_init(noc_rtl_sweep_conf_init_tb)
 
 
-@pytest.fixture()
+@pytest.fixture(scope='session')
 def noc_rtl_sweep_output(noc_rtl_sweep) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree]:
     """
         Runs the NoC configs + RTL generation
@@ -73,7 +73,7 @@ def noc_rtl_sweep_output(noc_rtl_sweep) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.T
     return tests_common.run_sweep(noc_rtl_sweep)
 
 
-@pytest.fixture()
+@pytest.fixture(scope='session')
 def get_sw_info(noc_rtl_sweep_output) -> Tuple[List[str], List[str]]:
     proj_tree: rg_ds.Tree
     _, proj_tree, _ = noc_rtl_sweep_output
@@ -127,7 +127,7 @@ def test_noc_rtl_sweep_gen(get_sw_info, request):
         assert os.path.exists(conf_fpath), f"Configuration file {conf_fpath} does not exist"
         assert os.path.exists(rtl_param_fpath), f"RTL parameter file {rtl_param_fpath} does not exist"
 
-@pytest.fixture()
+@pytest.fixture(scope='session')
 def noc_sw_pt_asic_flow_tb(
     hammer_flow_template,
     get_sw_info,
@@ -181,7 +181,7 @@ def test_noc_sw_pt_asic_flow(noc_sw_pt_asic_flow_tb, request):
     tests_common.run_verif_hammer_asic_flow(rg_args = noc_sw_pt_asic_flow_tb)
 
 
-@pytest.fixture()
+@pytest.fixture(scope='session')
 def noc_sw_pt_parse_tb(noc_sw_pt_asic_flow_tb) -> rg_ds.RadGenArgs:
     rg_args = copy.deepcopy(noc_sw_pt_asic_flow_tb)
     rg_args.subtool_args.compile_results = True

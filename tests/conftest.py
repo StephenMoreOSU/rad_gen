@@ -47,7 +47,7 @@ def create_rg_fixture(
         tests_common.write_fixture_json(rg_args, stack_lvl = 7)
         return rg_args
     
-    @pytest.fixture
+    @pytest.fixture(scope='session')
     @skip_if_fixtures_only
     def conf_init_fixture(request: pytest.FixtureRequest):
         input_data = request.getfixturevalue(input_fixture)
@@ -128,7 +128,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: pytest.ExitCode):
 pytest.hookimpl(tryfirst=True)(pytest_collection_modifyitems)
 pytest.hookimpl(trylast=True)(pytest_sessionfinish)
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def hammer_flow_template() -> Tuple[rg_ds.RadGenArgs, rg_ds.Tree]:
     """
         Uses some dummy arguments with the basic flow arguments to get both

@@ -20,18 +20,23 @@ We don't do a recursive clone as there are some modules from within hammer that 
 Python Setup
 ------------------
 
+The following script will setup the python environment for RAD-Gen.
+Dependencies are (`conda`) OR (`python >= 3.9` AND `venv`). 
+
+Install
+^^^^^^^^
+
 .. code-block:: bash
 
-   $ # create conda env from yaml file
-   $ conda env create -f conda_env/env.yaml
-   $ # activate conda env with below command
-   $ conda activate rad-gen-env
-   $ # For developers its convenient to install some libraries as editable python libs
-   $ # We can do this in hammer with the following commands:
-   $ cd third_party/hammer
-   $ # Installs an editable version of hammer to the conda env
-   $ python3 -m pip install -e .
-   $ # source a script which adds hammer modules to PYTHONPATH
+   $ # Creates conda env or venv environment
+   $ ./py_install.sh
+
+Activation
+^^^^^^^^^^^
+
+.. code-block:: bash
+
+   $ # Adds modules to PYTHONPATH and activates conda / venv environment
    $ source env_setup.sh
 
 ASAP7 PDK Setup

@@ -1934,6 +1934,7 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
             scaled_gds_fpath = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "par-rundir", f"{asic_dse.common_asic_flow.top_lvl_module}_drc.gds")
             # calls a function which uses a gds tool to return area from file rather than virtuoso
             # It seems like the gds libs return an area thats around 2x what virtuoso gives so I scale by 1/2 hence virtuoso is ideal for bounding box area measurement
+            # I justify this because virtuoso itself is conservative, usually this is still larger (an estimate)
             flow_report["gds_area"] = gds_fns.main([f"{stdcells_fpath}",f"{scaled_gds_fpath}", "get_area"])/2
             
 

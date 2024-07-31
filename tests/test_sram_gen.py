@@ -19,7 +19,7 @@ import pandas as pd
 import copy
 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def sram_gen() -> rg_ds.RadGenArgs:
     """
         Returns:
@@ -46,7 +46,7 @@ def sram_gen() -> rg_ds.RadGenArgs:
     tests_common.write_fixture_json(sram_gen_args)
     return sram_gen_args
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def sram_gen_output(sram_gen: rg_ds.RadGenArgs) -> Tuple[
     List[rg_ds.RadGenArgs],
     rg_ds.Tree,
@@ -66,7 +66,7 @@ def sram_gen_output(sram_gen: rg_ds.RadGenArgs) -> Tuple[
     """
     return tests_common.run_sweep(sram_gen)
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def get_stitched_srams() -> List[Dict[str, int]]:
     """
         Fixture to generate a list of dictionaries of all stitched SRAM macros to be generated.
@@ -173,7 +173,7 @@ def get_stitched_srams() -> List[Dict[str, int]]:
     ]
     return stitched_macros
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def get_dut_single_macro(sram_gen_output) -> Tuple[
     rg_ds.Tree, 
     str,
@@ -211,7 +211,7 @@ def get_dut_single_macro(sram_gen_output) -> Tuple[
     )
     return proj_tree, macro_conf_fpath, macro_params
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def get_dut_stitched_sram(sram_gen_output) ->Tuple[
     rg_ds.Tree, 
     str,
@@ -311,7 +311,7 @@ def test_sram_gen(sram_gen_output, get_stitched_srams, request):
 #  \__ \   / / _ \| |\/| | \__ \| || .` | (_ | |__| _|  | |\/| |/ _ \ (__|   / (_) |
 #  |___/_|_\/_/ \_\_|  |_| |___/___|_|\_|\___|____|___| |_|  |_/_/ \_\___|_|_\\___/ 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def single_macro_asic_flow_tb(
     hammer_flow_template, 
     get_dut_single_macro
@@ -354,7 +354,7 @@ def test_single_macro_asic_flow(single_macro_asic_flow_tb, request):
     tests_common.run_verif_hammer_asic_flow(rg_args = single_macro_asic_flow_tb)
 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def single_macro_parse_tb(single_macro_asic_flow_tb) -> rg_ds.RadGenArgs:
     rg_args = copy.deepcopy(single_macro_asic_flow_tb)
     rg_args.subtool_args.compile_results = True
@@ -387,7 +387,7 @@ def test_single_macro_parse(single_macro_parse_tb, request):
 #  \__ \   / / _ \| |\/| | \__ \ | |  | |  | || (__| __ | _|| |) | | |\/| |/ _ \ (__|   / (_) |
 #  |___/_|_\/_/ \_\_|  |_| |___/ |_| |___| |_| \___|_||_|___|___/  |_|  |_/_/ \_\___|_|_\\___/ 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def stitched_sram_asic_flow_tb(
     hammer_flow_template,
     get_dut_stitched_sram
@@ -427,7 +427,7 @@ def test_stitched_sram_asic_flow_conf_init(stitched_sram_asic_flow_conf_init_tb,
 def test_stitched_sram_asic_flow(stitched_sram_asic_flow_tb, request):
     tests_common.run_verif_hammer_asic_flow(rg_args = stitched_sram_asic_flow_tb)
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def stitched_sram_parse(stitched_sram_asic_flow_tb) -> rg_ds.RadGenArgs:
     rg_args = copy.deepcopy(stitched_sram_asic_flow_tb)
     rg_args.subtool_args.compile_results = True

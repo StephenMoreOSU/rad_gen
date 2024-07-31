@@ -15,8 +15,8 @@ import pytest
 import inspect
 
 import src.common.data_structs as rg_ds
+import src.common.utils as rg_utils
 import tests.common.common as tests_common
-
 
 
 def get_tests_info(
@@ -26,24 +26,16 @@ def get_tests_info(
 ) -> list[dict]:
     # Get all the tests which we want to generate a golden init struct for
     pytest_collect_args = ["pytest", "--collect-only-with-markers", "--disable-pytest-warnings"]
-    if init_marker_str:
-        # markers_or: str = " or ".join([f"{marker}" for marker in init_markers])
-        if test_arg:
-            # If test arg is a path to a particular test file
-            if os.path.isfile(test_arg):
-                test_args = [test_arg, "-m", init_marker_str]
-            # If the test is a function in a test file, markers don't do anything
-            else:
-                test_args = [test_arg]
-        else:
-            # If no test arg is given, run all tests with the markers
-            test_args = [tests_dpath, "-m", init_marker_str]
-    # No markers provided but a test arg is given and its either a test file or a test function
-    elif test_arg and (os.path.isfile(test_arg) or os.path.isfile(test_arg.split("::")[0])):
-        test_args = [test_arg]
-    # If none of the above we run for all tests
+    
+    test_args = []
+    if test_arg:
+        test_args += test_arg.split(" ")
     else:
-        test_args = [tests_dpath]
+        test_args.append(tests_dpath)
+    
+    if init_marker_str:
+        test_args += ["-m", init_marker_str]
+    
     pytest_collect_args += test_args
     result = sp.run(pytest_collect_args, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, text=True)
 
@@ -110,8 +102,8 @@ def update_golden_results(
         init_test: dict = init_test[0] if len(init_test) > 0 else None
 
         # Tests which don't have a golden result directory
-        if any( marker in core_test["markers"] for marker in ["asic_sweep", "buff_3d", ""]):
-            print(f" {core_test['markers']} marked tests do not have a golden result directory")
+        if any( marker in core_test["markers"] for marker in ["asic_sweep", "buff_3d"]):
+            print(f"one of marked tests in {core_test['markers']} do not have a golden result directory")
             continue
 
 
@@ -138,10 +130,10 @@ def update_golden_results(
             golden_res_dpaths.append(golden_res_dpath)
 
         if not os.path.isdir(core_test_data_dpath):
-            print(f"No data directory found for test '{test_fname}'")
+            print(f"No data directory found for test '{core_test['name']}'")
             continue
         elif not os.path.exists(core_out_dpath):
-            print(f"No output directory found for test '{test_fname}'")
+            print(f"No output directory found for test '{core_test['name']}'")
             continue
         
         # Depending on the core test type we will copy over golden results from the output directory
@@ -179,24 +171,14 @@ def conf_init_gen(
     tests_tree = tests_common.init_tests_tree()
     # Get all the tests which we want to generate a golden init struct for
     pytest_collect_args = ["pytest", "--collect-only"]
-    if init_marker_str:
-        # markers_or: str = " or ".join([f"{marker}" for marker in init_markers])
-        if test_arg:
-            # If test arg is a path to a particular test file
-            if os.path.isfile(test_arg):
-                test_args = [test_arg, "-m", init_marker_str]
-            # If the test is a function in a test file, markers don't do anything
-            else:
-                test_args = [test_arg]
-        else:
-            # If no test arg is given, run all tests with the markers
-            test_args = [tests_dpath, "-m", init_marker_str]
-    # No markers provided but a test arg is given and its either a test file or a test function
-    elif test_arg and (os.path.isfile(test_arg) or os.path.isfile(test_arg.split("::")[0])):
-        test_args = [test_arg]
-    # If none of the above we run for all tests
+    test_args = []
+    if test_arg:
+        test_args += test_arg.split(" ")
     else:
-        test_args = [tests_dpath]
+        test_args.append(tests_dpath)    
+    if init_marker_str:
+        test_args += ["-m", init_marker_str]
+    
     pytest_collect_args += test_args
     result = sp.run(pytest_collect_args, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, text=True)
     grab_test_info_re = re.compile(r"(.*)::(.*)")
@@ -264,13 +246,14 @@ def conf_init_gen(
             # convert rg_info into subtool struct
             subtool: str = test_rg_args.subtools[0]
             init_struct = rg_info[subtool]
-            json_text = json.dumps(tests_common.rec_convert_dataclass_to_dict(init_struct), cls=tests_common.EnhancedJSONEncoder, indent=4)
+            json_text = json.dumps(rg_utils.rec_convert_dataclass_to_dict(init_struct), cls=tests_common.EnhancedJSONEncoder, indent=4)
             golden_res_out_fpath = os.path.join(
                 golden_res_out_dpath,
                 f"init_struct_{fixture_fn_name}.json"
             )
             with open(golden_res_out_fpath, "w") as f:
                 f.write(json_text)
+            # Hack but just in case there's still any non $RAD_GEN_HOME replaced paths, replace them again
             repl_script_result = sp.run([os.path.join(rg_home, "scripts", "rg_home_path_repl.sh"), golden_res_out_fpath], stdout=sp.PIPE, stderr=sp.PIPE, text=True)
             print(f"Writing out golden result to '{golden_res_out_fpath}'")
             # Break out of loop as we assume the first fixture arg is the only one that we compare against

@@ -107,6 +107,11 @@ Corresponding ``rg_top_lvl_conf.yml``
 We can see the corresponding keys across the ``Common`` struct, the ``rg_top_lvl_conf.yml`` file, and command line arguments in the ``RadGenCLI`` struct.
 The general idea is to keep naming consistent across all possible user entry points, ideally avoiding confusion.
 
+.. note:: 
+    Fields in ``CLI`` or ``Tool`` structs that are initialized to ``None`` are not all necessarily optional. 
+    Different fields are mandatory for different modes of operation so mandatory ones aren't always enforced.
+    A nice infrastructure improvement in the future would be to go through all tools and put verify legal options somewhere after struct initialization.
+
 
 Hierarchically Defined Parameters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

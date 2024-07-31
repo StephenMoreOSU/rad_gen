@@ -853,8 +853,8 @@ class FPGA:
             total_mux_loads: Dict[str, int] = {}
 
             # list of all possible drive types in csv
-            drv_types: List[str] = list(set([wire_stat["DRV_TYPE"].lower() for wire_stat in rr_wire_stats]))
-            wire_types: List[str] = list(set([wire_stat["WIRE_TYPE"].lower() for wire_stat in rr_wire_stats]))
+            # drv_types: List[str] = list(set([wire_stat["DRV_TYPE"].lower() for wire_stat in rr_wire_stats]))
+            # wire_types: List[str] = list(set([wire_stat["WIRE_TYPE"].lower() for wire_stat in rr_wire_stats]))
             drv_wire_pairs: Set[Tuple[str]] = set()
             # Seperate the input wire statistics into wire types
             for wire_stat in rr_wire_stats:
@@ -884,7 +884,7 @@ class FPGA:
                     drv_type = stat_type.replace("fanin_num_","").lower()
                     if drv_type in stat_type and "total" not in drv_type:
                         # this is component fanin
-                        mux_ipin: c_ds.MuxIPIN = c_ds.MuxIPIN(
+                        mux_ipin = c_ds.MuxIPIN(
                             wire_type=wire_type,
                             drv_type=drv_type,
                             freq=int(round(float(wire_stat["mean"])))
@@ -908,7 +908,7 @@ class FPGA:
 
                 assert wire_type == drv_wire_pair[1], f"Wire type {wire_type} does not match drv type {drv_type}"
                 # Create a WireStatRRG object for each wire types
-                mux_stat: c_ds.MuxWireStatRRG = c_ds.MuxWireStatRRG(
+                mux_stat = c_ds.MuxWireStatRRG(
                     wire_type=wire_type,
                     drv_type=drv_type,
                     mux_ipins=mux_ipins[wire_type],

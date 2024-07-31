@@ -12,7 +12,7 @@ import importlib
 import shapely as sh
 
 
-from dataclasses import fields, field, asdict, is_dataclass, dataclass, MISSING
+from dataclasses import fields, MISSING
 import dataclasses
 import json
 
@@ -1035,7 +1035,7 @@ def clean_path(unsafe_path: str, validate_path: bool = True) -> str:
         Returns:
             The sanitized path
     """
-    safe_path = os.path.expanduser(unsafe_path)
+    safe_path = os.path.expanduser(unsafe_path.replace("${RAD_GEN_HOME}", os.environ.get("RAD_GEN_HOME")))
     # We want to turn off the path checker when loading in yaml files which may have invalid entries
     if validate_path:
         handle_error(lambda: check_for_valid_path(safe_path), {True : None})
@@ -1179,7 +1179,7 @@ def parse_config(conf_path: str, validate_paths: bool = True, sanitize: bool = T
     else:
         raise ValueError(f"ERROR: config file {conf_path} is not a yaml or json file")
     # In case the path of config itself is a userpath we expand it
-    in_conf_fpath: str = os.path.expanduser(conf_path)
+    in_conf_fpath: str = os.path.expanduser(conf_path.replace("${RAD_GEN_HOME}", os.getenv("RAD_GEN_HOME")))
     # Because configurations contain env_vars for paths we need to expand them with whats in users env
     conf_text = Path(in_conf_fpath).read_text().replace("${RAD_GEN_HOME}", os.getenv("RAD_GEN_HOME"))
     loaded_config = load_config_from_string(conf_text, is_yaml=is_yaml, path=str(Path(in_conf_fpath).resolve().parent))
@@ -1276,8 +1276,11 @@ def init_field(
             # Get a in config dict for the nested dataclass
             nested_config: dict = strip_hier(in_config, field_name)
             default_fac_config: dict
-            if field.default_factory != MISSING:
+            # Default factory must be of type dataclass
+            if field.default_factory != MISSING and dataclasses.is_dataclass(field.default_factory()):
                 default_fac_config = dataclasses.asdict(field.default_factory())
+            elif field.default != MISSING and field.default != None:
+                default_fac_config = {field_name: field.default}
             else:
                 default_fac_config = {}
 
@@ -1355,16 +1358,24 @@ def init_dataclass(
                 field_type, 
                 validate_paths
             )
-        # We look for our field in the single key dict we just created, if its there we assign it 
-        if init_dict:
+        # We look for our field in the single key dict we just created
+        # If its there and not None then we set the field to that value
+        if init_dict.get(field_name) != None:
             dataclass_inputs[field_name] = init_dict[field_name]
-        # If there exists a factory_default for the field then we will 
-        elif field.default_factory != MISSING:
+        # Or If there exists a factory_default for the field thats used 
+        elif field.default_factory != MISSING and field.default_factory() != None:
             dataclass_inputs[field_name] = field.default_factory()
-        # We don't set the field to None if its not found anywhere as this would break dataclasses with mandatory fields
+        # If there is a normal default value
+        elif field.default != MISSING and field.default != None:
+            dataclass_inputs[field_name] = field.default
+        # Finally we will se the value to None if that was the value passed in
+        elif init_dict:
+            assert init_dict[field_name] == None, f"ERROR, there is no state that should reach here where init_dict[{field_name}] != None"
+            dataclass_inputs[field_name] = None
+        # However, we don't set the field to None if its not found anywhere as this would break dataclasses with mandatory fields
         
         # Clean path and ensure it exists (if "path" keyword in field name)
-        if "path" in field_name and field_name in dataclass_inputs:
+        if any(path_key in field_name for path_key in ["path", "manual_obj_dir", "obj_dir"]) and field_name in dataclass_inputs:
             if isinstance(dataclass_inputs[field_name], list):
                 for idx, path in enumerate(dataclass_inputs[field_name]):
                     dataclass_inputs[field_name][idx] = clean_path(path, validate_paths)
@@ -2050,8 +2061,12 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
         rg_ds.ScriptInfo, 
         strip_hier(asic_dse_conf, strip_tag="scripts")
     )
-    compile_results_flag: bool = asic_dse_conf["compile_results"] # CTRL SIGNAL
     
+    # Control signals
+    compile_results_flag: bool = asic_dse_conf["compile_results"] # CTRL SIGNAL
+    sweep_conf_valid: bool = asic_dse_conf["sweep_conf_fpath"] != None
+    flow_conf_valid: bool = asic_dse_conf["flow_conf_fpaths"] != None
+
     common_asic_flow: rg_ds.CommonAsicFlow = init_dataclass(
         rg_ds.CommonAsicFlow, 
         {
@@ -2069,8 +2084,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
         common_asic_flow.top_lvl_module != None and 
         common_asic_flow.hdl_dpath != None
     )
-    sweep_conf_valid: bool = asic_dse_conf["sweep_conf_fpath"] != None
-    flow_conf_valid: bool = asic_dse_conf["flow_conf_fpaths"] != None
+
 
 
     asic_dse_mode: rg_ds.AsicDseMode = init_dataclass(

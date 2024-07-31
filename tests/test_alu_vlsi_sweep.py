@@ -38,7 +38,7 @@ Notes on testing infrastructure:
 #   / _ \| |_| |_| |  \ V /| |__\__ \| |  \__ \\ \/\/ /| _|| _||  _/   | | | _|\__ \ | |  
 #  /_/ \_\____\___/    \_/ |____|___/___| |___/ \_/\_/ |___|___|_|     |_| |___|___/ |_| 
 
-@pytest.fixture()
+@pytest.fixture(scope='session')
 def alu_vlsi_sweep() -> rg_ds.RadGenArgs:
     tests_tree, test_grp_name, fixture_name, fixture_out_fpath = tests_common.get_fixture_info()
     # Naming convension of directory for a particular test file is the name of the file without "test_" prefix
@@ -63,7 +63,7 @@ def alu_vlsi_sweep() -> rg_ds.RadGenArgs:
     tests_common.dataclass_2_json(alu_sweep_args, fixture_out_fpath)
     return alu_sweep_args 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def alu_vlsi_sweep_gen_tb(alu_vlsi_sweep: rg_ds.RadGenArgs) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree]:
     return tests_common.run_sweep(alu_vlsi_sweep)
 
@@ -122,7 +122,7 @@ def test_alu_vlsi_sweep_gen(alu_vlsi_sweep_gen_tb, request):
     for gen_conf_fpath in gen_conf_fpaths:
         assert os.path.exists(gen_conf_fpath), f"Generated config file {gen_conf_fpath} does not exist"
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def alu_sw_pt_asic_flow_tb(hammer_flow_template) -> rg_ds.RadGenArgs:
     proj_tree: rg_ds.Tree = tests_common.init_scan_proj_tree()
     proj_name: str = "alu"
@@ -170,7 +170,7 @@ def test_alu_sw_pt_asic_flow(alu_sw_pt_asic_flow_tb, request):
 #     fixture_type = 'parse',
 # )
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def alu_sw_pt_parse_tb(alu_sw_pt_asic_flow_tb) -> rg_ds.RadGenArgs:
     rg_args = copy.deepcopy(alu_sw_pt_asic_flow_tb)
     rg_args.subtool_args.compile_results = True
@@ -198,6 +198,46 @@ def test_alu_sw_pt_parse(alu_sw_pt_parse_tb, request):
         backup_flag = False, # Don't backup as this is for parsing existing results
     )
 
+
+@pytest.fixture(scope='session')
+def alu_sw_pt_virtuoso_gds_tb(alu_sw_pt_parse_tb, request):
+    # Requires the `test_alu_sw_pt_asic_flow` to be run first to get results to convert to gds in virtuoso
+    rg_args = copy.deepcopy(alu_sw_pt_parse_tb)
+    rg_args.subtool_args.scripts__virtuoso_setup_path = os.path.join(tests_common.get_rg_home(),"scripts","setup_virtuoso_env.sh")
+    # TODO figure out a good place to tell people to make this rundir
+    rg_args.subtool_args.stdcell_lib__pdk_rundir_path = os.path.expanduser(
+        os.path.join("~","ASAP_7_IC","asap7_rundir")
+    )
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+alu_sw_pt_virtuoso_gds_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'alu_sw_pt_virtuoso_gds_tb',
+    fixture_type = 'conf_init',
+)
+
+@pytest.mark.alu
+@pytest.mark.gds
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_alu_sw_pt_virtuoso_gds_conf_init(alu_sw_pt_virtuoso_gds_conf_init_tb, request):
+    tests_common.run_and_verif_conf_init(alu_sw_pt_virtuoso_gds_conf_init_tb)
+
+
+@pytest.mark.alu
+@pytest.mark.gds
+@skip_if_fixtures_only
+def test_alu_sw_pt_virtuoso_gds(alu_sw_pt_virtuoso_gds_tb, request):
+    """
+        Todos:
+            * Add the asic sw pt as a dependancy for this test
+    """
+    if not os.path.exists(alu_sw_pt_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path):
+        pytest.skip(f"Path {alu_sw_pt_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path} does not exist")
+    tests_common.run_verif_hammer_asic_flow(
+        rg_args = alu_sw_pt_virtuoso_gds_tb,
+        backup_flag = False,
+    )
 
 
 

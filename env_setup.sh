@@ -17,7 +17,6 @@ export THIRD_PARTY_HOME=$RAD_GEN_HOME/third_party
 export HAMMER_HOME=$THIRD_PARTY_HOME/hammer
 
 pathadd "PYTHONPATH" "$RAD_GEN_HOME"
-# pathadd $RAD_GEN_HOME/src
 
 # We need to add all of the hammer submodules to the PYTHONPATH
 hammer_submods=("technology" "vlsi")
@@ -39,37 +38,34 @@ for flow_stage in "${flow_stages[@]}"; do
     pathadd "PYTHONPATH" $HAMMER_HOME/hammer/${flow_stage}
 done
 
-# Copy the newly set env to pytest.ini
-${RAD_GEN_HOME}/scripts/cur_env_to_pytest.sh
+# python venv checks
+python3 -c 'import sys; assert sys.version_info >= (3,9)' > /dev/null
+PY_VERSION_VALID=$?
+python3 -m venv --help > /dev/null
+VENV_EXISTS=$?
 
 ## Conda env setup
 which conda > /dev/null
+# If conda in PATH
 if [ "$?" -eq "0" ]; then
     conda deactivate && conda activate rad-gen-env
+# If python3 version >= 3.9 and venv module exists
+elif [ "${PY_VERSION_VALID}" == "0" ] && [ "${VENV_EXISTS}" == "0" ]; then
+    source ${RAD_GEN_HOME}/rad-gen-venv/bin/activate
 else
-    echo "Conda not found. Please install conda and try again"
+    echo "Python env not initialized, run ${RAD_GEN_HOME}/py_install.sh"
     exit 1
 fi
 
-# Check if hammer already installed
-python3 -m pip show hammer-vlsi > /dev/null
-if [ "$?" -ne "0" ]; then
-    # Install hammer as editable repo within conda env
-    cd $HAMMER_HOME
-    python3 -m pip install -e .
-    cd - 
-fi
+# Copy the newly set env to pytest.ini
+${RAD_GEN_HOME}/scripts/cur_env_to_pytest.sh
 
+# Add the tests/scripts directory to the path (contains convenience/debugging scripts)
+pathadd "PATH" $RAD_GEN_HOME/tests/scripts
 
-
-
-################################ This is not needed anymore (to the best of my knowledge)  ##########################
+################################ This is not needed anymore (but may be someday)  ###################################
 ### If for some reason the hammer plugins are not found and vendor specifics need be used uncomment below ###########
 # vendor_plugins=("cadence" "mentor" "synopsys")
 # for vendor_plugin in "${vendor_plugins[@]}"; do
 #     pathadd $VLSI_HOME/hammer-${vendor_plugin}-plugins
 # done
-
-## PYTHONPATH for COFFE
-# pathadd $RAD_GEN_HOME/COFFE
-# pathadd $RAD_GEN_HOME/COFFE/coffe
