@@ -1375,12 +1375,16 @@ def init_dataclass(
         # However, we don't set the field to None if its not found anywhere as this would break dataclasses with mandatory fields
         
         # Clean path and ensure it exists (if "path" keyword in field name)
-        if any(path_key in field_name for path_key in ["path", "manual_obj_dir", "obj_dir"]) and field_name in dataclass_inputs:
+        if any(path_key in field_name for path_key in ["path", "obj_dir"]) and field_name in dataclass_inputs:
             if isinstance(dataclass_inputs[field_name], list):
                 for idx, path in enumerate(dataclass_inputs[field_name]):
                     dataclass_inputs[field_name][idx] = clean_path(path, validate_paths)
             elif isinstance(dataclass_inputs[field_name], str):
-                dataclass_inputs[field_name] = clean_path(dataclass_inputs[field_name], validate_paths)
+                # These fields denote output directories so they may not be created yet
+                if any(path_key in field_name for path_key in ["obj_dir"]):
+                    dataclass_inputs[field_name] = clean_path(dataclass_inputs[field_name], validate_path = False)
+                else:
+                    dataclass_inputs[field_name] = clean_path(dataclass_inputs[field_name], validate_paths)
             else:
                 pass
 

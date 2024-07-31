@@ -24,7 +24,7 @@ import tests.common.common as tests_common
 import tests.conftest as conftest
 from tests.conftest import skip_if_fixtures_only
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def ic_3d_flow_template() -> rg_ds.RadGenArgs:
     tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = tests_common.get_test_info()
     in_conf_dpath: str = tests_tree.search_subtrees(
@@ -41,7 +41,7 @@ def ic_3d_flow_template() -> rg_ds.RadGenArgs:
     )
     return dummy_ic_3d_args
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def ic_3d_tb(ic_3d_flow_template: rg_ds.RadGenArgs):
     rg_args = copy.deepcopy(ic_3d_flow_template)
     rg_args.project_name = "intel_foveros_ic_3d"
