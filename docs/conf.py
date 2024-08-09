@@ -11,17 +11,26 @@
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-#
-# import os
-# import sys
-# sys.path.insert(0, os.path.abspath('.'))
+
+import os
+import sys
+
+sys.path.insert(0, os.path.abspath('../src'))
+
+# rg_home = os.getenv('RAD_GEN_HOME')
+# src_dpath = os.path.join(rg_home, "src")
+# mod_dpaths = [os.path.join(src_dpath, mod) for mod in ["common", "coffe", "asic_dse", "ic_3d"]]
+
+# sys.path.append(src_dpath)
+# for mod_dpath in mod_dpaths:
+#     sys.path.append(mod_dpath)
 
 
 # -- Project information -----------------------------------------------------
 
 project = u'RAD Gen'
-copyright = u'2023, RAD Gen Team'
-author = u'RAD Gen Team'
+copyright = u'2024, RAD Gen Team'
+author = u'Stephen More'
 
 # The short X.Y version
 version = u''
@@ -39,9 +48,13 @@ release = u''
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    # 'myst_parser',
-    # 'sphinx-jsonschema',
     'sphinx_rtd_theme',
+    'sphinx.ext.napoleon',
+    'sphinx.ext.todo',
+    'sphinx.ext.viewcode',
+    'sphinx.ext.autodoc',
+    'sphinx.ext.autosectionlabel', # Does something for links in pages?
+    'sphinxcontrib.mermaid',
 ]
 
 # Add any paths that contain templates here, relative to this directory.

@@ -19,6 +19,7 @@ docs/_build/
 *.json
 
 # RAD-Gen outputs
+*.log
 *.csv
 *.png
 

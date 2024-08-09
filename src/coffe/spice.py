@@ -3,6 +3,7 @@
 
 import os
 import subprocess
+from typing import Dict, List
 import src.coffe.utils as utils
 
 # All .sp files should be created to use sweep_data.l to set parameters.
@@ -93,7 +94,7 @@ class SpiceInterface(object):
         return
     
 
-    def run(self, sp_path, parameter_dict):    
+    def run(self, sp_path: str, parameter_dict: Dict[str, List[str]]):    
         """
         This function runs HSPICE on the .sp file at 'sp_path' and returns a dictionary that 
         contains the HSPICE measurements.
@@ -165,7 +166,7 @@ class SpiceInterface(object):
         while (not hspice_success) :
             # last I checked the license is available during the night, so we can try to run hspice uncomment below if this is untrue
             #utils.check_for_time()
-            subprocess.call(["hspice", sp_filename], stdout=output_file, stderr=output_file)
+            subprocess.call(["hspice", '-mt', '8', '-i', sp_filename], stdout=output_file, stderr=output_file)
 
             # how come this file is closed here, it should be closed only if there is a success
             # since else the call process will write in a closed file

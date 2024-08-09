@@ -1,0 +1,41 @@
+
+tool_env_conf_fpaths: [ ${RAD_GEN_HOME}/tests/data/asic_dse/env.yml]
+flow_conf_fpaths: [ ${RAD_GEN_HOME}/tests/data/asic_dse/pdks/asap7.yml, ${RAD_GEN_HOME}/tests/data/asic_dse/cad_tools/cadence_tools.yml]
+# base config is the hammer config file which is used as a template for designs which will be swept over
+base_config_path: ${RAD_GEN_HOME}/tests/data/alu_vlsi_sweep/inputs/alu_base.yml
+# These two args are required for each run of hammer flow
+top_lvl_module: alu_ver
+hdl_dpath:  ${RAD_GEN_HOME}/tests/data/alu_vlsi_sweep/inputs/rtl
+flow_threads: 2
+type: vlsi
+vlsi_params:
+  {
+    custom_map:
+      { 
+        period: ["0 ns", "0 ns", "2 ns"],
+        core_util: [0.5, 0.7, 0.9],
+        effort: ["express", "standard", "extreme"], # can be "express", "standard", "extreme"
+        # fp_aspect_ratio: [1.0, 1.0, 1.0],
+        # wire_selection: ["WireAreaLowkCon"]
+        # metal_layers: [10]
+      },
+    direct_map:
+      {
+        # For each vlsi parameter we desire to sweep
+        # A 1:1 struct is created for each sweep point
+        "clocks": [
+          [
+            {
+              "name": "clk",
+              "period": "0 ns"
+            }, 
+          ],
+          [
+            {
+              "name": "clk",
+              "period": "2 ns" 
+            }, 
+          ] 
+        ]
+      }
+  }

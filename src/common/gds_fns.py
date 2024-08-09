@@ -51,20 +51,27 @@ def get_area(gds_tool, cell_list, gds_file):
               total_area += e.area()
             
         return total_area
+    else:
+        raise NotImplementedError("gdspy not supported yet")
     
 def asap7_scale_gds(gds_tool, cell_list, gds_file):
     print('Scaling down {gds} using {tool}...'.format(gds=gds_file, tool=gds_tool.__name__))
     if gds_tool.__name__ == 'gdstk':
         # load original_gds
         gds_lib = gds_tool.read_gds(infile=gds_file)
+        # Non STDCELL cells
+        non_stdcells = list(filter(lambda c: c.name not in cell_list, gds_lib.cells))
         # Iterate through cells that aren't part of standard cell library and scale
         for cell in list(filter(lambda c: c.name not in cell_list, gds_lib.cells)):
             print('Scaling down ' + cell.name)
-
             # Need to remove 'blk' layer from any macros, else LVS rule deck interprets it as a polygon
             # This has a layer datatype of 4
             # Then scale down the polygon
-            cell.filter(spec=(1 ,4), remove=True)
+            non_stdcell_pgs_uniq_layers = set([pg.layer for pg in cell.polygons])
+            blk_layer_dtype = 4
+            for layer in non_stdcell_pgs_uniq_layers:
+                # For all polygon layers that exist in all cells, filter out the polygons with datatype 4
+                cell.filter(spec=[(layer, blk_layer_dtype)], remove=True)
             for poly in cell.polygons:
                 poly.scale(0.25)
 

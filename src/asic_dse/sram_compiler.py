@@ -3,6 +3,11 @@ import re
 
 import math
 
+import pandas as pd
+import numpy as np
+
+import copy
+
 def truncate(f, n):
     '''Truncates/pads a float f to n decimal places without rounding'''
     s = '{}'.format(f)
@@ -26,15 +31,104 @@ def decode_sram_name(sram_str):
         ret_val = rw_ports, width, depth
     return ret_val
 
+
 def compile(hammer_tech_pdk_path: str, rw_ports: int, width: int, depth: int):
+    """
+        Takes in a list of SRAMs and returns the best SRAM mapping for the requested width, depth, and number of read/write ports
+        Currently only supports a single macro mapping to user requested specs
+    """
     sram_list = f'{hammer_tech_pdk_path}/srams.txt'
     srams = open(sram_list,"r").read()
     # This is going to be a very basic, dumb sram compiler
     # deincentivize depth over width -> (width only needs decoders depth needes muxes which are costlier)
-    depth_weight = (0.06 / 4 ) # factor which is added to cost as penalty for each depthwise macro
-    width_weight = 0.01 # It costs extra routing resources to be able to connect the pins of wider macros so this is to deincentivize width
+    depth_weight = 0.1 #(0.06 / 4 ) # factor which is added to cost as penalty for each depthwise macro
+    width_weight = 0.05 #0.01 # It costs extra routing resources to be able to connect the pins of wider macros so this is to deincentivize width
+    util_weight = 1 - abs(depth_weight - width_weight) # weight of utilization in cost function
+
     best_cost = float("inf")
     mapping_options = []
+    
+    port_matching_macros = [
+        {"name": sram, "ports": decode_sram_name(sram)[0], "width": decode_sram_name(sram)[1], "depth": decode_sram_name(sram)[2]} 
+        for sram in srams.split("\n") if "SRAM" in sram and decode_sram_name(sram)[0] == rw_ports
+    ]
+    # init with max and mins of width and depth
+    cur_max_depth = 1
+    cur_max_width = 1
+
+    # get list of macros which fit in integer divisions of the requested width & depth
+    fitted_macros = [
+        macro for macro in port_matching_macros if (macro["width"] == width or (macro["width"] < width and width % macro["width"] == 0)) and\
+            (macro["depth"] == depth or (macro["depth"] < depth and depth % macro["depth"] == 0))
+    ]
+
+    if fitted_macros:
+        macro_options = [
+            {
+                "num_w_macros": width // macro["width"] if macro["width"] < width else 1, 
+                "num_d_macros": depth // macro["depth"] if macro["depth"] < depth else 1,
+                **macro,
+            } for macro in fitted_macros
+        ]
+    else:
+        # If there were none that perfectly fit then we need to get the macros which are closest to the requested width and depth
+        macro_options = [
+            {
+                "num_w_macros": int(math.ceil(width / macro["width"])),
+                "num_d_macros": int(math.ceil(depth / macro["depth"])),
+                **macro,
+            } for macro in port_matching_macros
+        ]
+    
+
+
+    # Get all values for num_w_macros and num_d_macros into numpy arrays
+    num_w_macros_arr = np.array([copy.deepcopy(macro["num_w_macros"]) for macro in macro_options])
+    num_d_macros_arr = np.array([copy.deepcopy(macro["num_d_macros"]) for macro in macro_options])
+
+    for macro in macro_options:
+        # We need to calculate max and mins to get the cost
+        cur_max_width = macro["num_w_macros"] if macro["num_w_macros"] > cur_max_width else cur_max_width
+        cur_max_depth = macro["num_d_macros"] if macro["num_d_macros"] > cur_max_depth else cur_max_depth
+        # Do Z score normalization on the arrays for cost function
+        norm_num_w_macros_cost = (macro["num_w_macros"] - num_w_macros_arr.mean()) / num_w_macros_arr.std()
+        norm_num_d_macros_cost = (macro["num_d_macros"] - num_d_macros_arr.mean()) / num_d_macros_arr.std()
+
+        util_perc = (width * depth) / (macro["depth"] * macro["num_d_macros"] * macro["width"] * macro["num_w_macros"])
+        # Calculate cost with all fields normalized from 0 -> 1 and then multiply by their weights
+        cost = (norm_num_w_macros_cost * width_weight) + (norm_num_d_macros_cost * depth_weight) + (util_perc * util_weight)
+        macro_mapping = {
+            "macro": macro["name"],
+            "num_rw_ports": macro["ports"],
+            "num_w_macros" : macro["num_w_macros"],
+            "num_d_macros": macro["num_d_macros"],
+            "macro_w": macro["width"],
+            "macro_d": macro["depth"],
+            "depth": macro["depth"] * macro["num_d_macros"],
+            "width": macro["width"] * macro["num_w_macros"],
+            "macro_mapped_size": macro["depth"] * macro["num_d_macros"] * macro["width"] * macro["num_w_macros"],
+            "util_perc": util_perc,
+            "cost": cost
+        }
+        mapping_options.append(macro_mapping)
+    
+
+    mapping_options = sorted(mapping_options, key=lambda k: k['cost'])
+    num_options_displayed = 5
+    print(f"Best {num_options_displayed} SRAM Mappings:")
+    i = 0
+    while i < num_options_displayed and i < len(mapping_options):
+        print(f"Option {i+1}: {mapping_options[i]}")
+        i += 1
+    return mapping_options[0]
+
+
+
+    # for macro in macros:
+    #     macro["depth_util"] = macro["depth"] / max_depth
+    #     macro["width_util"] = macro["width"] / max_width
+    #     macro["cost"] = (macro["depth_util"] * depth_weight) + (macro["width_util"] * width_weight)
+
     for sram in srams.split("\n"):
         macro_mapping = {}
         if "SRAM" in sram:
@@ -42,22 +136,28 @@ def compile(hammer_tech_pdk_path: str, rw_ports: int, width: int, depth: int):
         else:
             continue
         # we need to match the width exactly
+        # We only need to get the width / depth to be at least as big as the requested width / depth
         if width == macro_w or (macro_w < width and width % macro_w == 0) and macro_rw_ps == rw_ports:
             # mult num of macros until we get a matching width
             if(macro_w < width):
-                n_w_macros = width // macro_w
+                num_w_macros = int(math.ceil(width / macro_w)) # Take ceil to make sure our width is at least greater than requested width
             else:
-                n_w_macros = 1
-            num_d_macros = 1
-            cur_compiled_depth = macro_d
-            while cur_compiled_depth < depth:
+                num_w_macros = 1
+            # num_d_macros = 1
+            # cur_compiled_depth = macro_d
+            if (macro_d < depth):
+                num_d_macros = int(math.ceil(depth / macro_d)) # Take ceil to make sure our depth is at least greater than requested depth
+            else:
+                num_d_macros
+            while macro_d < depth:
                 cur_compiled_depth += macro_d
                 num_d_macros += 1
             # (n_w_macros * width_weight) * (num_d_macros * depth_weight) *
             util_perc = (width*depth) / (cur_compiled_depth * n_w_macros * macro_w)
             """ number of macros in X direction * width weight * number of macros in Y direction * depth weight * read/write ports * depth """
             # cur_cost = (1/(macro_rw_ps * (cur_compiled_depth * macro_w * n_w_macros) - (width*depth*rw_ports)))*(num_d_macros * depth_weight) + (n_w_macros * width_weight)
-            cur_cost = (1/(util_perc + 1e-3))*(num_d_macros * depth_weight)*(n_w_macros * width_weight)
+            cur_cost = util_perc 
+            (1/(util_perc + 1e-3))*(num_d_macros * depth_weight)*(n_w_macros * width_weight)
             macro_mapping = {
                 "macro": sram,
                 "num_rw_ports": macro_rw_ps,
@@ -191,12 +291,12 @@ def translate_logical_to_phsical(mapping_dict) -> dict:
 
 
 
-def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outpath: str) -> tuple:
+def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
     top_level_mod_name = f"sram_macro_map_{mapping_dict['num_rw_ports']}x{mapping_dict['width']}x{mapping_dict['depth']}"
-    compiled_sram_outdir = os.path.join(outpath,top_level_mod_name)
-    if not os.path.exists(compiled_sram_outdir):
-        os.mkdir(compiled_sram_outdir)
-    compiled_sram_outpath = os.path.join(compiled_sram_outdir,f"{top_level_mod_name}.sv")
+    compiled_sram_outdir = os.path.join(outpath, top_level_mod_name)
+    # Make the directory if it doesn't exist
+    os.makedirs(compiled_sram_outdir, exist_ok=True)
+    compiled_sram_outpath = os.path.join(compiled_sram_outdir, f"{top_level_mod_name}.sv")
 
     mapped_addr_w = int(math.log2(mapping_dict["depth"]))
     mapped_data_w = int(mapping_dict["width"])
@@ -222,7 +322,9 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
     """ SRAM MACRO MOD DEFINITIONS"""
     macro_addr_w = int(math.log2(mapping_dict['macro_d']))
 
-    # defines the header for the sram mapped module, will need to be finished
+    equal_map_macro_depth = (macro_addr_w == mapped_addr_w)
+
+    # defines the header for the sram mapped module
     sram_map_port_lines = []
     for i in range(1,mapping_dict["num_rw_ports"]+1,1):
         sram_map_port_lines += [
@@ -232,6 +334,7 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
             f"    input logic en_{i}, ",
             f"    input logic mode_{i}, ", # 0 for read, 1 for write
         ]
+    # remove last comma from port instantiation
     sram_map_port_lines[-1] = sram_map_port_lines[-1].replace(",","")
 
     sram_map_mod_lines = [
@@ -291,6 +394,7 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
                     f"wire mem_{x_coord}_{y_coord}_{i}_cs;",
                 ]
                 rdata_signal_lists[i-1].append(f"mem_{x_coord}_{y_coord}_{i}_rdata")
+                chip_select_line = f"assign mem_{x_coord}_{y_coord}_{i}_cs = cs_bits_{i}[{y_coord}];" if not equal_map_macro_depth else f"assign mem_{x_coord}_{y_coord}_{i}_cs = ~reg_en_{i};"
                 # Assign the bottom lsbs of address to all macro addresses
                 inst_signal_assigns_lines += [
                     f"assign mem_{x_coord}_{y_coord}_{i}_addr = reg_addr_{i}[{macro_addr_w}-1:0];",
@@ -299,7 +403,7 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
                     f"assign mem_{x_coord}_{y_coord}_{i}_wdata = reg_wdata_{i}[({mapping_dict['macro_w']}*{mapping_dict['num_w_macros']-x_coord}-1)-:{mapping_dict['macro_w']}];",
                     f"assign mem_{x_coord}_{y_coord}_{i}_we = ~(reg_mode_{i} & reg_en_{i});",
                     f"assign mem_{x_coord}_{y_coord}_{i}_re = ~(~reg_mode_{i} & reg_en_{i});",
-                    f"assign mem_{x_coord}_{y_coord}_{i}_cs = ~reg_en_{i};",
+                    chip_select_line,
                 ]
                 sram_port_lines += [
                     f"      .CE{i}(clk),",
@@ -336,6 +440,8 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
     mux_isnt_lines = []
     dec_signal_insts_lines = []
     dec_inst_lines = []
+    # Concat word read out
+    rd_concat_lines = []
     sram_map_reg_lines = []
     sram_map_ff_reg_lines = [
         f"always_ff @(posedge clk) begin",
@@ -360,7 +466,7 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
         ]
         dec_inst_lines += [
             f"cs_decoder_{mapped_addr_w-macro_addr_w}_to_{mapping_dict['num_d_macros']} u_cs_decoder_{i} (",
-            f"   .in(reg_addr_{i}[{mapped_addr_w}-1:{mapped_addr_w-1-(mapped_addr_w-macro_addr_w)}]),",
+            f"   .in(reg_addr_{i}[{mapped_addr_w}-1:{mapped_addr_w-(mapped_addr_w-macro_addr_w)}]),",
             f"   .out(cs_bits_{i})",
             f");",
         ]
@@ -372,11 +478,15 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
             f"assign mux_in_{i}[{j}] = {{{','.join(rdata_signal_lists[i-1][j*mapping_dict['num_w_macros']:(j+1)*mapping_dict['num_w_macros']])}}};"
             for j in range(len(rdata_signal_lists[i-1])//mapping_dict['num_w_macros'])
         ]
+        # Only need these if no mux exists in design
+        rd_concat_lines += [
+            f"assign reg_rdata_{i} = {{{','.join(rdata_signal_lists[i-1][0:mapping_dict['num_w_macros']])}}};"
+        ]
 
         # We need a N to 1 mux of size width
         mux_isnt_lines += [
             f"mux #(.N({mapped_addr_w-macro_addr_w})) u_mux_{i}_{mapping_dict['num_d_macros']}_to_1 (",
-            f"   .select(cs_bits_{i}),",
+            f"   .select(reg_addr_{i}[{mapped_addr_w}-1:{mapped_addr_w-(mapped_addr_w-macro_addr_w)}]),",
             f"   .in (mux_in_{i}),",
             f"   .out(reg_rdata_{i})",
             f");",
@@ -386,20 +496,33 @@ def write_rtl_from_mapping(mapping_dict: dict, base_sram_wrapper_path: str, outp
     ]
 
     out_fd = open(compiled_sram_outpath,"w")
+    # Module Ports and Header Instantiation
     for l in sram_map_mod_lines:
         print(l,file=out_fd)
-    for l in sram_map_reg_lines + sram_map_ff_reg_lines:
-        print(l,file=out_fd)
-    for l in sram_macro_insts_lines:
-        print(l,file=out_fd)
+    # Decoder Signal Instantiation (will be synthesized out if not used)
     for l in dec_signal_insts_lines:
         print(l,file=out_fd)
-    for l in dec_inst_lines:
+    # Register Signal Instantation
+    for l in sram_map_reg_lines + sram_map_ff_reg_lines:
         print(l,file=out_fd)
-    for l in mux_signal_insts_lines + mux_signal_assign_lines + mux_isnt_lines:
+    # Macro Instantiation
+    for l in sram_macro_insts_lines:
         print(l,file=out_fd)
-    print("endmodule",file=out_fd)
+    # Only instantiate decoders + muxes if there is a depth adjustment
+    if not equal_map_macro_depth:
+        # Decoder Instantiation
+        for l in dec_inst_lines:
+            print(l,file=out_fd)
+        # Mux Instantiation
+        for l in mux_signal_insts_lines + mux_signal_assign_lines + mux_isnt_lines:
+            print(l,file=out_fd)
+    else:
+        # If we are stitching only word width we just concat the output
+        for l in rd_concat_lines:
+            print(l,file=out_fd)
 
+    print("endmodule",file=out_fd)
+    # Mux + Decoder Module Definitions
     for l in two_to_N_mux_mod_lines + cs_dec_mod_lines:
         print(l,file=out_fd)
 

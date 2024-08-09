@@ -1,0 +1,3437 @@
+{
+    "common": {
+        "just_config_init": true,
+        "override_outputs": true,
+        "manual_obj_dir": null,
+        "rad_gen_home_path": "${RAD_GEN_HOME}",
+        "hammer_home_path": "${RAD_GEN_HOME}/third_party/hammer",
+        "logger": null,
+        "log_verbosity": 1,
+        "obj_dir": "${RAD_GEN_HOME}/spice_sim",
+        "project_tree": null,
+        "project_name": "intel_foveros_ic_3d",
+        "res": {
+            "wspace_re": null,
+            "find_params_re": null,
+            "find_defines_re": null,
+            "grab_bw_soft_bkt": null,
+            "find_localparam_re": null,
+            "first_eq_re": null,
+            "find_soft_brkt_chars_re": null,
+            "find_verilog_fn_re": null,
+            "grab_verilog_fn_args": null,
+            "find_verilog_fn_hdr": null,
+            "decimal_re": null,
+            "signed_dec_re": null,
+            "sci_not_dec_re": null,
+            "inn_fp_grab_stdcell_density_re": null,
+            "int_re": null,
+            "sp_del_grab_info_re": null,
+            "sp_grab_print_vals_re": null,
+            "sp_grab_inv_pn_vals_re": null,
+            "sp_grab_tran_analysis_ub_str": "\\s*transient\\s*analysis.*?\\s*",
+            "sp_grab_tran_analysis_re": null,
+            "sp_grab_measure_re": null,
+            "sp_grab_param_re": null,
+            "sp_coffe_grab_params_re": null,
+            "coffe_key_w_spaces_rep_re": null
+        },
+        "report": {
+            "report_dir": "reports",
+            "unparse_report_dir": "unparse_reports",
+            "gds_area_fname": "gds_area.rpt",
+            "power_lookup": {
+                "W": 1.0,
+                "mW": 0.001,
+                "uW": 1e-06,
+                "nW": 1e-09,
+                "pW": 1e-12
+            }
+        }
+    },
+    "args": {
+        "cli_args": "List[GeneralCLI]",
+        "_fields": "Dict[str, Any]",
+        "_defaults": "Dict[str, Any]",
+        "buffer_dse": true,
+        "buffer_sens_study": false,
+        "debug_spice": null,
+        "input_config_path": "${RAD_GEN_HOME}/tests/data/ic_3d/inputs/3D_ic_explore.yaml",
+        "pdn_modeling": false
+    },
+    "esd_rc_params": {
+        "Rw": "0",
+        "Cw": "0f"
+    },
+    "add_wlens": [
+        0
+    ],
+    "stage_range": [
+        1,
+        2,
+        3,
+        4
+    ],
+    "fanout_range": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+    ],
+    "cost_fx_exps": {
+        "delay": 1,
+        "area": 1,
+        "power": 1
+    },
+    "tx_sizing": {
+        "opt_mode": "P",
+        "opt_goal": null,
+        "pmos_sz": 2,
+        "nmos_sz": 1,
+        "p_opt_params": null,
+        "n_opt_params": null,
+        "iters": null
+    },
+    "spice_info": {
+        "top_dir": "${RAD_GEN_HOME}",
+        "sp_dir": "${RAD_GEN_HOME}/spice_sim",
+        "sp_sim_title": "ubump_ic_driver",
+        "sp_sim_file": "${RAD_GEN_HOME}/spice_sim/ubump_ic_driver/ubump_ic_driver.sp",
+        "sp_sim_outfile": "${RAD_GEN_HOME}/spice_sim/ubump_ic_driver/ubump_ic_driver.lis",
+        "subckt_lib_dir": "${RAD_GEN_HOME}/spice_sim/subckts",
+        "basic_subckts_file": "${RAD_GEN_HOME}/spice_sim/subckts/basic_subcircuits.l",
+        "subckts_file": "${RAD_GEN_HOME}/spice_sim/subckts/subcircuits.l",
+        "includes_dir": "${RAD_GEN_HOME}/spice_sim/includes",
+        "include_sp_file": "${RAD_GEN_HOME}/spice_sim/includes/includes.l",
+        "process_data_file": "${RAD_GEN_HOME}/spice_sim/includes/process_data.l",
+        "sweep_data_file": "${RAD_GEN_HOME}/spice_sim/includes/sweep_data.l",
+        "model_dir": "${RAD_GEN_HOME}/spice_sim/models",
+        "model_file": "${RAD_GEN_HOME}/spice_sim/models/7nm_TT.l",
+        "process_package_dse": {
+            "title": "process_package_dse",
+            "top_sp_dir": "${RAD_GEN_HOME}/spice_sim",
+            "sp_dir": "${RAD_GEN_HOME}/spice_sim/process_package_dse",
+            "sp_file": "${RAD_GEN_HOME}/spice_sim/process_package_dse/process_package_dse.sp",
+            "sp_outfile": "${RAD_GEN_HOME}/spice_sim/process_package_dse/process_package_dse.lis"
+        }
+    },
+    "process_data": {
+        "global_nodes": {
+            "gnd": "gnd",
+            "vdd": "vdd"
+        },
+        "voltage_info": {
+            "supply_v": "0.7"
+        },
+        "geometry_info": null,
+        "driver_info": {
+            "dvr_ic_in_res": "1m",
+            "dvr_ic_in_cap": "0.001f"
+        },
+        "tech_info": null
+    },
+    "driver_model_info": {
+        "global_in_node": "n_in",
+        "global_out_node": "n_out",
+        "v_supply_param": "supply_v",
+        "gnd_node": "gnd",
+        "global_vdd_node": "vdd",
+        "dut_in_node": "n_dut_in",
+        "dut_vdd_node": "vdd_dut",
+        "dut_out_node": "n_dut_out"
+    },
+    "pn_opt_model": {
+        "wn_param": "inv_Wn",
+        "wp_param": "inv_Wp"
+    },
+    "res": {
+        "wspace_re": null,
+        "find_params_re": null,
+        "find_defines_re": null,
+        "grab_bw_soft_bkt": null,
+        "find_localparam_re": null,
+        "first_eq_re": null,
+        "find_soft_brkt_chars_re": null,
+        "find_verilog_fn_re": null,
+        "grab_verilog_fn_args": null,
+        "find_verilog_fn_hdr": null,
+        "decimal_re": null,
+        "signed_dec_re": null,
+        "sci_not_dec_re": null,
+        "inn_fp_grab_stdcell_density_re": null,
+        "int_re": null,
+        "sp_del_grab_info_re": null,
+        "sp_grab_print_vals_re": null,
+        "sp_grab_inv_pn_vals_re": null,
+        "sp_grab_tran_analysis_ub_str": "\\s*transient\\s*analysis.*?\\s*",
+        "sp_grab_tran_analysis_re": null,
+        "sp_grab_measure_re": null,
+        "sp_grab_param_re": null,
+        "sp_coffe_grab_params_re": null,
+        "coffe_key_w_spaces_rep_re": null
+    },
+    "sp_sim_settings": {
+        "unit_lookups": {
+            "time": {
+                "n": 1000.0,
+                "p": 1,
+                "f": 0.001
+            },
+            "voltage": {
+                "m": 1,
+                "u": 0.001,
+                "n": 1e-06
+            }
+        },
+        "unit_lookup_factors": {
+            "time": "p",
+            "voltage": "m"
+        },
+        "abs_unit_lookups": {
+            "g": 1000000000.0,
+            "x": 1000000.0,
+            "k": 1000.0,
+            " ": 1,
+            "m": 0.001,
+            "u": 1e-06,
+            "n": 1e-09,
+            "p": 1e-12,
+            "f": 1e-15,
+            "a": 1e-18
+        },
+        "sp_options": {
+            "BRIEF": 1,
+            "POST": 1,
+            "INGOLD": 1,
+            "NODE": 1,
+            "LIST": 1
+        },
+        "gnd_node": "gnd",
+        "vdd_node": "vdd",
+        "vdd_param": "supply_v"
+    },
+    "design_info": {
+        "process_info": {
+            "name": "ASAP7",
+            "mlayers": 12,
+            "contact_poly_pitch": 54,
+            "geometry_info": {
+                "min_tx_contact_width": 7,
+                "tx_diffusion_length": 25,
+                "gate_length": 20,
+                "min_width_tx_area": 13122,
+                "tx_dims": [
+                    81,
+                    162
+                ]
+            },
+            "mlayer_lists": {
+                "pitch": [
+                    36,
+                    36,
+                    36,
+                    48,
+                    48,
+                    64,
+                    64,
+                    80,
+                    80,
+                    648,
+                    648,
+                    648
+                ],
+                "wire_res_per_um": [
+                    131.2,
+                    131.2,
+                    131.2,
+                    58.49,
+                    58.49,
+                    27.08,
+                    27.08,
+                    15.27,
+                    15.27,
+                    0.14,
+                    0.14,
+                    0.14
+                ],
+                "wire_cap_per_um": [
+                    0.23,
+                    0.23,
+                    0.23,
+                    0.23,
+                    0.23,
+                    0.23,
+                    0.23,
+                    0.23,
+                    0.23,
+                    0.23,
+                    0.23,
+                    0.23
+                ],
+                "wcu": [
+                    16.8,
+                    16.8,
+                    16.8,
+                    23.4,
+                    23.4,
+                    32.2,
+                    32.2,
+                    41,
+                    41,
+                    353.4,
+                    353.4,
+                    353.4
+                ],
+                "hcu": [
+                    38.1,
+                    38.1,
+                    38.1,
+                    51.3,
+                    51.3,
+                    68.9,
+                    68.9,
+                    86.5,
+                    86.5,
+                    711.3,
+                    711.3,
+                    711.3
+                ],
+                "dy": [
+                    18.3,
+                    18.3,
+                    18.3,
+                    24.9,
+                    24.9,
+                    33.7,
+                    33.7,
+                    42.5,
+                    42.5,
+                    354.9,
+                    354.9,
+                    354.9
+                ],
+                "t_barrier": [
+                    1.5,
+                    1.5,
+                    1.5,
+                    1.5,
+                    1.5,
+                    1.5,
+                    1.5,
+                    1.5,
+                    1.5,
+                    1.5,
+                    1.5,
+                    1.5
+                ]
+            },
+            "via_lists": {
+                "via_res": [
+                    13.08,
+                    13.08,
+                    13.08,
+                    9.17,
+                    7.31,
+                    5.17,
+                    4.19,
+                    3.22,
+                    2.77,
+                    0.29,
+                    0.12,
+                    0.12
+                ],
+                "via_cap": [
+                    0.11,
+                    0.11,
+                    0.11,
+                    0.11,
+                    0.11,
+                    0.12,
+                    0.12,
+                    0.12,
+                    0.12,
+                    0.12,
+                    0.12,
+                    0.12
+                ],
+                "via_pitch": [
+                    39.6,
+                    39.6,
+                    39.6,
+                    39.6,
+                    52.8,
+                    52.8,
+                    70.4,
+                    70.4,
+                    88,
+                    712.4,
+                    712.4,
+                    712.4
+                ]
+            },
+            "via_stacks": [
+                {
+                    "mlayer_range": [
+                        0,
+                        2
+                    ],
+                    "res": 33.95,
+                    "height": 198
+                },
+                {
+                    "mlayer_range": [
+                        3,
+                        4
+                    ],
+                    "res": 14.56,
+                    "height": 158.4
+                },
+                {
+                    "mlayer_range": [
+                        5,
+                        6
+                    ],
+                    "res": 9.59,
+                    "height": 211
+                },
+                {
+                    "mlayer_range": [
+                        7,
+                        8
+                    ],
+                    "res": 0.84,
+                    "height": 264
+                },
+                {
+                    "mlayer_range": [
+                        9,
+                        11
+                    ],
+                    "res": 0.68,
+                    "height": 2851.2
+                }
+            ]
+        },
+        "subckt_libs": {
+            "atomic_subckts": null,
+            "basic_subckts": null,
+            "subckts": null
+        },
+        "srams": [
+            {
+                "width": 16.0,
+                "height": 51.84,
+                "area": 829.44
+            }
+        ],
+        "logic_block": {
+            "name": "logic_block",
+            "area": 600.0,
+            "width": 30.0,
+            "height": 20.0
+        },
+        "shape_nstages": null,
+        "dut_buffer_nstages": null,
+        "sink_die_nstages": null,
+        "total_nstages": null,
+        "stage_ratio": null,
+        "bot_die_nstages": 1,
+        "nocs": null,
+        "max_macro_dist": 33.92,
+        "add_wlen": 0,
+        "package_info": null,
+        "buffer_routing_mlayer_idx": 11
+    },
+    "process_infos": [
+        {
+            "name": "ASAP7",
+            "num_mlayers": 12,
+            "mlayers": [
+                {
+                    "idx": 0,
+                    "wire_res_per_um": 131.2,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 13.08,
+                    "via_cap": 0.11,
+                    "via_pitch": 39.6,
+                    "pitch": 36,
+                    "t_barrier": 1.5,
+                    "height": 38.1,
+                    "width": 16.8,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_0_wire_res_per_um",
+                            "suffix": "",
+                            "value": 131.2,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_0_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_0_via_res",
+                            "suffix": "",
+                            "value": 13.08,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_0_via_cap",
+                            "suffix": "f",
+                            "value": 0.11,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 1,
+                    "wire_res_per_um": 131.2,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 13.08,
+                    "via_cap": 0.11,
+                    "via_pitch": 39.6,
+                    "pitch": 36,
+                    "t_barrier": 1.5,
+                    "height": 38.1,
+                    "width": 16.8,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_1_wire_res_per_um",
+                            "suffix": "",
+                            "value": 131.2,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_1_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_1_via_res",
+                            "suffix": "",
+                            "value": 13.08,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_1_via_cap",
+                            "suffix": "f",
+                            "value": 0.11,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 2,
+                    "wire_res_per_um": 131.2,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 13.08,
+                    "via_cap": 0.11,
+                    "via_pitch": 39.6,
+                    "pitch": 36,
+                    "t_barrier": 1.5,
+                    "height": 38.1,
+                    "width": 16.8,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_2_wire_res_per_um",
+                            "suffix": "",
+                            "value": 131.2,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_2_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_2_via_res",
+                            "suffix": "",
+                            "value": 13.08,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_2_via_cap",
+                            "suffix": "f",
+                            "value": 0.11,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 3,
+                    "wire_res_per_um": 58.49,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 9.17,
+                    "via_cap": 0.11,
+                    "via_pitch": 39.6,
+                    "pitch": 48,
+                    "t_barrier": 1.5,
+                    "height": 51.3,
+                    "width": 23.4,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_3_wire_res_per_um",
+                            "suffix": "",
+                            "value": 58.49,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_3_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_3_via_res",
+                            "suffix": "",
+                            "value": 9.17,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_3_via_cap",
+                            "suffix": "f",
+                            "value": 0.11,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 4,
+                    "wire_res_per_um": 58.49,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 7.31,
+                    "via_cap": 0.11,
+                    "via_pitch": 52.8,
+                    "pitch": 48,
+                    "t_barrier": 1.5,
+                    "height": 51.3,
+                    "width": 23.4,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_4_wire_res_per_um",
+                            "suffix": "",
+                            "value": 58.49,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_4_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_4_via_res",
+                            "suffix": "",
+                            "value": 7.31,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_4_via_cap",
+                            "suffix": "f",
+                            "value": 0.11,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 5,
+                    "wire_res_per_um": 27.08,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 5.17,
+                    "via_cap": 0.12,
+                    "via_pitch": 52.8,
+                    "pitch": 64,
+                    "t_barrier": 1.5,
+                    "height": 68.9,
+                    "width": 32.2,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_5_wire_res_per_um",
+                            "suffix": "",
+                            "value": 27.08,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_5_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_5_via_res",
+                            "suffix": "",
+                            "value": 5.17,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_5_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 6,
+                    "wire_res_per_um": 27.08,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 4.19,
+                    "via_cap": 0.12,
+                    "via_pitch": 70.4,
+                    "pitch": 64,
+                    "t_barrier": 1.5,
+                    "height": 68.9,
+                    "width": 32.2,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_6_wire_res_per_um",
+                            "suffix": "",
+                            "value": 27.08,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_6_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_6_via_res",
+                            "suffix": "",
+                            "value": 4.19,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_6_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 7,
+                    "wire_res_per_um": 15.27,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 3.22,
+                    "via_cap": 0.12,
+                    "via_pitch": 70.4,
+                    "pitch": 80,
+                    "t_barrier": 1.5,
+                    "height": 86.5,
+                    "width": 41,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_7_wire_res_per_um",
+                            "suffix": "",
+                            "value": 15.27,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_7_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_7_via_res",
+                            "suffix": "",
+                            "value": 3.22,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_7_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 8,
+                    "wire_res_per_um": 15.27,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 2.77,
+                    "via_cap": 0.12,
+                    "via_pitch": 88,
+                    "pitch": 80,
+                    "t_barrier": 1.5,
+                    "height": 86.5,
+                    "width": 41,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_8_wire_res_per_um",
+                            "suffix": "",
+                            "value": 15.27,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_8_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_8_via_res",
+                            "suffix": "",
+                            "value": 2.77,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_8_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 9,
+                    "wire_res_per_um": 0.14,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 0.29,
+                    "via_cap": 0.12,
+                    "via_pitch": 712.4,
+                    "pitch": 648,
+                    "t_barrier": 1.5,
+                    "height": 711.3,
+                    "width": 353.4,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_9_wire_res_per_um",
+                            "suffix": "",
+                            "value": 0.14,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_9_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_9_via_res",
+                            "suffix": "",
+                            "value": 0.29,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_9_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 10,
+                    "wire_res_per_um": 0.14,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 0.12,
+                    "via_cap": 0.12,
+                    "via_pitch": 712.4,
+                    "pitch": 648,
+                    "t_barrier": 1.5,
+                    "height": 711.3,
+                    "width": 353.4,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_10_wire_res_per_um",
+                            "suffix": "",
+                            "value": 0.14,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_10_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_10_via_res",
+                            "suffix": "",
+                            "value": 0.12,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_10_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 11,
+                    "wire_res_per_um": 0.14,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 0.12,
+                    "via_cap": 0.12,
+                    "via_pitch": 712.4,
+                    "pitch": 648,
+                    "t_barrier": 1.5,
+                    "height": 711.3,
+                    "width": 353.4,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_11_wire_res_per_um",
+                            "suffix": "",
+                            "value": 0.14,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_11_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_11_via_res",
+                            "suffix": "",
+                            "value": 0.12,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_11_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                }
+            ],
+            "contact_poly_pitch": 54,
+            "via_stack_infos": [
+                {
+                    "mlayer_range": [
+                        0,
+                        2
+                    ],
+                    "res": 33.95,
+                    "height": 198,
+                    "avg_mlayer_cap_per_um": 0.115,
+                    "cap": 0.022770000000000002,
+                    "sp_params": {
+                        "res": {
+                            "name": "via_stack_res_m0_to_2_to",
+                            "suffix": "",
+                            "value": 33.95,
+                            "opt_settings": null
+                        },
+                        "cap": {
+                            "name": "via_stack_cap_m0_to_2_to",
+                            "suffix": "f",
+                            "value": 0.022770000000000002,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "mlayer_range": [
+                        3,
+                        4
+                    ],
+                    "res": 14.56,
+                    "height": 158.4,
+                    "avg_mlayer_cap_per_um": 0.115,
+                    "cap": 0.018216000000000003,
+                    "sp_params": {
+                        "res": {
+                            "name": "via_stack_res_m3_to_4_to",
+                            "suffix": "",
+                            "value": 14.56,
+                            "opt_settings": null
+                        },
+                        "cap": {
+                            "name": "via_stack_cap_m3_to_4_to",
+                            "suffix": "f",
+                            "value": 0.018216000000000003,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "mlayer_range": [
+                        5,
+                        6
+                    ],
+                    "res": 9.59,
+                    "height": 211,
+                    "avg_mlayer_cap_per_um": 0.115,
+                    "cap": 0.024265000000000002,
+                    "sp_params": {
+                        "res": {
+                            "name": "via_stack_res_m5_to_6_to",
+                            "suffix": "",
+                            "value": 9.59,
+                            "opt_settings": null
+                        },
+                        "cap": {
+                            "name": "via_stack_cap_m5_to_6_to",
+                            "suffix": "f",
+                            "value": 0.024265000000000002,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "mlayer_range": [
+                        7,
+                        8
+                    ],
+                    "res": 0.84,
+                    "height": 264,
+                    "avg_mlayer_cap_per_um": 0.115,
+                    "cap": 0.03036,
+                    "sp_params": {
+                        "res": {
+                            "name": "via_stack_res_m7_to_8_to",
+                            "suffix": "",
+                            "value": 0.84,
+                            "opt_settings": null
+                        },
+                        "cap": {
+                            "name": "via_stack_cap_m7_to_8_to",
+                            "suffix": "f",
+                            "value": 0.03036,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "mlayer_range": [
+                        9,
+                        11
+                    ],
+                    "res": 0.68,
+                    "height": 2851.2,
+                    "avg_mlayer_cap_per_um": 0.115,
+                    "cap": 0.327888,
+                    "sp_params": {
+                        "res": {
+                            "name": "via_stack_res_m9_to_11_to",
+                            "suffix": "",
+                            "value": 0.68,
+                            "opt_settings": null
+                        },
+                        "cap": {
+                            "name": "via_stack_cap_m9_to_11_to",
+                            "suffix": "f",
+                            "value": 0.327888,
+                            "opt_settings": null
+                        }
+                    }
+                }
+            ],
+            "tx_geom_info": {
+                "min_tx_contact_width": 7.0,
+                "tx_diffusion_length": 25.0,
+                "gate_length": 20.0,
+                "min_width_tx_area": 13122.0,
+                "sp_params": {
+                    "min_tx_contact_width": {
+                        "name": "min_tx_contact_width",
+                        "suffix": "n",
+                        "value": 7.0,
+                        "opt_settings": null
+                    },
+                    "tx_diffusion_length": {
+                        "name": "tx_diffusion_length",
+                        "suffix": "n",
+                        "value": 25.0,
+                        "opt_settings": null
+                    },
+                    "gate_length": {
+                        "name": "gate_length",
+                        "suffix": "n",
+                        "value": 20.0,
+                        "opt_settings": null
+                    },
+                    "min_width_tx_area": {
+                        "name": "min_width_tx_area",
+                        "suffix": "n",
+                        "value": 13122.0,
+                        "opt_settings": null
+                    }
+                }
+            }
+        }
+    ],
+    "ubump_infos": [
+        {
+            "height": 22.5,
+            "diameter": 27.5,
+            "pitch": 55,
+            "res": 8.26,
+            "cap": 164.6,
+            "area": 756.25,
+            "bump_per_sq_um": null,
+            "tag": "ubump",
+            "sp_params": {
+                "res": {
+                    "name": "ubump_res",
+                    "suffix": "",
+                    "value": 8.26,
+                    "opt_settings": null
+                },
+                "cap": {
+                    "name": "ubump_cap",
+                    "suffix": "f",
+                    "value": 164.6,
+                    "opt_settings": null
+                }
+            }
+        },
+        {
+            "height": 20,
+            "diameter": 20.0,
+            "pitch": 40,
+            "res": 15.63,
+            "cap": 87.04,
+            "area": 400.0,
+            "bump_per_sq_um": null,
+            "tag": "ubump",
+            "sp_params": {
+                "res": {
+                    "name": "ubump_res",
+                    "suffix": "",
+                    "value": 15.63,
+                    "opt_settings": null
+                },
+                "cap": {
+                    "name": "ubump_cap",
+                    "suffix": "f",
+                    "value": 87.04,
+                    "opt_settings": null
+                }
+            }
+        },
+        {
+            "height": 18,
+            "diameter": 18.0,
+            "pitch": 36,
+            "res": 19.29,
+            "cap": 70.5,
+            "area": 324.0,
+            "bump_per_sq_um": null,
+            "tag": "ubump",
+            "sp_params": {
+                "res": {
+                    "name": "ubump_res",
+                    "suffix": "",
+                    "value": 19.29,
+                    "opt_settings": null
+                },
+                "cap": {
+                    "name": "ubump_cap",
+                    "suffix": "f",
+                    "value": 70.5,
+                    "opt_settings": null
+                }
+            }
+        },
+        {
+            "height": 12.5,
+            "diameter": 12.5,
+            "pitch": 25,
+            "res": 40,
+            "cap": 34,
+            "area": 156.25,
+            "bump_per_sq_um": null,
+            "tag": "ubump",
+            "sp_params": {
+                "res": {
+                    "name": "ubump_res",
+                    "suffix": "",
+                    "value": 40,
+                    "opt_settings": null
+                },
+                "cap": {
+                    "name": "ubump_cap",
+                    "suffix": "f",
+                    "value": 34,
+                    "opt_settings": null
+                }
+            }
+        },
+        {
+            "height": 5,
+            "diameter": 5.0,
+            "pitch": 10,
+            "res": 99,
+            "cap": 3,
+            "area": 25.0,
+            "bump_per_sq_um": null,
+            "tag": "ubump",
+            "sp_params": {
+                "res": {
+                    "name": "ubump_res",
+                    "suffix": "",
+                    "value": 99,
+                    "opt_settings": null
+                },
+                "cap": {
+                    "name": "ubump_cap",
+                    "suffix": "f",
+                    "value": 3,
+                    "opt_settings": null
+                }
+            }
+        },
+        {
+            "height": 0.17,
+            "diameter": 2.5,
+            "pitch": 5,
+            "res": 17,
+            "cap": 0.1,
+            "area": 6.25,
+            "bump_per_sq_um": null,
+            "tag": "ubump",
+            "sp_params": {
+                "res": {
+                    "name": "ubump_res",
+                    "suffix": "",
+                    "value": 17,
+                    "opt_settings": null
+                },
+                "cap": {
+                    "name": "ubump_cap",
+                    "suffix": "f",
+                    "value": 0.1,
+                    "opt_settings": null
+                }
+            }
+        },
+        {
+            "height": 0.17,
+            "diameter": 0.5,
+            "pitch": 1,
+            "res": 97,
+            "cap": 0.07,
+            "area": 0.25,
+            "bump_per_sq_um": null,
+            "tag": "ubump",
+            "sp_params": {
+                "res": {
+                    "name": "ubump_res",
+                    "suffix": "",
+                    "value": 97,
+                    "opt_settings": null
+                },
+                "cap": {
+                    "name": "ubump_cap",
+                    "suffix": "f",
+                    "value": 0.07,
+                    "opt_settings": null
+                }
+            }
+        }
+    ],
+    "pdn_sim_settings": {
+        "plot_settings": {
+            "tsv_grid": false,
+            "c4_grid": false,
+            "power_region": false,
+            "pdn_sens_study": false
+        }
+    },
+    "design_pdn": {
+        "floorplan": null,
+        "power_budget": 0.703125,
+        "process_info": {
+            "name": "ASAP7",
+            "num_mlayers": 12,
+            "mlayers": [
+                {
+                    "idx": 0,
+                    "wire_res_per_um": 131.2,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 13.08,
+                    "via_cap": 0.11,
+                    "via_pitch": 39.6,
+                    "pitch": 36,
+                    "t_barrier": 1.5,
+                    "height": 38.1,
+                    "width": 16.8,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_0_wire_res_per_um",
+                            "suffix": "",
+                            "value": 131.2,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_0_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_0_via_res",
+                            "suffix": "",
+                            "value": 13.08,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_0_via_cap",
+                            "suffix": "f",
+                            "value": 0.11,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 1,
+                    "wire_res_per_um": 131.2,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 13.08,
+                    "via_cap": 0.11,
+                    "via_pitch": 39.6,
+                    "pitch": 36,
+                    "t_barrier": 1.5,
+                    "height": 38.1,
+                    "width": 16.8,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_1_wire_res_per_um",
+                            "suffix": "",
+                            "value": 131.2,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_1_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_1_via_res",
+                            "suffix": "",
+                            "value": 13.08,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_1_via_cap",
+                            "suffix": "f",
+                            "value": 0.11,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 2,
+                    "wire_res_per_um": 131.2,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 13.08,
+                    "via_cap": 0.11,
+                    "via_pitch": 39.6,
+                    "pitch": 36,
+                    "t_barrier": 1.5,
+                    "height": 38.1,
+                    "width": 16.8,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_2_wire_res_per_um",
+                            "suffix": "",
+                            "value": 131.2,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_2_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_2_via_res",
+                            "suffix": "",
+                            "value": 13.08,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_2_via_cap",
+                            "suffix": "f",
+                            "value": 0.11,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 3,
+                    "wire_res_per_um": 58.49,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 9.17,
+                    "via_cap": 0.11,
+                    "via_pitch": 39.6,
+                    "pitch": 48,
+                    "t_barrier": 1.5,
+                    "height": 51.3,
+                    "width": 23.4,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_3_wire_res_per_um",
+                            "suffix": "",
+                            "value": 58.49,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_3_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_3_via_res",
+                            "suffix": "",
+                            "value": 9.17,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_3_via_cap",
+                            "suffix": "f",
+                            "value": 0.11,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 4,
+                    "wire_res_per_um": 58.49,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 7.31,
+                    "via_cap": 0.11,
+                    "via_pitch": 52.8,
+                    "pitch": 48,
+                    "t_barrier": 1.5,
+                    "height": 51.3,
+                    "width": 23.4,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_4_wire_res_per_um",
+                            "suffix": "",
+                            "value": 58.49,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_4_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_4_via_res",
+                            "suffix": "",
+                            "value": 7.31,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_4_via_cap",
+                            "suffix": "f",
+                            "value": 0.11,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 5,
+                    "wire_res_per_um": 27.08,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 5.17,
+                    "via_cap": 0.12,
+                    "via_pitch": 52.8,
+                    "pitch": 64,
+                    "t_barrier": 1.5,
+                    "height": 68.9,
+                    "width": 32.2,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_5_wire_res_per_um",
+                            "suffix": "",
+                            "value": 27.08,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_5_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_5_via_res",
+                            "suffix": "",
+                            "value": 5.17,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_5_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 6,
+                    "wire_res_per_um": 27.08,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 4.19,
+                    "via_cap": 0.12,
+                    "via_pitch": 70.4,
+                    "pitch": 64,
+                    "t_barrier": 1.5,
+                    "height": 68.9,
+                    "width": 32.2,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_6_wire_res_per_um",
+                            "suffix": "",
+                            "value": 27.08,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_6_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_6_via_res",
+                            "suffix": "",
+                            "value": 4.19,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_6_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 7,
+                    "wire_res_per_um": 15.27,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 3.22,
+                    "via_cap": 0.12,
+                    "via_pitch": 70.4,
+                    "pitch": 80,
+                    "t_barrier": 1.5,
+                    "height": 86.5,
+                    "width": 41,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_7_wire_res_per_um",
+                            "suffix": "",
+                            "value": 15.27,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_7_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_7_via_res",
+                            "suffix": "",
+                            "value": 3.22,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_7_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 8,
+                    "wire_res_per_um": 15.27,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 2.77,
+                    "via_cap": 0.12,
+                    "via_pitch": 88,
+                    "pitch": 80,
+                    "t_barrier": 1.5,
+                    "height": 86.5,
+                    "width": 41,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_8_wire_res_per_um",
+                            "suffix": "",
+                            "value": 15.27,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_8_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_8_via_res",
+                            "suffix": "",
+                            "value": 2.77,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_8_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 9,
+                    "wire_res_per_um": 0.14,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 0.29,
+                    "via_cap": 0.12,
+                    "via_pitch": 712.4,
+                    "pitch": 648,
+                    "t_barrier": 1.5,
+                    "height": 711.3,
+                    "width": 353.4,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_9_wire_res_per_um",
+                            "suffix": "",
+                            "value": 0.14,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_9_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_9_via_res",
+                            "suffix": "",
+                            "value": 0.29,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_9_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 10,
+                    "wire_res_per_um": 0.14,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 0.12,
+                    "via_cap": 0.12,
+                    "via_pitch": 712.4,
+                    "pitch": 648,
+                    "t_barrier": 1.5,
+                    "height": 711.3,
+                    "width": 353.4,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_10_wire_res_per_um",
+                            "suffix": "",
+                            "value": 0.14,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_10_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_10_via_res",
+                            "suffix": "",
+                            "value": 0.12,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_10_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "idx": 11,
+                    "wire_res_per_um": 0.14,
+                    "wire_cap_per_um": 0.23,
+                    "via_res": 0.12,
+                    "via_cap": 0.12,
+                    "via_pitch": 712.4,
+                    "pitch": 648,
+                    "t_barrier": 1.5,
+                    "height": 711.3,
+                    "width": 353.4,
+                    "sp_params": {
+                        "wire_res_per_um": {
+                            "name": "mlayer_11_wire_res_per_um",
+                            "suffix": "",
+                            "value": 0.14,
+                            "opt_settings": null
+                        },
+                        "wire_cap_per_um": {
+                            "name": "mlayer_11_wire_cap_per_um",
+                            "suffix": "f",
+                            "value": 0.23,
+                            "opt_settings": null
+                        },
+                        "via_res": {
+                            "name": "mlayer_11_via_res",
+                            "suffix": "",
+                            "value": 0.12,
+                            "opt_settings": null
+                        },
+                        "via_cap": {
+                            "name": "mlayer_11_via_cap",
+                            "suffix": "f",
+                            "value": 0.12,
+                            "opt_settings": null
+                        }
+                    }
+                }
+            ],
+            "contact_poly_pitch": 54,
+            "via_stack_infos": [
+                {
+                    "mlayer_range": [
+                        0,
+                        2
+                    ],
+                    "res": 33.95,
+                    "height": 198,
+                    "avg_mlayer_cap_per_um": 0.115,
+                    "cap": 0.022770000000000002,
+                    "sp_params": {
+                        "res": {
+                            "name": "via_stack_res_m0_to_2_to",
+                            "suffix": "",
+                            "value": 33.95,
+                            "opt_settings": null
+                        },
+                        "cap": {
+                            "name": "via_stack_cap_m0_to_2_to",
+                            "suffix": "f",
+                            "value": 0.022770000000000002,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "mlayer_range": [
+                        3,
+                        4
+                    ],
+                    "res": 14.56,
+                    "height": 158.4,
+                    "avg_mlayer_cap_per_um": 0.115,
+                    "cap": 0.018216000000000003,
+                    "sp_params": {
+                        "res": {
+                            "name": "via_stack_res_m3_to_4_to",
+                            "suffix": "",
+                            "value": 14.56,
+                            "opt_settings": null
+                        },
+                        "cap": {
+                            "name": "via_stack_cap_m3_to_4_to",
+                            "suffix": "f",
+                            "value": 0.018216000000000003,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "mlayer_range": [
+                        5,
+                        6
+                    ],
+                    "res": 9.59,
+                    "height": 211,
+                    "avg_mlayer_cap_per_um": 0.115,
+                    "cap": 0.024265000000000002,
+                    "sp_params": {
+                        "res": {
+                            "name": "via_stack_res_m5_to_6_to",
+                            "suffix": "",
+                            "value": 9.59,
+                            "opt_settings": null
+                        },
+                        "cap": {
+                            "name": "via_stack_cap_m5_to_6_to",
+                            "suffix": "f",
+                            "value": 0.024265000000000002,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "mlayer_range": [
+                        7,
+                        8
+                    ],
+                    "res": 0.84,
+                    "height": 264,
+                    "avg_mlayer_cap_per_um": 0.115,
+                    "cap": 0.03036,
+                    "sp_params": {
+                        "res": {
+                            "name": "via_stack_res_m7_to_8_to",
+                            "suffix": "",
+                            "value": 0.84,
+                            "opt_settings": null
+                        },
+                        "cap": {
+                            "name": "via_stack_cap_m7_to_8_to",
+                            "suffix": "f",
+                            "value": 0.03036,
+                            "opt_settings": null
+                        }
+                    }
+                },
+                {
+                    "mlayer_range": [
+                        9,
+                        11
+                    ],
+                    "res": 0.68,
+                    "height": 2851.2,
+                    "avg_mlayer_cap_per_um": 0.115,
+                    "cap": 0.327888,
+                    "sp_params": {
+                        "res": {
+                            "name": "via_stack_res_m9_to_11_to",
+                            "suffix": "",
+                            "value": 0.68,
+                            "opt_settings": null
+                        },
+                        "cap": {
+                            "name": "via_stack_cap_m9_to_11_to",
+                            "suffix": "f",
+                            "value": 0.327888,
+                            "opt_settings": null
+                        }
+                    }
+                }
+            ],
+            "tx_geom_info": {
+                "min_tx_contact_width": 7.0,
+                "tx_diffusion_length": 25.0,
+                "gate_length": 20.0,
+                "min_width_tx_area": 13122.0,
+                "sp_params": {
+                    "min_tx_contact_width": {
+                        "name": "min_tx_contact_width",
+                        "suffix": "n",
+                        "value": 7.0,
+                        "opt_settings": null
+                    },
+                    "tx_diffusion_length": {
+                        "name": "tx_diffusion_length",
+                        "suffix": "n",
+                        "value": 25.0,
+                        "opt_settings": null
+                    },
+                    "gate_length": {
+                        "name": "gate_length",
+                        "suffix": "n",
+                        "value": 20.0,
+                        "opt_settings": null
+                    },
+                    "min_width_tx_area": {
+                        "name": "min_width_tx_area",
+                        "suffix": "n",
+                        "value": 13122.0,
+                        "opt_settings": null
+                    }
+                }
+            }
+        },
+        "supply_voltage": 0.7,
+        "ir_drop_budget": 5.0,
+        "fpga_info": {
+            "sector_info": {
+                "width": null,
+                "height": null,
+                "bram_cols": null,
+                "dsp_cols": null,
+                "abs_area": null,
+                "sector_grid": null
+            },
+            "sector_dims": [
+                8,
+                8
+            ],
+            "lbs": {
+                "total_num": 82944,
+                "abs_area": 660.0,
+                "rel_area": 1,
+                "abs_width": 22.0,
+                "abs_height": 30.0
+            },
+            "dsps": {
+                "total_num": 4608,
+                "abs_area": 1458.7,
+                "rel_area": 3,
+                "abs_width": null,
+                "abs_height": null
+            },
+            "brams": {
+                "total_num": 6912,
+                "abs_area": 2640.0,
+                "rel_area": 4,
+                "abs_width": null,
+                "abs_height": null
+            },
+            "grid_height": null,
+            "grid_width": null
+        },
+        "tsv_info": {
+            "single_tsv": {
+                "height": 70,
+                "diameter": 7,
+                "pitch": 10,
+                "resistivity": 0.0172,
+                "keepout_zone": 1.5,
+                "area": 49,
+                "resistance": 0.047
+            },
+            "placement_setting": "dense",
+            "koz_grid": null,
+            "tsv_grid": null,
+            "tsv_rect_placements": null,
+            "koz_rect_placements": null,
+            "dims": null,
+            "area_bounds": [
+                40,
+                60
+            ],
+            "resistance": null
+        },
+        "c4_info": {
+            "single_c4": {
+                "height": 80,
+                "diameter": 80,
+                "pitch": 100,
+                "area": 6400,
+                "resistance": 0.013
+            },
+            "placement_setting": "dense",
+            "margin": 0,
+            "grid": null,
+            "max_c4_placements": {
+                "rects": [
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 0,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 80,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 100,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 180,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 200,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 280,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 300,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 380,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 400,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 480,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 500,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 580,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 600,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 680,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 700,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 780,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 800,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 880,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 900,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 980,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 0
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 80
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 100
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 180
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 200
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 280
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 300
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 380
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 400
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 480
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 500
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 580
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 600
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 680
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 700
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 780
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 800
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 880
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 900
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 980
+                        },
+                        "bb": null,
+                        "label": null
+                    },
+                    {
+                        "p1": {
+                            "x": 1000,
+                            "y": 1000
+                        },
+                        "p2": {
+                            "x": 1080,
+                            "y": 1080
+                        },
+                        "bb": null,
+                        "label": null
+                    }
+                ],
+                "tag": "C4",
+                "area": 774400.0,
+                "bb_poly": null
+            },
+            "max_c4_dims": [
+                11,
+                11
+            ],
+            "pdn_dims": null
+        },
+        "ubump_info": {
+            "single_ubump": {
+                "height": 22.5,
+                "diameter": 22.5,
+                "pitch": 55.0,
+                "resistance": null,
+                "area": 506.25
+            },
+            "margin": 0.0,
+            "grid": null,
+            "max_dims": [
+                20,
+                20
+            ]
+        },
+        "pwr_rail_info": {
+            "mlayer_dist": [
+                0.2,
+                0.5
+            ],
+            "num_mlayers": 2
+        },
+        "pwr_region_dims": null,
+        "resistance_target": 0.20089285714285715,
+        "current_per_tx": 1.130022332728795e-08,
+        "num_txs": 88888888
+    }
+}

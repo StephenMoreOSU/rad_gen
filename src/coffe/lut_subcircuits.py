@@ -1,5 +1,5 @@
 import math
-
+from typing import List, Tuple
 # Note: We generate all LUT netlists with a 6-LUT interface regardless of LUT size.
 # This makes it easier to include the LUT circuitry in other (top-level) netlists.
 # For example, a 5-LUT has the following interface:
@@ -12,7 +12,7 @@ import math
 #		size to reduce the amount of code repetition and make differences
 #		between them more obvious
 
-def generate_ptran_lut6(spice_filename, min_tran_width, use_finfet):
+def generate_ptran_lut6(spice_filename:str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str]]:
 	""" Generates a 6LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -31,7 +31,7 @@ def generate_ptran_lut6(spice_filename, min_tran_width, use_finfet):
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=1\n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -79,8 +79,8 @@ def generate_ptran_lut6(spice_filename, min_tran_width, use_finfet):
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("ptran_lut_L1_nmos")
 	tran_names_list.append("ptran_lut_L2_nmos")
 	tran_names_list.append("ptran_lut_L3_nmos")
@@ -115,7 +115,7 @@ def generate_ptran_lut6(spice_filename, min_tran_width, use_finfet):
 	return tran_names_list, wire_names_list
 
 
-def generate_ptran_lut5(spice_filename, min_tran_width, use_finfet):
+def generate_ptran_lut5(spice_filename: str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates a 5LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -135,7 +135,7 @@ def generate_ptran_lut5(spice_filename, min_tran_width, use_finfet):
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=1\n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -179,8 +179,8 @@ def generate_ptran_lut5(spice_filename, min_tran_width, use_finfet):
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("ptran_lut_L1_nmos")
 	tran_names_list.append("ptran_lut_L2_nmos")
 	tran_names_list.append("ptran_lut_L3_nmos")
@@ -213,7 +213,7 @@ def generate_ptran_lut5(spice_filename, min_tran_width, use_finfet):
 	return tran_names_list, wire_names_list
 
 	
-def generate_ptran_lut4(spice_filename, min_tran_width, use_finfet):
+def generate_ptran_lut4(spice_filename: str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates a 4LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -233,7 +233,7 @@ def generate_ptran_lut4(spice_filename, min_tran_width, use_finfet):
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=1\n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -273,8 +273,8 @@ def generate_ptran_lut4(spice_filename, min_tran_width, use_finfet):
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("ptran_lut_L1_nmos")
 	tran_names_list.append("ptran_lut_L2_nmos")
 	tran_names_list.append("rest_lut_int_buffer_pmos")
@@ -305,7 +305,7 @@ def generate_ptran_lut4(spice_filename, min_tran_width, use_finfet):
 	return tran_names_list, wire_names_list
 	
 
-def generate_ptran_lut_driver(spice_filename, lut_input_name, lut_input_type):
+def generate_ptran_lut_driver(spice_filename: str, lut_input_name: str, lut_input_type: str) -> Tuple[List[str], List[str] ]:
 	""" Generate a pass-transistor LUT driver based on type. """
 	
 	# Open SPICE file for appending
@@ -381,7 +381,7 @@ def generate_ptran_lut_driver(spice_filename, lut_input_name, lut_input_type):
 	return tran_names_list, wire_names_list
  
 
-def generate_ptran_lut_not_driver(spice_filename, lut_input_name):
+def generate_ptran_lut_not_driver(spice_filename: str, lut_input_name: str) -> Tuple[List[str], List[str] ]:
 	""" Generate a pass-transistor LUT driver based on type. """
 
 	# Open SPICE file for appending
@@ -466,7 +466,7 @@ def generate_ptran_lut_driver_load(spice_filename, lut_input_name, K, use_fluts)
 	return wire_names_list
 
 
-def generate_tgate_lut6(spice_filename, min_tran_width, use_finfet):
+def generate_tgate_lut6(spice_filename: str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates a 6LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -486,7 +486,7 @@ def generate_tgate_lut6(spice_filename, min_tran_width, use_finfet):
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=2 \n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -534,8 +534,8 @@ def generate_tgate_lut6(spice_filename, min_tran_width, use_finfet):
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("tgate_lut_L1_nmos")
 	tran_names_list.append("tgate_lut_L1_pmos")
 	tran_names_list.append("tgate_lut_L2_nmos")
@@ -576,7 +576,7 @@ def generate_tgate_lut6(spice_filename, min_tran_width, use_finfet):
 	return tran_names_list, wire_names_list
 
 
-def generate_tgate_lut5(spice_filename, min_tran_width, use_finfet):
+def generate_tgate_lut5(spice_filename: str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates a 5LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -596,7 +596,7 @@ def generate_tgate_lut5(spice_filename, min_tran_width, use_finfet):
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=2 \n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -640,8 +640,8 @@ def generate_tgate_lut5(spice_filename, min_tran_width, use_finfet):
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("tgate_lut_L1_nmos")
 	tran_names_list.append("tgate_lut_L1_pmos")
 	tran_names_list.append("tgate_lut_L2_nmos")
@@ -679,7 +679,7 @@ def generate_tgate_lut5(spice_filename, min_tran_width, use_finfet):
 	return tran_names_list, wire_names_list
 
 	
-def generate_tgate_lut4(spice_filename, min_tran_width, use_finfet):
+def generate_tgate_lut4(spice_filename: str, min_tran_width: float, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates a 4LUT SPICE deck """
 	
 	# Open SPICE file for appending
@@ -699,7 +699,7 @@ def generate_tgate_lut4(spice_filename, min_tran_width, use_finfet):
 		spice_file.write("Xinv_lut_sram_driver_1 n_in n_1_1 n_vdd n_gnd inv Wn=1 Wp=2 \n")
 
 	spice_file.write("Xwire_lut_sram_driver n_1_1 n_1_2 wire Rw=wire_lut_sram_driver_res Cw=wire_lut_sram_driver_cap\n")
-	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_0sram_driver_2_nmos Wp=inv_lut_0sram_driver_2_pmos\n")
+	spice_file.write("Xinv_lut_sram_driver_2 n_1_2 n_2_1 n_vdd n_gnd inv Wn=inv_lut_sram_driver_2_nmos Wp=inv_lut_sram_driver_2_pmos\n")
 	spice_file.write("Xwire_lut_sram_driver_out n_2_1 n_2_2 wire Rw=wire_lut_sram_driver_out_res Cw=wire_lut_sram_driver_out_cap\n\n")
 	
 	spice_file.write("* First chain\n")
@@ -739,8 +739,8 @@ def generate_tgate_lut4(spice_filename, min_tran_width, use_finfet):
 	
 	# Create a list of all transistors used in this subcircuit
 	tran_names_list = []
-	tran_names_list.append("inv_lut_0sram_driver_2_nmos")
-	tran_names_list.append("inv_lut_0sram_driver_2_pmos")
+	tran_names_list.append("inv_lut_sram_driver_2_nmos")
+	tran_names_list.append("inv_lut_sram_driver_2_pmos")
 	tran_names_list.append("tgate_lut_L1_nmos")
 	tran_names_list.append("tgate_lut_L1_pmos")
 	tran_names_list.append("tgate_lut_L2_nmos")
@@ -776,7 +776,7 @@ def generate_tgate_lut4(spice_filename, min_tran_width, use_finfet):
 
 	
 
-def generate_tgate_lut_driver(spice_filename, lut_input_name, lut_input_type):
+def generate_tgate_lut_driver(spice_filename: str, lut_input_name: str, lut_input_type: str) -> Tuple[List[str], List[str] ]:
 	""" Generate a pass-transistor LUT driver based on type. """
 	
 	# Open SPICE file for appending
@@ -854,7 +854,7 @@ def generate_tgate_lut_driver(spice_filename, lut_input_name, lut_input_type):
  
 
 #samething doesn't change?
-def generate_tgate_lut_not_driver(spice_filename, lut_input_name):
+def generate_tgate_lut_not_driver(spice_filename: str, lut_input_name: str) -> Tuple[List[str], List[str] ]:
 	""" Generate a pass-transistor LUT driver based on type. """
 
 	# Open SPICE file for appending
@@ -886,7 +886,7 @@ def generate_tgate_lut_not_driver(spice_filename, lut_input_name):
 	return tran_names_list, wire_names_list
 
 
-def generate_tgate_lut_driver_load(spice_filename, lut_input_name, K, use_fluts):
+def generate_tgate_lut_driver_load(spice_filename: str, lut_input_name: str, K: int, use_fluts: bool) -> List[str]:
 	""" Generates LUT input load SPICE deck """
 	
 	# Calculate number of pass-transistors loading this input
@@ -936,7 +936,7 @@ def generate_tgate_lut_driver_load(spice_filename, lut_input_name, K, use_fluts)
 
 
 # not used in the code
-def generate_full_adder(spice_filename, circuit_name, use_finfet):
+def generate_full_adder(spice_filename: str, circuit_name: str, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates full adder SPICE deck """
 
 
@@ -1014,7 +1014,7 @@ def generate_full_adder(spice_filename, circuit_name, use_finfet):
 	
 
 # Simplified version of the above FA, much faster to size
-def generate_full_adder_simplified(spice_filename, circuit_name, use_finfet):
+def generate_full_adder_simplified(spice_filename: str, circuit_name: str, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates full adder SPICE deck """
 
 	
@@ -1031,7 +1031,7 @@ def generate_full_adder_simplified(spice_filename, circuit_name, use_finfet):
 	spice_file.write("******************************************************************************************\n")
 	spice_file.write("* Full adder subcircuit \n")
 	spice_file.write("******************************************************************************************\n")
-	spice_file.write(".SUBCKT FA_" + circuit_name + " n_a n_b n_cin n_cout n_sum_out n_p n_vdd n_gnd\n")
+	spice_file.write(".SUBCKT " + circuit_name + " n_a n_b n_cin n_cout n_sum_out n_p n_vdd n_gnd\n")
 	# The core of the FA consists of 3 inveters, 6 Transmission gates and 4 pass transistors.
 	# There should be a wire for all inputs and outputs, I'll assume the following for the wires:
 	# Cin and cout take half of the wire that is as long as the square root of the LUT + adder + the additional muxes
@@ -1085,7 +1085,7 @@ def generate_full_adder_simplified(spice_filename, circuit_name, use_finfet):
 	return tran_names_list, wire_names_list
 	
 
-def generate_carry_chain_perf_ripple(spice_filename, circuit_name, use_finfet):
+def generate_carry_chain_perf_ripple(spice_filename: str, circuit_name: str, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 	""" Generates carry chain inverters for sum SPICE deck """
 
 
@@ -1146,7 +1146,7 @@ def generate_skip_and_tree(spice_filename, circuit_name, use_finfet, nand1_size,
 	return tran_names_list, wire_names_list
 
 
-def generate_carry_inter(spice_filename, circuit_name, use_finfet):
+def generate_carry_inter(spice_filename: str, circuit_name: str, use_finfet: bool) -> Tuple[List[str], List[str] ]:
 
 	""" Generates the driver to load "cin" of the next cluster """
 

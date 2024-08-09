@@ -1,5 +1,4 @@
-
-
+from typing import List, Tuple, Dict
 
 import math
 
@@ -204,9 +203,12 @@ def generate_configurabledecoder3ii_lp(spice_filename, nand3circuit_name):
 	return tran_names_list, wire_names_list
 
 #This is the last stage of the configurable decoder
-def generate_configurabledecoderiii(spice_filename, circuit_name, required_size):
+def generate_configurabledecoderiii(
+    spice_filename: str,
+    circuit_name: str,
+    required_size: int
+) -> Tuple[List[str], List[str]]:
 
-   
 	# Open SPICE file for appending
 	spice_file = open(spice_filename, 'a')
 
@@ -232,17 +234,17 @@ def generate_configurabledecoderiii(spice_filename, circuit_name, required_size)
 	# Create a list of all wires used in this subcircuit
 	wire_names_list = []
 
-
-
 	return tran_names_list, wire_names_list
 
 #This is the low power version of the last stage of the configurable decoder
-def generate_configurabledecoderiii_lp(spice_filename, circuit_name, required_size):
-
+def generate_configurabledecoderiii_lp(
+	spice_filename: str,
+    circuit_name: str,
+    required_size: int
+) -> Tuple[List[str], List[str]]:
    
 	# Open SPICE file for appending
 	spice_file = open(spice_filename, 'a')
-	
 	
 	# Create thecircuit
 	spice_file.write("******************************************************************************************\n")
@@ -880,7 +882,12 @@ def generate_columndecoder_lp(spice_filename, circuit_name, decsize):
 
 
 # This is the output crossbar
-def generate_pgateoutputcrossbar(spice_filename, circuit_name, maxwidth, def_use_tgate):
+def generate_pgateoutputcrossbar(
+		spice_filename: str, 
+		circuit_name: str, 
+		maxwidth: int, 
+		use_tgate: bool
+) -> Tuple[List[str], List[str]]:
 
 	# Open SPICE file for appending
 	spice_file = open(spice_filename, 'a')
@@ -895,7 +902,7 @@ def generate_pgateoutputcrossbar(spice_filename, circuit_name, maxwidth, def_use
 	spice_file.write("X_inv_pgateoutputcrossbar_2 n_1_1 n_1_2 n_vdd n_gnd inv Wn=inv_pgateoutputcrossbar_2_nmos Wp=inv_pgateoutputcrossbar_2_pmos\n")
 
 	# TODO: figure out if TGATE is better or using a tristate buffer
-	if def_use_tgate == 1:
+	if use_tgate:
 		spice_file.write("X_tgate n_1_2 n_0_0 n_vdd n_gnd n_vdd n_gnd RAM_tgate Wn=tgate_pgateoutputcrossbar_3_nmos Wp=tgate_pgateoutputcrossbar_3_pmos\n")
 	# Replacing this TGATE with a tri-state buffer to improve the output crossbar
 	else:
@@ -931,7 +938,7 @@ def generate_pgateoutputcrossbar(spice_filename, circuit_name, maxwidth, def_use
 	spice_file.write("X_inv_pgateoutputcrossbarp_1 n_in n_2_1 n_vdd n_gnd inv Wn=inv_pgateoutputcrossbar_1_nmos Wp=inv_pgateoutputcrossbar_1_pmos\n")
 	spice_file.write("X_inv_pgateoutputcrossbarp_2 n_2_1 n_2_2 n_vdd n_gnd inv Wn=inv_pgateoutputcrossbar_2_nmos Wp=inv_pgateoutputcrossbar_2_pmos\n")
 
-	if def_use_tgate == 1:
+	if use_tgate:
 		spice_file.write("X_2tgate n_2_2 n_20_0 n_vdd n_gnd n_vdd n_gnd RAM_tgate Wn=tgate_pgateoutputcrossbar_3_nmos Wp=tgate_pgateoutputcrossbar_3_pmos\n")
 	#replacing this TGATE with a tri-state buffer to improve the output crossbar
 	else:
@@ -954,7 +961,7 @@ def generate_pgateoutputcrossbar(spice_filename, circuit_name, maxwidth, def_use
 	tran_names_list.append("inv_pgateoutputcrossbar_1_pmos")
 	tran_names_list.append("inv_pgateoutputcrossbar_2_nmos")
 	tran_names_list.append("inv_pgateoutputcrossbar_2_pmos")
-	if def_use_tgate == 1:
+	if use_tgate:
 		tran_names_list.append("tgate_pgateoutputcrossbar_3_nmos")
 		tran_names_list.append("tgate_pgateoutputcrossbar_3_pmos")
 	else:

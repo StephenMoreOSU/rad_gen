@@ -10,16 +10,19 @@ import src.coffe.vpr as coffe_vpr
 import datetime
 import math
 import src.common.data_structs as rg_ds
+import logging
 
 from collections import namedtuple
 from dataclasses import fields
 
 def run_coffe_flow(coffe_info: rg_ds.Coffe):
-    arch_folder = utils.create_output_dir(coffe_info.arch_name, coffe_info.fpga_arch_conf["fpga_arch_params"]['arch_out_folder'])
+    arch_folder = utils.create_output_dir(coffe_info.arch_name, coffe_info.common.obj_dir)
 
     is_size_transistors = not coffe_info.no_sizing
     size_hb_interfaces = coffe_info.size_hb_interfaces
 
+    # Path to output telemetry file
+    # telemetry_file_path = os.path.join(arch_folder, "telemetry.csv")
     # Print the options to both terminal and report file
     report_file_path = os.path.join(arch_folder, "report.txt") 
 
@@ -43,8 +46,12 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     total_start_time = time.time()
 
     # Create an FPGA instance
-    fpga_inst = fpga.FPGA(coffe_info, args, spice_interface)
-                        
+    fpga_inst = fpga.FPGA(
+        coffe_info = coffe_info,
+        run_options = args,
+        spice_interface = spice_interface,
+    )   # telemetry_file_path
+    
     ###############################################################
     ## GENERATE FILES
     ###############################################################
@@ -53,14 +60,14 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     os.chdir(arch_folder)  
 
     # Generate FPGA and associated SPICE files
-    fpga_inst.generate(is_size_transistors, size_hb_interfaces) 
+    fpga_inst.generate(size_hb_interfaces) 
 
     # Go back to the base directory
     os.chdir(default_dir)
 
     # Extract initial transistor sizes from file and overwrite the 
     # default initial sizes if this option was used.
-    if coffe_info.initial_sizes != "default" :
+    if coffe_info.initial_sizes != None:
         utils.use_initial_tran_size(args.initial_sizes, fpga_inst, tran_sizing, coffe_info.fpga_arch_conf["fpga_arch_params"]['use_tgate'])
 
     # Print FPGA implementation details
@@ -112,4 +119,7 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     utils.print_summary(arch_folder, fpga_inst, total_start_time)
 
     # Print vpr architecure file
-    coffe_vpr.print_vpr_file(fpga_inst, arch_folder, coffe_info.fpga_arch_conf["fpga_arch_params"]['enable_bram_module'])
+    coffe_vpr.print_vpr_file(fpga_inst, 
+        arch_folder, 
+        coffe_info.fpga_arch_conf["fpga_arch_params"]['enable_bram_module']
+    )
