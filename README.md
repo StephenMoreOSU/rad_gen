@@ -1,3 +1,5 @@
+[![Documentation Status](https://readthedocs.org/projects/rad-gen/badge/?version=latest)](https://rad-gen.readthedocs.io/en/latest/?badge=latest)
+
 # RAD GEN 
 
 
