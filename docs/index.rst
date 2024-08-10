@@ -72,7 +72,6 @@ The following paper may be used as a general citation for RAD-Gen:
 
 .. code-block:: bibtex
 
-<<<<<<< HEAD
    @inproceedings{rad-gen,
       title = {{Into the Third Dimension: Architecture Exploration Tools for 3D Reconfigurable Acceleration Devices}},
       author = {Boutros, Andrew and Mahmoudi, Fatemehsadat and Mohaghegh, Amin and More, Stephen and Betz, Vaughn},
@@ -80,14 +79,6 @@ The following paper may be used as a general citation for RAD-Gen:
       year = {2023}
    }
 
-=======
-	@inproceedings{rad-gen,
-	    title = {{Into the Third Dimension: Architecture Exploration Tools for 3D Reconfigurable Acceleration Devices}},
-	    author = {Boutros, Andrew and Mahmoudi, Fatemehsadat and Mohaghegh, Amin and More, Stephen and Betz, Vaughn},
-	    booktitle = {IEEE International Conference on Field-Programmable Technology (FPT)},
-	    year = {2023}
-	}
->>>>>>> master
 
 
 Indices and tables
@@ -109,16 +100,6 @@ Indices and tables
   :width: 1000
   :alt: RAD Flow Overview
 
-<<<<<<< HEAD
-
-.. .. automodule:: asic_dse.hammer_flow
-..    :members:
-..    :undoc-members:
-..    :show-inheritance:
-
-.. quickstart/index
-=======
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
->>>>>>> master
