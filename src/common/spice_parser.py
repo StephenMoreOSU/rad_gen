@@ -207,10 +207,10 @@ subckt_name_re: re.Pattern = get_name_re(r"\.SUBCKT")
 # 1st capture group: subckt name
 # 2nd capture group: port names
 # 3rd capture group: param name default value pairs 
-subckt_hdr_parse_re: re.Pattern = re.compile("\.SUBCKT\s+" + \
-    "(\w+)\s+" + \
-    "(\w+(?:\s+\w+)*)\s*" + \
-    "((?:\w+=(?:\d+|\w+)\s*)+)?",
+subckt_hdr_parse_re: re.Pattern = re.compile(r"\.SUBCKT\s+" + \
+    r"(\w+)\s+" + \
+    r"(\w+(?:\s+\w+)*)\s*" + \
+    r"((?:\w+=(?:\d+|\w+)\s*)+)?",
     re.IGNORECASE | re.MULTILINE
 )
 wspace_re: re.Pattern = re.compile(r"\s+")
@@ -326,7 +326,7 @@ def main(argv: List[str] = [], kwargs: Dict[str, str] = {}) -> Dict[str, rg_ds.S
                 subckts: list = []
                 for subckt_name_grps in subckt_names:
                     subckt_name: str  = subckt_name_grps if isinstance(subckt_name_grps, str) else subckt_name_grps[0]
-                    subckt_def_str: str = f"\.SUBCKT\s+{subckt_name}\s+"
+                    subckt_def_str: str = rf"\.SUBCKT\s+{subckt_name}\s+"
                     subckt_grab_re: re.Pattern = get_grab_text_re(subckt_def_str, r"\.ENDS")
                     subckts_text: list = subckt_grab_re.findall(lib_text)
                     if len(subckts_text) > 1:

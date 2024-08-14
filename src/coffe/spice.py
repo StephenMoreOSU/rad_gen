@@ -3,6 +3,7 @@
 
 import os
 import subprocess
+import re
 from typing import Dict, List
 import src.coffe.utils as utils
 
@@ -92,9 +93,8 @@ class SpiceInterface(object):
         hspice_data_file.close()
     
         return
-    
 
-    def run(self, sp_path: str, parameter_dict: Dict[str, List[str]]):    
+    def run_hspice(self, sp_path: str, parameter_dict: Dict[str, List[str]]):
         """
         This function runs HSPICE on the .sp file at 'sp_path' and returns a dictionary that 
         contains the HSPICE measurements.
@@ -202,8 +202,305 @@ class SpiceInterface(object):
         os.chdir(saved_cwd)
            
         return spice_measurements
+    
+    def measure_node_replacement(self, main_file, lib_files):
+        class circuit:
+            """
+            This class represent a subcircuit. 
+            A subcircuit in spice would look like this:
 
+            .subckt <type> <io1> .... <io#> <parameter1>=<val1> ... <parameter#>=<val#>
+            <element1> <io node/internal node>
+            ...
+            <element#>
+            .ends
 
+            self.type is the type of the subcircuit
+            self.io contains all io names
+            self.components is in the following form
+            {<element1> : [<node1>, ... , <node#>, <element1 type>], ...}
+            """
+            def __init__(self, s):
+                if(s == None):
+                    self.type = ""
+                    self.io = []
+                    self.components = {}
+                    return
+                # set type
+                self.type = re.search(r"\.subckt\s+(\w+)", s, re.I).group(1)
+                # set io
+                io = re.search(rf"\.subckt\s+{self.type}(.*)", s, re.I).group(1)
+                self.io = []
+                for word in io.split():
+                    if not '=' in word:
+                        self.io.append(word)
+                # set components
+                self.components = {}
+                lines = s.split('\n')
+                # exclude .subckt and .ends
+                lines = lines[1:-1]
+                for line in lines:
+                    line = line.split()
+                    new_line = []
+                    # parse all words besides parameter settings
+                    for word in line:
+                        word = word.lower()
+                        if not "=" in word:
+                            new_line.append(word)
+                    # create one component
+                    for i, w in enumerate(new_line):
+                        w = w.lower()
+                        if i == 0:
+                            self.components[w] = []
+                        else:
+                            self.components[new_line[0]].append(w)
+
+        # holds all subcircuits, key is subcircuit type, value is subcircuit data structure
+        circuits = {}
+        # holds all node indexing in a spice file that could be potentially wrong when converting from hspice to ngspice
+        # it is in the format ["<component1>.<component2>....<component#>.<node>", ...]
+        querries = []
+        # root file, usually ends with .sp
+        main_file = open(main_file, 'r')
+        main_file = main_file.read()
+        # This can also be "[iv]\((.*)\)" but the following works
+        querries = re.findall(r"\w\(([^\s]*?)\)", main_file, re.I)
+        main_file = main_file.split("\n")
+        # the root file has not ios or types, only components, not using the constructor for circuit
+        c = circuit(None)
+        c.type = "main"
+        for line in main_file:
+            line = line.split()
+            if len(line) == 0: 
+                continue
+            if line[0][0] == "+" or line[0][0] == "." or line[0][0] == "*":
+                continue
+            for i, w in enumerate(line):
+                w = w.lower()
+                if i == 0:
+                    c.components[w] = []
+                else:
+                    if w == "pulse":
+                        break
+                    c.components[line[0].lower()].append(w)
+        circuits["main"] = c
+        
+        # parse all subcircuits and create circuit class for them
+        for file_path in lib_files:
+            file = open(file_path, 'r')
+            file = file.read()
+            circuit_strs = re.findall(r"(\.subckt.*?\.ends)", file, re.IGNORECASE | re.DOTALL)
+            for circuit_str in circuit_strs:
+                c = circuit(circuit_str)
+                circuits[c.type.lower()] = c
+        # result is used to hold the strings to be replaced with
+        # querries[i] will be replaced by result[i]
+        result = []
+        # find replacement string for all querries 
+        for q in querries:
+            original_string = q
+            q = q.split(".")
+            current_subcircuit_type = "main"
+            # subcircuits holds all subcircuits we traced through
+            subcircuits = []
+            for i, w in enumerate(q):
+                w = w.lower()
+                cs = circuits[current_subcircuit_type]
+                subcircuits.append(cs)
+                # last index is not a subcircuit but a node
+                if i != len(q)-1:
+                    current_subcircuit_type = cs.components[w][-1]
+                else: 
+                    break
+            # the node of the deepest subcircuit (root is shallow)
+            current_io = q[-1]
+            for i, sub in enumerate(reversed(subcircuits)):
+                # if the node is an io node, then go one subcircuit level above
+                if current_io in sub.io:
+                    io_index = sub.io.index(current_io)
+                    # finding the equivelent node in one subcircuit level above
+                    current_io = subcircuits[-2-i].components[q[-2-i]][io_index]
+                # if the node is an internal node, keep all subcircuits above the current level, 
+                # and append the current node
+                else:
+                    q = q[0:-1-i]
+                    q.append(current_io)
+                    break
+            result.append((original_string, ".".join(q)))
+        return result
+
+    def parse_ngspice_measurements(self, file_path, measurements):
+        file = open(file_path, "r")
+        file_content = file.read()
+        file.close()
+        for match in re.finditer(r"^\s*(meas_\w+)\s*=\s*([+-]?(\d*\.\d+|\d+\.\d*)([eE][\+-]?\d+)?|\d+[eE][\+-]?\d)", file_content, flags=re.I|re.M):
+            if match.group(1) in measurements:
+                measurements[match.group(1)].append((match.group(2)))
+            else:
+                measurements[match.group(1)] = [(match.group(2))]
+
+    def run_ngspice(self, sp_path, parameter_dict):
+        """
+        This function runs NGSPICE on the .sp file at 'sp_path' and returns a dictionary that 
+        contains the NGSPICE measurements.
+
+        'parameter_dict' is a dictionary that contains the sizes of transistors and wire RC. 
+        It has the following format:
+        parameter_dict = {param1_name: [val1, val2, etc...],
+                          param2_name: [val1, val2, etc...],
+                          etc...}
+
+        You need to make sure that 'parameter_dict' has a key-value pair for each parameter
+        in your HSPICE netlists. Otherwise, the simulation will fail because of missing 
+        parameters. That is, only the parameters found in 'parameter_dict' will be given a
+        value. 
+        
+        This is important when we consider the fact that, the 'value' in the key value 
+        pair is a list of different parameter values that you want to run HSPICE on.
+        The lists must be of the same length for all params in 'parameter_dict' (param1_name's
+        list has the same number of elements as param2_name). Here's what is going to happen:
+        We will start by setting all the parameters to their 'val1' and we'll run NGSPICE. 
+        Then, we'll set all the params to 'val2' and we'll run NGSPICE. And so on (that's 
+        actually not exactly what happens, but you get the idea). So, you can run NGSPICE on 
+        different transistor size conbinations by adding elements to these lists. Transistor 
+        sizing combination i is ALL the vali in the parameter_dict. So, even if you never 
+        want to change param1_name, you still need a list (who's elements will all be the 
+        same in this case).
+        If you only want to run NGSPICE for one transistor sizing combination, your lists will
+        only have one element (but it still needs to be a list).
+
+        Ok, so 'parameter_dict' contains a key-value pair for each transistor where the 'value'
+        is a list of transistor sizes to use. A transistor sizing combination consists of all 
+        the elements at a particular index in these lists. You also need to provide a key-value
+        (or key-list we could say) for all your wire RC parameters. The wire RC data in the 
+        lists corresponds to each transistor sizing combination. You'll need to calculate what
+        the wire RC is for a particular transistor sizing combination outside this function 
+        though. Here, we'll only set the paramters to the appropriate values. 
+
+        Finally, what we'll return is a dictionary similar to 'parameter_dict' but containing
+        all of the of the SPICE measurements. The return value will have this format: 
+
+        measurements = {meas_name1: [value1, value2, value3, etc...], 
+                        meas_name2: [value1, value2, value3, etc...],
+                        etc...}
+        """
+        sp_dir = os.path.dirname(sp_path)
+        sp_filename = os.path.basename(sp_path)
+
+        numOfValues = len(next(iter(parameter_dict.values())))
+
+        # modify the wire subcircuit so the syntax is NGSPICE compatible
+        basic_subcircuit_path = "basic_subcircuits.l"
+        basic_subcircuit_file = open(basic_subcircuit_path, "r+")
+        basic_subcircuit_content = basic_subcircuit_file.read()
+        # Rw and Cw become {Rw} and {Cw}
+        basic_subcircuit_content_modified = re.sub(r"\b([RC]w)$", r"{\1}", basic_subcircuit_content, flags=re.M|re.I)
+        basic_subcircuit_file.seek(0)
+        basic_subcircuit_file.write(basic_subcircuit_content_modified)
+        basic_subcircuit_file.truncate()
+        basic_subcircuit_file.close()
+
+        sp_file = open(os.path.join(sp_dir, sp_filename), "r+")
+        sp_content = sp_file.read()
+        # functions used by regex subsititution
+        def insert_include(match):
+            return f"{match.group(0)}\n.INCLUDE \"{os.path.join(os.getcwd(), HSPICE_DATA_SWEEP_PATH)}\"\n"
+        def absolute_lib(match):
+            return f"{match.group(1)}{os.path.abspath("includes.l")}{match.group(3)}"
+        def add_quotation(match):
+            s = "pulse ("
+            if not match.group(1)[0].isdigit():
+                s = s + f"'{match.group(1)}' "
+            else:
+                s = s + f"{match.group(1)} "
+            if not match.group(2)[0].isdigit():
+                s = s + f"'{match.group(2)}'"
+            else:
+                s = s + f"{match.group(2)}"
+            return s
+        def fix_vgnd(match):
+            return f"Vgnd gnd1 gnd 0\n{match.group(1)}v(gnd1){match.group(3)}"
+        # parameter file must be included in the circuit.sp file for NGSPICE
+        sp_content_modified = re.sub(r".TITLE.*$", insert_include, sp_content, count=1, flags=re.M|re.I)
+        # control block in NGSPICE to run and quit the simulation
+        sp_content_modified = re.sub(r"$", "\n.CONTROL\nset temp = 25\nrun\nquit\n.ENDC\n", sp_content_modified, count = 1)
+        # use absolute path for .LIB section
+        sp_content_modified = re.sub(r"(.lib\s+\")(.*)(\")", absolute_lib, sp_content_modified, flags=re.M|re.I)
+        # Remove the SWEEP in .tran section, NGSPICE does not have a SWEEP command
+        # SWEEP effect is simulated by calling NGSPICE multiple times
+        sp_content_modified = re.sub(r"(\.tran(\s+\w+){2}).*$", r"\1", sp_content_modified, flags=re.M|re.I)
+        # INTEGRAL keyword has to be INTEG in NGSPICE
+        sp_content_modified = re.sub(r"\bintegral\b", "INTEG", sp_content_modified, flags=re.M|re.I)
+        # parameter to PULSE function has to have "'" around variables
+        sp_content_modified = re.sub(r"pulse\s*\(\s*(\w+)\s+(\w+)", add_quotation, sp_content_modified, flags=re.M|re.I)
+        # fix v(gnd): ngspice cannot measure node named gnd
+        sp_content_modified = re.sub(r"^(.*)\bv\((gnd)\)(.*)$", fix_vgnd, sp_content_modified, flags=re.M|re.I)
+        # replace reference to node with highest level internal node that is equivalent
+        measure_replacements = self.measure_node_replacement(os.path.join(sp_dir, sp_filename), ["subcircuits.l", "basic_subcircuits.l"])
+        
+        for m in measure_replacements:
+            sp_content_modified = re.sub(re.escape(m[0]), m[1], sp_content_modified, flags=re.M|re.I)
+        sp_file.seek(0)
+        sp_file.write(sp_content_modified)
+        sp_file.truncate()
+        sp_file.close()
+        
+        # Change working dir so that SPICE output files are created in circuit subdirectory
+        saved_cwd = os.getcwd()
+        os.chdir(sp_dir)
+        measurements = {}
+        hspice_data_file = open(os.path.join("..", HSPICE_DATA_SWEEP_PATH), 'r')
+        hspice_data_content = hspice_data_file.read()
+        hspice_data_file.close()
+        for iteration in range(numOfValues): 
+            # write all the vali to a parameter file
+            hspice_data_file = open(os.path.join("..", HSPICE_DATA_SWEEP_PATH), 'w')
+            for param in parameter_dict:
+                hspice_data_file.write(".param " + param + "=" + str(parameter_dict[param][iteration])+ "\n")
+            hspice_data_file.close()
+         
+            # Creat an output file having the ending .lis
+            # Run the SPICE simulation and capture output
+            output_filename = sp_filename.rstrip(".sp") + ".lis"
+            output_file = open(output_filename, "w")
+            subprocess.call(["ngspice", sp_filename], stdout=output_file, stderr=output_file)
+            output_file.close()
+            self.parse_ngspice_measurements(output_filename, measurements)
+
+        measurements["temper"] = [25] * numOfValues
+
+        measurements = {
+            **measurements,
+            **parameter_dict,
+        }     
+
+        # Update simulation counter with the number of simulations done by 
+        # adding the length of the list of parameter values inside the dictionary
+        self.simulation_counter += len(next(iter(parameter_dict.values())))   
+
+        # Return to saved cwd
+        os.chdir(saved_cwd)
+
+        basic_subcircuit_file = open(basic_subcircuit_path, "w")
+        basic_subcircuit_file.write(basic_subcircuit_content)
+        basic_subcircuit_file.close()
+        sp_file = open(os.path.join(sp_dir, sp_filename), "w")
+        sp_file.write(sp_content)
+        sp_file.close()
+        hspice_data_file = open(os.path.join("..", HSPICE_DATA_SWEEP_PATH), 'w')
+        hspice_data_file.write(hspice_data_content)
+        hspice_data_file.close()
+
+        return measurements
+
+    def run(self, sp_path: str, parameter_dict: Dict[str, List[str]]):
+        ishspice = False
+        isngspice = True
+        if ishspice:
+            return self.run_hspice(sp_path, parameter_dict)
+        elif isngspice:
+            return self.run_ngspice(sp_path, parameter_dict)
+       
     def parse_mt0(self, filepath):
         """
         Parse a HSPICE .mt0 file to collect measurements. 

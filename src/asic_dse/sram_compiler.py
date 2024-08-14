@@ -22,9 +22,9 @@ def decode_sram_name(sram_str):
     ret_val = None
     # SRAM name format: SRAM<NUM_RW_PORTS><WIDTH>x<DEPTH>
     if("SRAM" in sram_str):
-        rw_ports_re = re.compile("(?<=SRAM)\d+(?=RW)")
-        depth_re = re.compile("(?<=RW)\d+(?=x)")
-        width_re = re.compile("(?<=x)\d+")
+        rw_ports_re = re.compile(r"(?<=SRAM)\d+(?=RW)")
+        depth_re = re.compile(r"(?<=RW)\d+(?=x)")
+        width_re = re.compile(r"(?<=x)\d+")
         rw_ports = int(rw_ports_re.search(sram_str).group())
         width = int(width_re.search(sram_str).group())
         depth = int(depth_re.search(sram_str).group())
@@ -243,7 +243,7 @@ def translate_sram_grid(w: int, d: int, mapping_grid: list, cut_bool: bool) -> l
 
 def translate_logical_to_phsical(mapping_dict) -> dict:
     """ This function uses the macro instantiation names as the logical mapping and returns a physical mapping"""
-    digit_re = re.compile("\d+")
+    digit_re = re.compile(r"\d+")
     macro_list = []
     # Get logical coords from the inst names
     for inst_name in mapping_dict["macro_inst_names"]:
