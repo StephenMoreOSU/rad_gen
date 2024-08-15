@@ -19,8 +19,10 @@ class SpiceInterface(object):
     Defines an HSPICE interface class. 
     An object of this class can be used to run HSPICE jobs and parse the output of those jobs.
     """
-
-    def __init__(self):
+    def __init__(self, useNgSpice):
+        self.useNgSpice = False
+        if useNgSpice:
+            self.useNgSpice = True
 
         # This simulation counter keeps track of number of HSPICE sims performed.
         self.simulation_counter = 0
@@ -494,12 +496,11 @@ class SpiceInterface(object):
         return measurements
 
     def run(self, sp_path: str, parameter_dict: Dict[str, List[str]]):
-        ishspice = False
-        isngspice = True
-        if ishspice:
-            return self.run_hspice(sp_path, parameter_dict)
-        elif isngspice:
+        if self.useNgSpice:
             return self.run_ngspice(sp_path, parameter_dict)
+        else:
+            return self.run_hspice(sp_path, parameter_dict)
+
        
     def parse_mt0(self, filepath):
         """
