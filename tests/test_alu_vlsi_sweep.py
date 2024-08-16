@@ -54,7 +54,10 @@ def alu_vlsi_sweep() -> rg_ds.RadGenArgs:
         tool_env_conf_fpath = tool_env_conf_fpath,
     )
     alu_sweep_args = rg_ds.RadGenArgs(
-        override_outputs = True,
+        manual_obj_dir = os.path.join(
+            tests_tree.search_subtrees(f"tests.data.{test_grp_name}.outputs", is_hier_tag = True)[0].path,
+            "alu_ver_sweep"
+        ),
         project_name = "alu",
         subtools = ["asic_dse"],
         subtool_args = asic_dse_args,

@@ -1898,6 +1898,7 @@ def init_asic_obj_dir(
     # Users can specify a specific obj directory
     if common.manual_obj_dir != None:
         obj_dir_path = os.path.abspath(os.path.expanduser(common.manual_obj_dir))
+        print(obj_dir_path)
         # if this does not exist create it now
         os.makedirs(obj_dir_path, exist_ok = True)
     # Or they can use the latest created obj dir
@@ -1922,7 +1923,7 @@ def init_asic_obj_dir(
             rad_gen_log(f"Symlink already exists @ {project_obj_dpath}", rad_gen_log_fd)
         else:
             # If symlink exists but points to wrong location, remove it (just unlinks doesn't delete the directory)
-            if os.readlink(project_obj_dpath) != obj_dir_path:
+            if os.path.islink(project_obj_dpath) and os.readlink(project_obj_dpath) != obj_dir_path:
                 os.unlink(project_obj_dpath)
             os.symlink(obj_dir_path, project_obj_dpath)
     # If we don't specify a manual obj directory we can directly append our new obj directory to the project tree to create it + add to data structure
