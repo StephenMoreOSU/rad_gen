@@ -4,7 +4,7 @@
 import os
 import subprocess
 import re
-from typing import Dict, List
+from typing import Dict, List, Tuple
 import src.coffe.utils as utils
 
 # All .sp files should be created to use sweep_data.l to set parameters.
@@ -16,13 +16,11 @@ DATA_SWEEP_PATH = "data.txt"
 
 class SpiceInterface(object):
     """
-    Defines an HSPICE interface class. 
-    An object of this class can be used to run HSPICE jobs and parse the output of those jobs.
+    Defines an SPICE interface class. 
+    An object of this class can be used to run SPICE jobs with your choice of simulator and parse the output of those jobs.
     """
-    def __init__(self, useNgSpice):
-        self.useNgSpice = False
-        if useNgSpice:
-            self.useNgSpice = True
+    def __init__(self, spice_sim_name : str):
+        self.spice_sim_name = spice_sim_name
 
         # This simulation counter keeps track of number of HSPICE sims performed.
         self.simulation_counter = 0
@@ -205,24 +203,67 @@ class SpiceInterface(object):
            
         return spice_measurements
     
-    def measure_node_replacement(self, main_file, lib_files):
+    def measure_node_replacement(self, main_file: str, lib_files: List[str]) -> List[Tuple[str, str]]:
+        """
+        This function finds all index of node, and returns a list of tuple including hspice index format and ngspice index format
+        for each index node. This function creates the subcircuits hierarchy with many instances of the class circuit. For each index
+        of node, the function starts with the top level circuits in the main file trace to the lowest node. In this process, all
+        subcircuits iterated through are recorded in a list. The list is then traversed in reverse, along with the index nodes in reverse. 
+        The first time we encounter a node that is not an io node of a circuit, we know it is the highest visiable name for that node. The
+        new way of indexing is stored with the original way of indexing in a tuple and appended to a list. 
+
+        .subckt typeA io1 io2 io3
+        Element4 internal1 io3 io2 typeB
+        Element2 io1 internal2 io2 typeB
+        .ends
+
+        .subckt typeB io1 io2 io3
+        Element3 io1 io2 io3 typeC
+        .ends
+
+        .subckt typeC io1 io2 io3
+        ...
+
+        In the main or upper-level file that usually ends with ".sp" we have:
+
+        Element1 wire1 wire2 wire3 typeA
+        .measure V(Element1.Element2.Element3.io1)
+        .measure V(Element1.Element2.Element3.io2 )
+
+
+        Element1.Element2.Element3.io1 is visible from main where wire1 is the same node as io1 in element3. 
+        Therefore, in NGSpice, we have to reference this node by wire1. 
+
+        Element1.Element2.Element3.io2 is not visible from main, no node in main directly connects to it. 
+        Therefore, in NGSpice, the unique way to identify a node is to use the name (direct connection) that is 
+        on the highest level (main is the direction of high), Element1.internal2
+
+        .measure V(wire1)
+        .measure V(Element1.internal2) 
+        The above should replace the original measure statements.
+        """
         class circuit:
             """
             This class represent a subcircuit. 
             A subcircuit in spice would look like this:
 
             .subckt <type> <io1> .... <io#> <parameter1>=<val1> ... <parameter#>=<val#>
-            <element1> <io node/internal node>
+            <component1> <io node/internal node>
             ...
-            <element#>
+            <component#>
             .ends
 
             self.type is the type of the subcircuit
             self.io contains all io names
             self.components is in the following form
-            {<element1> : [<node1>, ... , <node#>, <element1 type>], ...}
+            {<component> : [<node1>, ... , <node#>, <component type>], ...}
             """
-            def __init__(self, s):
+            def __init__(self, s: (str | None)):
+                # s is a multiline string of block of spice code that represents a circuit
+                # .subckt type io1 io2 ...
+                # component1 node1 node 2 ...  component1 type
+                # ...
+                #.ends
                 if(s == None):
                     self.type = ""
                     self.io = []
@@ -261,12 +302,12 @@ class SpiceInterface(object):
         circuits = {}
         # holds all node indexing in a spice file that could be potentially wrong when converting from hspice to ngspice
         # it is in the format ["<component1>.<component2>....<component#>.<node>", ...]
-        querries = []
+        node_index = []
         # root file, usually ends with .sp
         main_file = open(main_file, 'r')
         main_file = main_file.read()
         # This can also be "[iv]\((.*)\)" but the following works
-        querries = re.findall(r"\w\(([^\s]*?)\)", main_file, re.I)
+        node_index = re.findall(r"\w\(([^\s]*?)\)", main_file, re.I)
         main_file = main_file.split("\n")
         # the root file has not ios or types, only components, not using the constructor for circuit
         c = circuit(None)
@@ -296,42 +337,42 @@ class SpiceInterface(object):
                 c = circuit(circuit_str)
                 circuits[c.type.lower()] = c
         # result is used to hold the strings to be replaced with
-        # querries[i] will be replaced by result[i]
+        # node_index[i] will be replaced by result[i]
         result = []
-        # find replacement string for all querries 
-        for q in querries:
-            original_string = q
-            q = q.split(".")
+        # find replacement string for all node_index 
+        for idx in node_index:
+            original_string = idx
+            idx = idx.split(".")
             current_subcircuit_type = "main"
             # subcircuits holds all subcircuits we traced through
             subcircuits = []
-            for i, w in enumerate(q):
+            for i, w in enumerate(idx):
                 w = w.lower()
                 cs = circuits[current_subcircuit_type]
                 subcircuits.append(cs)
                 # last index is not a subcircuit but a node
-                if i != len(q)-1:
+                if i != len(idx)-1:
                     current_subcircuit_type = cs.components[w][-1]
-                else: 
+                else:
                     break
             # the node of the deepest subcircuit (root is shallow)
-            current_io = q[-1]
+            current_io = idx[-1]
             for i, sub in enumerate(reversed(subcircuits)):
                 # if the node is an io node, then go one subcircuit level above
                 if current_io in sub.io:
                     io_index = sub.io.index(current_io)
                     # finding the equivelent node in one subcircuit level above
-                    current_io = subcircuits[-2-i].components[q[-2-i]][io_index]
+                    current_io = subcircuits[-2-i].components[idx[-2-i]][io_index]
                 # if the node is an internal node, keep all subcircuits above the current level, 
                 # and append the current node
                 else:
-                    q = q[0:-1-i]
-                    q.append(current_io)
+                    idx = idx[0:-1-i]
+                    idx.append(current_io)
                     break
-            result.append((original_string, ".".join(q)))
+            result.append((original_string, ".".join(idx)))
         return result
 
-    def parse_ngspice_measurements(self, file_path, measurements):
+    def parse_ngspice_measurements(self, file_path : str, measurements : Dict):
         file = open(file_path, "r")
         file_content = file.read()
         file.close()
@@ -341,7 +382,7 @@ class SpiceInterface(object):
             else:
                 measurements[match.group(1)] = [(match.group(2))]
 
-    def run_ngspice(self, sp_path, parameter_dict):
+    def run_ngspice(self, sp_path: str, parameter_dict: Dict[str, List[str]]):
         """
         This function runs NGSPICE on the .sp file at 'sp_path' and returns a dictionary that 
         contains the NGSPICE measurements.
@@ -353,12 +394,12 @@ class SpiceInterface(object):
                           etc...}
 
         You need to make sure that 'parameter_dict' has a key-value pair for each parameter
-        in your HSPICE netlists. Otherwise, the simulation will fail because of missing 
+        in your SPICE netlists. Otherwise, the simulation will fail because of missing 
         parameters. That is, only the parameters found in 'parameter_dict' will be given a
         value. 
         
         This is important when we consider the fact that, the 'value' in the key value 
-        pair is a list of different parameter values that you want to run HSPICE on.
+        pair is a list of different parameter values that you want to run SPICE on.
         The lists must be of the same length for all params in 'parameter_dict' (param1_name's
         list has the same number of elements as param2_name). Here's what is going to happen:
         We will start by setting all the parameters to their 'val1' and we'll run NGSPICE. 
@@ -381,10 +422,31 @@ class SpiceInterface(object):
 
         Finally, what we'll return is a dictionary similar to 'parameter_dict' but containing
         all of the of the SPICE measurements. The return value will have this format: 
+        
+        Unlike HPSICE, NGSPICE is launch as many times as the length of grid point search hence
+        the length of a meas_names# list. HSPICE on the other hand is launched once, and the
+        grid point's control flow is internal to HSPICE.
 
         measurements = {meas_name1: [value1, value2, value3, etc...], 
                         meas_name2: [value1, value2, value3, etc...],
                         etc...}
+        
+        A number of modifications are required on the .sp and its included library files for ngspice
+        to simulate succesfully. The described changes is valid since ngspice version 34. You have to
+        add the option "set ngbehavior=hs" in file "~/.spiceinit". 
+        1. In the wire basic subcircuit, the variable Rw and Cw must be wrapped in {}
+        2. The parameter file must be included directly in the .sp file instead of chained includes. 
+        3. NGSPICE has the concept of control block, in it one controls the start and end of simulation.
+            In this block, temperature is set, then run and quit. Run will start the simulation. Quit will
+            leave the ngspice interative interface. 
+        4. There is no SWEEP in ngspice, multiple launches of ngspice is used instead. 
+        5. The INTEGRAL key word is INTEG in ngspice. 
+        6. Variables in PULSE function must be wrapped in ''
+        7. GND is a keyword in ngspice and is always the node 0 (when measureing only node 0 exist not the variable GND). 
+            A voltage source of zero is connected to GND, and measurements are done there. 
+        8. In ngpsice, the netlist will be flattened. Only nodes name visiable from the upper most circuit remains.
+            In other words, if a node of a subcircuit is equivelent to some node in an upper level circuit, it can
+            only be referenced by indexing the upper level circuit node. Up is the direction to the main .sp file.
         """
         sp_dir = os.path.dirname(sp_path)
         sp_filename = os.path.basename(sp_path)
@@ -496,11 +558,15 @@ class SpiceInterface(object):
         return measurements
 
     def run(self, sp_path: str, parameter_dict: Dict[str, List[str]]):
-        if self.useNgSpice:
+        if self.spice_sim_name == "ngspice":
             return self.run_ngspice(sp_path, parameter_dict)
-        else:
+        elif self.spice_sim_name == "hspice":
             return self.run_hspice(sp_path, parameter_dict)
-
+        else:
+            print("----------------------------------------------------------")
+            print("              Unknown Spice Simulator Name                ")
+            print("----------------------------------------------------------")
+            exit(2)
        
     def parse_mt0(self, filepath):
         """

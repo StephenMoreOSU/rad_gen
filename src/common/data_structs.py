@@ -1748,7 +1748,7 @@ class CoffeCLI(ParentCLI):
         # Additional Args for Refactor
         GeneralCLI(key = "rrg_data_dpath", shortcut = "-rrg", datatype = str, help_msg = "Path to directory containing parsed RRG output csvs"),
         GeneralCLI(key = "pass_through", shortcut = "-pass", datatype = bool, action = "store_true", help_msg = "Flag which enables pass-through mode for COFFE, this does NOT run spice simulations but allows the tool to be run to the end for debugging purposes" ),
-        GeneralCLI(key = "ngspice", shortcut = "-ng", datatype = bool, action = "store_true", help_msg = "Flag which enables the use of ngspice over hspice" ),
+        GeneralCLI(key = "spice_sim_type", shortcut = "-sst", datatype = str, choices = ["hspice", "ngspice"], default_val = "hspice", help_msg = "Choose the spice simulator COFFE uses, hspice is the default" ),
         GeneralCLI(
             key = "checkpoint_dpaths", shortcut = "-ckpt", datatype = str, nargs = "*", 
             help_msg = "Paths to spice subckt sizing grid search iterations from previous COFFE runs. This allows the current run to skip the found iterations and run spice simulations for missing iterations"
@@ -1915,6 +1915,7 @@ class Coffe:
 
         Attributes:
             common: common settings for RAD Gen
+            spice_sim_type: choice of spice simulator, options are "hspice" or "ngspice"
             no_sizing: don't perform transistor sizing
             opt_type: optimization type, options are "global" or "local"
             initial_sizes: where to get initial transistor sizes options are "default" ... TODO find all valid options
@@ -1935,7 +1936,7 @@ class Coffe:
     common: Common # common settings for RAD Gen
     # args: CoffeArgs = None
     # TODO put coffe CLI in here
-    ngspice: bool # use ngspice over default hspice
+    spice_sim_type: str # choice of spice simulator, options are "hspice" or "ngspice"
     no_sizing: bool # don't perform sizing
     opt_type: str # optimization type, options are "global" or "local"
     initial_sizes: str # where to get initial transistor sizes options are "default" ... TODO find all valid options
