@@ -39,7 +39,7 @@ Notes on testing infrastructure:
 #  /_/ \_\____\___/    \_/ |____|___/___| |___/ \_/\_/ |___|___|_|     |_| |___|___/ |_| 
 
 @pytest.fixture(scope='session')
-def alu_vlsi_sweep() -> rg_ds.RadGenArgs:
+def alu_vlsi_sweep() -> type[rg_ds.MetaDataclass]:
     tests_tree, test_grp_name, fixture_name, fixture_out_fpath = tests_common.get_fixture_info()
     # Naming convension of directory for a particular test file is the name of the file without "test_" prefix
     asic_dse_inputs_dpath: str = tests_tree.search_subtrees(f"tests.data.asic_dse", is_hier_tag = True)[0].path
@@ -67,7 +67,7 @@ def alu_vlsi_sweep() -> rg_ds.RadGenArgs:
     return alu_sweep_args 
 
 @pytest.fixture(scope='session')
-def alu_vlsi_sweep_gen_tb(alu_vlsi_sweep: rg_ds.RadGenArgs) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree]:
+def alu_vlsi_sweep_gen_tb(alu_vlsi_sweep: type[rg_ds.MetaDataclass]) -> Tuple[List[type[rg_ds.MetaDataclass]], rg_ds.Tree]:
     return tests_common.run_sweep(alu_vlsi_sweep)
 
 alu_vlsi_sweep_init_conf_tb = conftest.create_rg_fixture(
@@ -82,14 +82,14 @@ alu_vlsi_sweep_init_conf_tb = conftest.create_rg_fixture(
 @pytest.mark.asic_sweep
 @pytest.mark.init
 @skip_if_fixtures_only
-def test_alu_vlsi_sweep_gen_conf_init(alu_vlsi_sweep_init_conf_tb, request):
+def test_alu_vlsi_sweep_gen_conf_init(alu_vlsi_sweep_init_conf_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
     tests_common.run_and_verif_conf_init(alu_vlsi_sweep_init_conf_tb)
 
 
 @pytest.mark.alu
 @pytest.mark.asic_sweep
 @skip_if_fixtures_only
-def test_alu_vlsi_sweep_gen(alu_vlsi_sweep_gen_tb, request):
+def test_alu_vlsi_sweep_gen(alu_vlsi_sweep_gen_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
     # BELOW ARE ASSUMPTIONS THAT WILL BE CHANGED IF THE SWEEP CONFIG FILE CHANGES
     # THEY AFFECT ASSERTIONS!
     proj_tree: rg_ds.Tree
@@ -126,7 +126,7 @@ def test_alu_vlsi_sweep_gen(alu_vlsi_sweep_gen_tb, request):
         assert os.path.exists(gen_conf_fpath), f"Generated config file {gen_conf_fpath} does not exist"
 
 @pytest.fixture(scope='session')
-def alu_sw_pt_asic_flow_tb(hammer_flow_template) -> rg_ds.RadGenArgs:
+def alu_sw_pt_asic_flow_tb(hammer_flow_template) -> type[rg_ds.MetaDataclass]:
     proj_tree: rg_ds.Tree = tests_common.init_scan_proj_tree()
     proj_name: str = "alu"
     top_lvl_module: str = "alu_ver"
@@ -139,7 +139,7 @@ def alu_sw_pt_asic_flow_tb(hammer_flow_template) -> rg_ds.RadGenArgs:
         os.path.join(gen_conf_dpath, fname) 
             for fname in os.listdir(gen_conf_dpath) if "period_0ns__core_util_0.7__effort_standard" in fname
     ][0]
-    rg_args: rg_ds.RadGenArgs = tests_common.gen_hammer_flow_rg_args(
+    rg_args: type[rg_ds.MetaDataclass] = tests_common.gen_hammer_flow_rg_args(
         hammer_flow_template = hammer_flow_template,
         proj_name = proj_name,
         top_lvl_module = top_lvl_module,
@@ -158,13 +158,13 @@ alu_sw_pt_asic_flow_conf_init_tb = conftest.create_rg_fixture(
 @pytest.mark.asic_flow
 @pytest.mark.init
 @skip_if_fixtures_only
-def test_alu_sw_pt_asic_flow_conf_init(alu_sw_pt_asic_flow_conf_init_tb, request):
+def test_alu_sw_pt_asic_flow_conf_init(alu_sw_pt_asic_flow_conf_init_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
     tests_common.run_and_verif_conf_init(alu_sw_pt_asic_flow_conf_init_tb) 
 
 @pytest.mark.alu
 @pytest.mark.asic_flow
 @skip_if_fixtures_only
-def test_alu_sw_pt_asic_flow(alu_sw_pt_asic_flow_tb, request):
+def test_alu_sw_pt_asic_flow(alu_sw_pt_asic_flow_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
     tests_common.run_verif_hammer_asic_flow(rg_args = alu_sw_pt_asic_flow_tb)
 
 # TODO get this to work, problem with writing out fixture json (due to stack lvl stuff)
@@ -174,13 +174,13 @@ def test_alu_sw_pt_asic_flow(alu_sw_pt_asic_flow_tb, request):
 # )
 
 @pytest.fixture(scope='session')
-def alu_sw_pt_parse_tb(alu_sw_pt_asic_flow_tb) -> rg_ds.RadGenArgs:
+def alu_sw_pt_parse_tb(alu_sw_pt_asic_flow_tb: type[rg_ds.MetaDataclass]) -> type[rg_ds.MetaDataclass]:
     rg_args = copy.deepcopy(alu_sw_pt_asic_flow_tb)
     rg_args.subtool_args.compile_results = True
     tests_common.write_fixture_json(rg_args)
     return rg_args
 
-test_alu_sw_pt_parse_conf_init_tb = conftest.create_rg_fixture(
+test_alu_sw_pt_parse_conf_init_tb: type[rg_ds.MetaDataclass] = conftest.create_rg_fixture(
     input_fixture = 'alu_sw_pt_parse_tb',
     fixture_type = 'conf_init',
 )
@@ -189,13 +189,13 @@ test_alu_sw_pt_parse_conf_init_tb = conftest.create_rg_fixture(
 @pytest.mark.parse
 @pytest.mark.init
 @skip_if_fixtures_only
-def test_alu_sw_pt_parse_conf_init(test_alu_sw_pt_parse_conf_init_tb, request):
+def test_alu_sw_pt_parse_conf_init(test_alu_sw_pt_parse_conf_init_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
     tests_common.run_and_verif_conf_init(test_alu_sw_pt_parse_conf_init_tb) 
 
 @pytest.mark.alu
 @pytest.mark.parse
 @skip_if_fixtures_only
-def test_alu_sw_pt_parse(alu_sw_pt_parse_tb, request):
+def test_alu_sw_pt_parse(alu_sw_pt_parse_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
     tests_common.run_verif_hammer_asic_flow(
         rg_args = alu_sw_pt_parse_tb,
         backup_flag = False, # Don't backup as this is for parsing existing results
@@ -203,7 +203,7 @@ def test_alu_sw_pt_parse(alu_sw_pt_parse_tb, request):
 
 
 @pytest.fixture(scope='session')
-def alu_sw_pt_virtuoso_gds_tb(alu_sw_pt_parse_tb, request):
+def alu_sw_pt_virtuoso_gds_tb(alu_sw_pt_parse_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest) -> type[rg_ds.MetaDataclass]:
     # Requires the `test_alu_sw_pt_asic_flow` to be run first to get results to convert to gds in virtuoso
     rg_args = copy.deepcopy(alu_sw_pt_parse_tb)
     rg_args.subtool_args.scripts__virtuoso_setup_path = os.path.join(tests_common.get_rg_home(),"scripts","setup_virtuoso_env.sh")
@@ -223,14 +223,14 @@ alu_sw_pt_virtuoso_gds_conf_init_tb = conftest.create_rg_fixture(
 @pytest.mark.gds
 @pytest.mark.init
 @skip_if_fixtures_only
-def test_alu_sw_pt_virtuoso_gds_conf_init(alu_sw_pt_virtuoso_gds_conf_init_tb, request):
+def test_alu_sw_pt_virtuoso_gds_conf_init(alu_sw_pt_virtuoso_gds_conf_init_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
     tests_common.run_and_verif_conf_init(alu_sw_pt_virtuoso_gds_conf_init_tb)
 
 
 @pytest.mark.alu
 @pytest.mark.gds
 @skip_if_fixtures_only
-def test_alu_sw_pt_virtuoso_gds(alu_sw_pt_virtuoso_gds_tb, request):
+def test_alu_sw_pt_virtuoso_gds(alu_sw_pt_virtuoso_gds_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
     """
         Todos:
             * Add the asic sw pt as a dependancy for this test
