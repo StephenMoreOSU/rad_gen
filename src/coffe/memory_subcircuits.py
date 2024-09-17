@@ -429,7 +429,7 @@ def generate_mtj_sa_lp(spice_filename, circuit_name):
 	spice_file.write("AS=200n*trans_diffusion_length AD=200n*trans_diffusion_length PS=200n+2*trans_diffusion_length PD=200n+2*trans_diffusion_length\n")	
 	spice_file.write("M12 n_1_7 n_reb n_inp n_gnd nmos_lp_mtj L=22n W=200n ")
 	spice_file.write("AS=200n*trans_diffusion_length AD=200n*trans_diffusion_length PS=200n+2*trans_diffusion_length PD=200n+2*trans_diffusion_length\n")	
-	spice_file.write("M13 n_1_8 n_reb n_inp_ref n_gnd nmos_lp_mtj L=22n W=200n\ ")
+	spice_file.write("M13 n_1_8 n_reb n_inp_ref n_gnd nmos_lp_mtj L=22n W=200n ")
 	spice_file.write("AS=200n*trans_diffusion_length AD=200n*trans_diffusion_length PS=200n+2*trans_diffusion_length PD=200n+2*trans_diffusion_length\n")	
 	spice_file.write(".ENDS\n\n\n")
 

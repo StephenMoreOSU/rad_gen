@@ -40,7 +40,7 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     default_dir = os.getcwd()
 
     # Create an HSPICE interface
-    spice_interface = spice.SpiceInterface()
+    spice_interface = spice.SpiceInterface(args.spice_sim_type)
 
     # Record start time
     total_start_time = time.time()
