@@ -19,6 +19,7 @@ import json
 from deepdiff import DeepDiff
 import re
 import subprocess as sp
+import pandas as pd
 
 def get_rg_home() -> str:
     return os.environ.get("RAD_GEN_HOME")
@@ -42,6 +43,18 @@ def init_scan_proj_tree() -> rg_ds.Tree:
     return proj_tree
 
 def get_test_info(stack_lvl: int = 2) -> Tuple[rg_ds.Tree, str, str, str, str]:
+    """
+        Args:
+            stack_lvl: The number of function calls between this function and the uniquely named test function (default = 2)
+        
+        Returns:
+            tuple:
+                tests_tree: The tests tree object
+                test_grp_name: The name of the test group 
+                test_name: The name of the test
+                test_out_dpath: The output directory for the test --> tests.data.<test_grp_name>.outputs
+                rg_home: The path to the rad_gen home directory
+    """
     # TODO replace stack lvl bs with just passing in the name of function + file at the top level
     rg_home: str = get_rg_home()
     tests_tree: rg_ds.Tree = init_tests_tree()
@@ -80,7 +93,7 @@ def get_fixture_info(stack_lvl = 3) -> Tuple[rg_ds.Tree, str, str, str]:
     )
     return tests_tree, test_grp_name, fixture_name, fixture_out_fpath
 
-def write_fixture_json(rad_gen_args: rg_ds.RadGenArgs, stack_lvl = 4):
+def write_fixture_json(rad_gen_args: type[rg_ds.MetaDataclass], stack_lvl = 4):
     _, _, _, fixture_out_fpath = get_fixture_info(stack_lvl = stack_lvl)
     # Write the fixture object to json
     dataclass_2_json(rad_gen_args, fixture_out_fpath)
@@ -89,11 +102,26 @@ def verify_flow_stage(obj_dpath: str, golden_results_dpath: str, stage_name: str
     summary_base_fname: str = "report"
     stage_results_fpath: str = os.path.join(obj_dpath, "reports", f"{stage_name}_{summary_base_fname}.csv")
     stage_gold_results_fpath: str = os.path.join(golden_results_dpath, f"{stage_name}_{summary_base_fname}.csv")
+    # Get both dataframes so they can be printed out as well
+    stage_results_df = pd.read_csv(stage_results_fpath)
+    stage_gold_results_df = pd.read_csv(stage_gold_results_fpath)
     # Use a function to compare results, then transpose and reset indexes to get data in format expected by get_df_output_lines()
     stage_cmp_df = rg_utils.compare_results(stage_results_fpath, stage_gold_results_fpath).T.reset_index()
+    
+    print(rg_utils.text2ascii(f"{stage_name}"))
+    print(f"{'#'*200:^200}")
+    print(f"{f"{'#'*10} {rg_utils.pr_green('Golden')} @ {stage_gold_results_fpath} {'#'*10}":^200}")
+    for l in rg_utils.get_df_output_lines(stage_gold_results_df):
+        print(l)
+    print(f"{'#'*200:^200}")
+    print(f"{f"{'#'*10} {rg_utils.pr_yellow('Test')} @ {stage_results_fpath} {'#'*10}":^200}")
+    for l in rg_utils.get_df_output_lines(stage_results_df):
+        print(l)
+    print(f"{'#'*200:^200}")
+    print(f"{f'{"#"*10} {rg_utils.pr_cyan('Comparison')} {"#"*10}':^200}")    
     for l in rg_utils.get_df_output_lines(stage_cmp_df):
         print(l)
-
+    
     syn_verif_keys: List[str] = ["Slack", "Delay", "Timing SRC", "Total Area", "Area SRC"]
     par_verif_keys: List[str] = syn_verif_keys + ["Total Power", "Power SRC", "GDS Area"]
     verif_keys: List[str]
@@ -106,12 +134,18 @@ def verify_flow_stage(obj_dpath: str, golden_results_dpath: str, stage_name: str
     for col in stage_cmp_df.columns:
         if col in verif_keys:
             cmp_val: float | str = stage_cmp_df[col].values[row_idx]
-            if isinstance(cmp_val, float):
-                assert (cmp_val < 0.1 and cmp_val > 0) or (cmp_val > -0.1 and cmp_val < 0 ) or cmp_val == 0.0 # % difference tolerance we allow
-            elif isinstance(cmp_val, str):
-                assert cmp_val == "Matching"
-            else:
-                assert False, f"Unexpected type {type(cmp_val)} for comparison value {cmp_val}"
+            try:
+                if isinstance(cmp_val, float):
+                    assert (cmp_val < 0.1 and cmp_val > 0) or (cmp_val > -0.1 and cmp_val < 0 ) or cmp_val == 0.0 # % difference tolerance we allow
+                elif isinstance(cmp_val, str):
+                    assert cmp_val == "Matching"
+                else:
+                    assert False, f"Unexpected type {type(cmp_val)} for comparison value {cmp_val}"
+            except AssertionError:
+                print(rg_utils.pr_red(f"Golden and test results for {stage_name} do not match within tolerance!"))
+                assert False, f"Value for {col} does not match within tolerance: {cmp_val}"
+    print(rg_utils.pr_green(f"Golden and test results for {stage_name} match within tolerance!"))
+
 
 def get_current_function_name(level: int = 1) -> str:
     # Returns the name of the function which called this function (if level = 1)
@@ -120,7 +154,7 @@ def get_current_function_name(level: int = 1) -> str:
 def get_caller_file(level: int = 1):
     return inspect.stack()[level].filename
 
-def run_rad_gen(rg_args: rg_ds.RadGenArgs, rg_home: str, just_print: bool = False) -> Any | None:
+def run_rad_gen(rg_args: type[rg_ds.MetaDataclass], rg_home: str, just_print: bool = False) -> Any | None:
     cmd_str, sys_args, sys_kwargs = rg_args.get_rad_gen_cli_cmd(rg_home)
     print(f"Running: {cmd_str}")
     ret_val = None
@@ -129,9 +163,9 @@ def run_rad_gen(rg_args: rg_ds.RadGenArgs, rg_home: str, just_print: bool = Fals
         ret_val = rg.main(args_ns) 
     return ret_val
 
-def run_sweep(rg_args: rg_ds.RadGenArgs) -> Tuple[List[rg_ds.RadGenArgs], rg_ds.Tree, rg_ds.RadGenArgs]:
+def run_sweep(rg_args: type[rg_ds.MetaDataclass]) -> Tuple[List[type[rg_ds.MetaDataclass]], rg_ds.Tree, type[rg_ds.MetaDataclass]]:
     rg_home: str = os.environ.get("RAD_GEN_HOME")
-    sw_pt_args_list: List[rg_ds.RadGenArgs]
+    sw_pt_args_list: List[type[rg_ds.MetaDataclass]]
     proj_tree: rg_ds.Tree
     
     sw_pt_args_list, proj_tree = run_rad_gen(rg_args, rg_home)
@@ -201,9 +235,9 @@ def gen_hammer_flow_rg_args(
     else:
         assert manual_obj_dpath is not None, "manual_obj_dpath must be provided if top_lvl_module is None"
     
-    rg_args: rg_ds.RadGenArgs = copy.deepcopy(dummy_hammer_flow_args)
+    rg_args: type[rg_ds.MetaDataclass] = copy.deepcopy(dummy_hammer_flow_args)
     # append test specific config to flow_conf_fpaths (they are just the base hammer confs)
-    subtool_args: rg_ds.AsicDseArgs = rg_args.subtool_args
+    subtool_args: type[rg_ds.MetaDataclass] = rg_args.subtool_args
     subtool_args = set_fields(
         subtool_args, 
         subtool_fields, 
@@ -219,7 +253,7 @@ def gen_hammer_flow_rg_args(
     return rg_args
 
 def run_verif_hammer_asic_flow(
-    rg_args: rg_ds.RadGenArgs,
+    rg_args: type[rg_ds.MetaDataclass],
     exec_flag: bool = True,
     verif_flag: bool = True,
     backup_flag: bool = True,
@@ -245,6 +279,7 @@ def run_verif_hammer_asic_flow(
         )[0].path
         for stage in ["syn", "par", "timing", "power", "final"]:
             verify_flow_stage(manual_obj_dpath, golden_results_dpath, stage)
+    print_success_face()
     return ret_val
 
 class EnhancedJSONEncoder(json.JSONEncoder):
@@ -314,11 +349,11 @@ def rec_get_human_readable_csv(
     assert csv_print_result.returncode == 0, f"Error running {rec_csv_print_fpath}: {csv_print_result.stderr}"
     return csv_print_result.stdout
 
-def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
+def run_and_verif_conf_init(rg_args: type[rg_ds.MetaDataclass]):
     """
         Runs args for a 'init' marked test and does a deepdict comparison
     """
-    tests_tree, test_grp_name, tests_name, _, _ = get_test_info(stack_lvl = 3)
+    tests_tree, test_grp_name, tests_name, test_out_dpath, _ = get_test_info(stack_lvl = 3)
     rg_info, _ = run_rad_gen(
         rg_args, 
         get_rg_home()
@@ -326,7 +361,9 @@ def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
     subtool: str = rg_args.subtools[0]
     init_struct = rg_info[subtool]
     test_init: dict = rg_utils.rec_convert_dataclass_to_dict(init_struct)
-    
+    # Dump the test init struct to an output json in output directory
+    test_init_fpath: str = os.path.join(test_out_dpath, f"{tests_name}_init_struct.json")
+    json.dump(test_init, open(test_init_fpath, "w"), indent=4)
     # Get golden ref to compare against
     golden_results_dpath: str = tests_tree.search_subtrees(
         f"tests.data.{test_grp_name}.golden_results", is_hier_tag = True
@@ -360,24 +397,42 @@ def run_and_verif_conf_init(rg_args: rg_ds.RadGenArgs):
         items_added_dict: dict = ddiff.get("dictionary_item_added")
         if items_added_dict:
             rm_csv_fpath: str = write_out_test_cmp(items_added_dict, tests_name, result_dpath, "removed")
+            print(f"{rm_csv_fpath}:")
             print(rec_get_human_readable_csv(rm_csv_fpath, tests_tree))
         # Any values exist in test but not in golden?
         items_removed_dict: dict = ddiff.get("dictionary_item_removed")
         if items_removed_dict:
             add_csv_fpath: str = write_out_test_cmp(items_removed_dict, tests_name, result_dpath, "added")
+            print(f"{add_csv_fpath}:")
             print(rec_get_human_readable_csv(add_csv_fpath, tests_tree))
         # Any values exist in both but are different?
         items_changed_dict: dict = ddiff.get("values_changed")
         if items_changed_dict:
             # Write out to a csv for debugging
             val_ch_csv_fpath: str = write_out_test_cmp(items_changed_dict, tests_name, result_dpath, "vals_changed")
+            print(f"{val_ch_csv_fpath}:")
             print(rec_get_human_readable_csv(val_ch_csv_fpath, tests_tree))
         type_changes_dict: dict = ddiff.get("type_changes")
         if type_changes_dict:
             # Write out to a csv for debugging
             type_ch_csv_fpath: str = write_out_test_cmp(type_changes_dict, tests_name, result_dpath, "types_changed")
+            print(f"{type_ch_csv_fpath}:")
             print(rec_get_human_readable_csv(type_ch_csv_fpath, tests_tree))
+        print(rg_utils.pr_red(f"\nDifferences found between test and golden init struct, see {result_dpath} for more detail"))
         assert False, f"Differences found between test and golden init struct, see {result_dpath} for more detail"
     else:
-        print("No differences found between test and golden init struct")
+        print(rg_utils.pr_green("\nNo differences found between test and golden init struct"))
+        print("\nFor more details use the following commands to view test / golden initialization structs, respectively:\n")    
+        print(f"[TEST]:    {test_init_fpath:>50}")
+        print(f"[GOLDEN]:   {golden_init_struct_fpath:>50}")
+        print_success_face()
 
+
+def print_success_face():
+    print(rg_utils.pr_green("\n"))
+    print(rg_utils.pr_green("    _   _   "))
+    print(rg_utils.pr_green("    *   *   "))
+    print(rg_utils.pr_green("      |     "))
+    print(rg_utils.pr_green("            "))
+    print(rg_utils.pr_green("    \\___/  "))
+    print(rg_utils.pr_green("\n"))

@@ -203,10 +203,16 @@ def test_alu_sw_pt_parse(alu_sw_pt_parse_tb: type[rg_ds.MetaDataclass], request:
 
 
 @pytest.fixture(scope='session')
-def alu_sw_pt_virtuoso_gds_tb(alu_sw_pt_parse_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest) -> type[rg_ds.MetaDataclass]:
+def alu_sw_pt_virtuoso_gds_tb(alu_sw_pt_asic_flow_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest) -> type[rg_ds.MetaDataclass]:
     # Requires the `test_alu_sw_pt_asic_flow` to be run first to get results to convert to gds in virtuoso
-    rg_args = copy.deepcopy(alu_sw_pt_parse_tb)
-    rg_args.subtool_args.scripts__virtuoso_setup_path = os.path.join(tests_common.get_rg_home(),"scripts","setup_virtuoso_env.sh")
+    rg_args = copy.deepcopy(alu_sw_pt_asic_flow_tb)
+    rg_args.subtool_args.common_asic_flow__flow_stages__sram__run = False
+    rg_args.subtool_args.common_asic_flow__flow_stages__syn__run = False
+    rg_args.subtool_args.common_asic_flow__flow_stages__par__run = False
+    rg_args.subtool_args.common_asic_flow__flow_stages__pt__run = True
+    rg_args.subtool_args.scripts__virtuoso_setup_path = os.path.join(
+        tests_common.get_rg_home(),"scripts","setup_virtuoso_env.sh"
+    )
     # TODO figure out a good place to tell people to make this rundir
     rg_args.subtool_args.stdcell_lib__pdk_rundir_path = os.path.expanduser(
         os.path.join("~","ASAP_7_IC","asap7_rundir")
@@ -228,6 +234,7 @@ def test_alu_sw_pt_virtuoso_gds_conf_init(alu_sw_pt_virtuoso_gds_conf_init_tb: t
 
 
 @pytest.mark.alu
+@pytest.mark.asic_flow
 @pytest.mark.gds
 @skip_if_fixtures_only
 def test_alu_sw_pt_virtuoso_gds(alu_sw_pt_virtuoso_gds_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):

@@ -162,7 +162,7 @@ def conf_init_gen(
         If a test fixture writes out a .json file to its corresponding `fixtures` directory in format `<fixture_name>.json`, 
         then a test case is considered to perform data structure initialization.
 
-        A side effect of assumptions in this function is that we expect there to be a fixture produce a rg_ds.RadGenArgs object and pass it to its corresponding test.
+        A side effect of assumptions in this function is that we expect there to be a fixture producing a rg_ds.RadGenArgs object and pass it to its corresponding test.
     """
     # TODO define created dirs with Tree data structures for flexibility into future
     rg_home: str = os.environ.get("RAD_GEN_HOME")

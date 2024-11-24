@@ -894,7 +894,14 @@ def gen_compiled_srams(asic_dse: rg_ds.AsicDSE, base_config: dict) -> List[ Type
                                             sram_map_info,
                                             rtl_outpath)
         
-        mem_cmd_lines, mem_idx, rg_args = get_hammer_flow_sweep_point_lines(asic_dse, mem_idx, config_fpath, sram_compiler=True)
+        mem_cmd_lines, mem_idx, rg_args = get_hammer_flow_sweep_point_lines(
+            asic_dse, 
+            mem_idx, 
+            config_fpath,
+            scripts__virtuoso_setup_path = os.path.join(asic_dse.common.rad_gen_home_path, "scripts/setup_virtuoso_env.sh"),
+            stdcell_lib__pdk_rundir_path = "/fs1/eecg/vaughn/morestep/ASAP_7_IC/asap7_rundir", # TODO renmove hardcoding
+            common_asic_flow__flow_stages__sram__run = True, 
+        )
         if mem_cmd_lines is None:
             break
         else:
@@ -938,6 +945,8 @@ def get_hammer_flow_sweep_point_lines(
         project_name = asic_dse.common.project_name,
     )
     rg_cmd, _, _ = rad_gen_args.get_rad_gen_cli_cmd(asic_dse.common.rad_gen_home_path)
+    # Modify command to break it up using escapes to make more human readable
+    rg_cmd = rg_cmd.replace(" -"," \\\n    -")
     cmd_lines = [
         f"{rg_cmd} &", # Get the cmd then run in bg so we can run multiple sweeps in parallel
         "sleep 0.01", # Sleep for 0.01 seconds to make sure directories which are uniquified with a datetime tag are unique TODO fix
@@ -962,9 +971,8 @@ def sram_sweep_gen(asic_dse: rg_ds.AsicDSE) -> List[ Type[rg_ds.MetaDataclass] ]
     rg_sw_pt_drivers += gen_compiled_srams(asic_dse, base_config)
     mem_params = rg_utils.parse_json( base_config["vlsi.inputs.sram_parameters"] )
 
-
     # List of available SRAM macros
-    sram_macro_lefs = os.listdir(os.path.join(asic_dse.stdcell_lib.sram_lib_path, "lef"))
+    sram_macro_lefs = [ f for f in os.listdir(os.path.join(asic_dse.stdcell_lib.sram_lib_path, "lef")) if f.endswith(".lef") ] 
 
     sweep_script_lines = []
     sweep_pt_idx = 1
@@ -1098,8 +1106,21 @@ def sram_sweep_gen(asic_dse: rg_ds.AsicDSE) -> List[ Type[rg_ds.MetaDataclass] ]
                 # with open(modified_config_path, 'w') as fd:
                 #     yaml.safe_dump(mod_base_config, fd, sort_keys=False) 
                 
+                #--tool_env_conf_fpaths /fs1/eecg/vaughn/morestep/Documents/rad-flow-revisions/rad_gen_pr/rad_gen/tests/data/asic_dse/env.yml \
+                #--scripts.virtuoso_setup_path /fs1/eecg/vaughn/morestep/Documents/rad-flow-revisions/rad_gen_pr/rad_gen/scripts/setup_virtuoso_env.sh \
+                #--stdcell_lib.pdk_rundir_path /fs1/eecg/vaughn/morestep/ASAP_7_IC/asap7_rundir \
+                #--common_asic_flow.flow_stages.sram.run \
+                #--project sram
+    
                 # Create a script cmd to run this sram compiler generated config through the tool
-                cmd_lines, sweep_pt_idx, rg_args = get_hammer_flow_sweep_point_lines(asic_dse, sweep_pt_idx, mod_flow_conf_fpath, sram_compiler=True)
+                cmd_lines, sweep_pt_idx, rg_args = get_hammer_flow_sweep_point_lines(
+                    asic_dse, 
+                    sweep_pt_idx, 
+                    mod_flow_conf_fpath,
+                    scripts__virtuoso_setup_path = os.path.join(asic_dse.common.rad_gen_home_path, "scripts/setup_virtuoso_env.sh"),
+                    stdcell_lib__pdk_rundir_path = "/fs1/eecg/vaughn/morestep/ASAP_7_IC/asap7_rundir", # TODO renmove hardcoding
+                    common_asic_flow__flow_stages__sram__run = True,
+                )
                 if cmd_lines == None:
                     continue
                 rg_sw_pt_drivers.append(rg_args)
@@ -1529,7 +1550,7 @@ def gen_report_to_csv(report: dict):
     if "target_freq" in report:
         report_to_csv["Target Freq"] = report["target_freq"]
     # TIMING
-    for flow_stage in ["pt", "par", "syn"]:
+    for flow_stage in ["pt", "power", "timing", "par", "syn"]:
         if report[flow_stage] != None and "timing" in report[flow_stage]:
             if len(report[flow_stage]["timing"]) > 0:
                 if "Slack" in report[flow_stage]["timing"][0]:
@@ -1541,7 +1562,7 @@ def gen_report_to_csv(report: dict):
         if "Slack" and "Delay" in report_to_csv:
             break
     # AREA
-    for flow_stage in ["pt", "par", "syn"]:
+    for flow_stage in ["pt", "power", "timing", "par", "syn"]:
         if report[flow_stage] != None and "area" in report[flow_stage]:
             if len(report[flow_stage]["area"]) > 0:
                 if "Hinst Name" in report[flow_stage]["area"][0]:
@@ -1552,7 +1573,7 @@ def gen_report_to_csv(report: dict):
         if "Top Level Inst" and "Total Area" in report_to_csv:
             break
     # POWER
-    for flow_stage in ["pt", "par", "syn"]:
+    for flow_stage in ["pt", "power", "timing", "par", "syn"]:
         if report[flow_stage] != None and "power" in report[flow_stage]:
             if len(report[flow_stage]["power"]) > 0:
                 if "Total" in report[flow_stage]["power"][0]:
@@ -1747,9 +1768,15 @@ def gen_parse_reports(asic_dse: rg_ds.AsicDSE, report_search_dir: str, top_level
 def write_virtuoso_gds_to_area_script(asic_dse: rg_ds.AsicDSE, gds_fpath: str):
     # skill_fname = "get_area.il"
     skill_script_lines = [
-        f"system(\"strmin -library {asic_dse.stdcell_lib.cds_lib} -strmFile {gds_fpath} -writeMode noOverwrite -logFile strmIn.log\")",
+        # Previous modification to prevent overriding of the TOPCELL seemed to be a mistake as multiple runs share the same virtuoso directory
+        # `-writeMode noOverwrite` is the command that was removed
+        f"system(\"strmin -library {asic_dse.stdcell_lib.cds_lib} -strmFile {gds_fpath} -logFile strmIn.log\")",
         f'cv = dbOpenCellViewByType("asap7_TechLib" "TOPCELL" "layout")',
+        # Bounding Box
         "print(cv~>bBox)",
+        # Metal Area + Density 
+        # This is the closest function I could find to return the desired information, however, only works in a gui...
+        # 'leComputeAreaDensity(hiGetCurrentWindow() list(list(list("TEXT" "drawing"))))',
     ]
     skill_fpath = os.path.join(asic_dse.stdcell_lib.pdk_rundir_path, f"{asic_dse.scripts.gds_to_area_fname}.il")
     csh_fpath = os.path.join(asic_dse.stdcell_lib.pdk_rundir_path, f"{asic_dse.scripts.gds_to_area_fname}.csh")
@@ -1801,21 +1828,25 @@ def run_asap7_gds_scaling_scripts(rad_gen: rg_ds.AsicDSE, obj_dir: str, top_lvl_
         This function will run gds scaling from the par outputs for asap7 pdk
         - It uses Cadence Virtuoso skill scripts to read in the gds output (which is scaled using gdspy or gdstk tools)
         - Then it will extract the GDS area (of bounding box TODO figure out how to do metal area without entering UI)
+        
+        Todos:
+            * Determine why it would be beneficial to use a gds area report that already exists vs just running it again.
+                * I discovered a possibly erroneous area.rpt file just continued to be used which is why I removed the option.
     """
     gds_file = os.path.join(obj_dir,"par-rundir",f"{top_lvl_mod}_drc.gds")
     if os.path.isfile(gds_file):
-        if not os.path.exists(os.path.join(obj_dir,rad_gen.common.report.gds_area_fname)):
-            write_virtuoso_gds_to_area_script(rad_gen, gds_file)
-            for ext in ["csh"]:
-                permission_cmd = "chmod +x " +  os.path.join(rad_gen.stdcell_lib.pdk_rundir_path,f'{rad_gen.scripts.gds_to_area_fname}.{ext}')
-                rg_utils.run_shell_cmd_no_logs(permission_cmd)
-            prev_cwd = os.getcwd()
-            os.chdir(rad_gen.stdcell_lib.pdk_rundir_path)
-            rg_utils.run_csh_cmd(os.path.join(rad_gen.stdcell_lib.pdk_rundir_path,f"{rad_gen.scripts.gds_to_area_fname}.csh"))
-            os.chdir(prev_cwd)
-            gds_area = parse_gds_to_area_output(rad_gen, obj_dir)
-        else:
-            gds_area = get_gds_area_from_rpt(rad_gen, obj_dir)
+        # if not os.path.exists(os.path.join(obj_dir,rad_gen.common.report.gds_area_fname)):
+        write_virtuoso_gds_to_area_script(rad_gen, gds_file)
+        for ext in ["csh"]:
+            permission_cmd = "chmod +x " +  os.path.join(rad_gen.stdcell_lib.pdk_rundir_path,f'{rad_gen.scripts.gds_to_area_fname}.{ext}')
+            rg_utils.run_shell_cmd_no_logs(permission_cmd)
+        prev_cwd = os.getcwd()
+        os.chdir(rad_gen.stdcell_lib.pdk_rundir_path)
+        rg_utils.run_csh_cmd(os.path.join(rad_gen.stdcell_lib.pdk_rundir_path,f"{rad_gen.scripts.gds_to_area_fname}.csh"))
+        os.chdir(prev_cwd)
+        gds_area = parse_gds_to_area_output(rad_gen, obj_dir)
+        # else:
+        #     gds_area = get_gds_area_from_rpt(rad_gen, obj_dir)
     else:
         raise FileNotFoundError(f"Could not find gds file at {gds_file}")
 
@@ -1861,6 +1892,8 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
     flow_report = {
         "syn" : None,
         "par" : None,
+        "timing": None,
+        "power": None,
         "pt" : None
     }
     # Add some items to flow report
@@ -1921,7 +1954,7 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
     if os.path.exists(par_out_config):
         config_paths.append(par_out_config)
         
-    
+    # asap7 specific section as it needs to have its gds scaled back from 28nm to 7nm
     if asic_dse.asic_flow_settings.hammer_driver.database.get_setting("vlsi.core.technology") == "asap7":
         # If the user doesn't specify a virtuoso setup script, then we can assume we cant run virtuoso for gds scaling
         if asic_dse.scripts.virtuoso_setup_path != None and asic_dse.stdcell_lib.pdk_rundir_path != None:
@@ -1934,7 +1967,7 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
             scaled_gds_fpath = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "par-rundir", f"{asic_dse.common_asic_flow.top_lvl_module}_drc.gds")
             # calls a function which uses a gds tool to return area from file rather than virtuoso
             # It seems like the gds libs return an area thats around 2x what virtuoso gives so I scale by 1/2 hence virtuoso is ideal for bounding box area measurement
-            # I justify this because virtuoso itself is conservative, usually this is still larger (an estimate)
+            # I justify this because virtuoso itself is conservative, usually this is still larger (a handwaving estimate)
             flow_report["gds_area"] = gds_fns.main([f"{stdcells_fpath}",f"{scaled_gds_fpath}", "get_area"])/2
             
 
@@ -2032,13 +2065,13 @@ def run_hammer_flow(asic_dse: rg_ds.AsicDSE, config_paths: List[str]) -> Tuple[f
         flow_report["power"] = pt_report
     write_flow_stage_report("power", flow_report, asic_dse.common.obj_dir)
 
-    pt_reports_path = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "pt-rundir", "reports")
-    if os.path.isdir(pt_reports_path):
-        pt_report = get_report_results(
-            asic_dse, asic_dse.common_asic_flow.top_lvl_module, pt_reports_path, 
-            asic_dse.common_asic_flow.flow_stages.pt
-        )
-        flow_report["pt"] = pt_report
+    # pt_reports_path = os.path.join(asic_dse.asic_flow_settings.hammer_driver.obj_dir, "pt-rundir", "reports")
+    # if os.path.isdir(pt_reports_path):
+    #     pt_report = get_report_results(
+    #         asic_dse, asic_dse.common_asic_flow.top_lvl_module, pt_reports_path, 
+    #         asic_dse.common_asic_flow.flow_stages.pt
+    #     )
+    #     flow_report["pt"] = pt_report
     
     # Now that we have all the reports, we can generate the final report
     write_flow_stage_report("final", flow_report, asic_dse.common.obj_dir)
