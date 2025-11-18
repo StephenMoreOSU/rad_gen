@@ -1,13 +1,13 @@
 {
     "common": {
         "just_config_init": true,
-        "override_outputs": true,
-        "manual_obj_dir": null,
+        "override_outputs": false,
+        "manual_obj_dir": "${RAD_GEN_HOME}/tests/data/sram_gen/outputs/sram_gen_sweep",
         "rad_gen_home_path": "${RAD_GEN_HOME}",
         "hammer_home_path": "${RAD_GEN_HOME}/third_party/hammer",
         "logger": null,
         "log_verbosity": 1,
-        "obj_dir": "${RAD_GEN_HOME}/shared_resources/sram_lib/obj_dirs/sram_gen-2024--07--10--19--09--58--121",
+        "obj_dir": "${RAD_GEN_HOME}/tests/data/sram_gen/outputs/sram_gen_sweep",
         "project_tree": null,
         "project_name": null,
         "res": {

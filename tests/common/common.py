@@ -384,11 +384,17 @@ def run_and_verif_conf_init(rg_args: type[rg_ds.MetaDataclass]):
     assert golden_init_struct_fpath is not None, f"Could not find golden init struct file in {golden_results_dpath}"
     golden_init: dict = json.load(open(golden_init_struct_fpath, "r"))
     # Compare the two
-    ddiff = DeepDiff(test_init, golden_init, ignore_order=True, verbose_level = 2)
+    ddiff = DeepDiff(
+        test_init, 
+        golden_init, 
+        ignore_order=True, 
+        verbose_level = 2,
+        exclude_paths=["root['common']['obj_dir']"], #We ignore obj_dir paths as they will all be unique
+    )
     test_data_dpath: str = tests_tree.search_subtrees(
         f"tests.data.{test_grp_name}", is_hier_tag = True
     )[0].path
-    
+    print(ddiff)
     # If there are any differences iterate over them
     if ddiff:
         result_dpath = os.path.join(test_data_dpath, "results")

@@ -121,7 +121,7 @@ class SwitchBlockMuxTB(c_ds.SimTB):
             type = "PULSE",
             init_volt = c_ds.Value(0),
             peak_volt = c_ds.Value(name = self.supply_v_param), # TODO get this from defined location
-            pulse_width = c_ds.Value(2), # ns
+            pulse_width = c_ds.Value(4), # ns
             period = c_ds.Value(8), # ns
         )
         # DC Voltage SRC for measuring power

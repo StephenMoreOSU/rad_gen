@@ -649,7 +649,13 @@ def edit_rtl_proj_params(asic_dse: rg_ds.AsicDSE, rtl_params: Dict[str, Any], ba
 
     return mod_parameter_paths, mod_config_paths
 
-def read_in_rtl_proj_params(asic_dse: rg_ds.AsicDSE, rtl_params: Dict[str, Any], top_level_mod: str, rtl_dir_path: str, sweep_param_inc_path: str = False):
+def read_in_rtl_proj_params(
+    asic_dse: rg_ds.AsicDSE, 
+    rtl_params: Dict[str, Any], 
+    top_level_mod: str, 
+    rtl_dir_path: str, 
+    sweep_param_inc_path: str = False
+):
 
     # Find all parameters which will be used in the design (ie find top level module rtl, parse include files top to bottom and get those values )
     """ FIND TOP LEVEL MODULE IN RTL FILES """
@@ -1513,7 +1519,7 @@ def parse_output(asic_dse: rg_ds.AsicDSE, top_level_mod: str, output_path: str):
     pt_dir = "pt-rundir"
     # Loop through the output dir and find the relevant files to each stage of the flow
     syn_report_path = os.path.join(output_path,syn_dir,"reports")
-    par_report_path = os.path.join(output_path,par_dir)
+    par_report_path = os.path.join(output_path,par_dir, "reports")
     pt_report_path = os.path.join(output_path,pt_dir,"reports")
 
     syn_results = get_report_results(
@@ -1531,7 +1537,10 @@ def parse_output(asic_dse: rg_ds.AsicDSE, top_level_mod: str, output_path: str):
     return syn_results, par_results, pt_results
 
 
-def get_gds_area_from_rpt(rad_gen: rg_ds.AsicDSE, obj_dir: str):
+def get_gds_area_from_rpt(rad_gen: rg_ds.AsicDSE, obj_dir: str) -> float:
+    """
+        Minmialistic function to get GDS area from an obj directory
+    """
     with open(os.path.join(obj_dir, rad_gen.common.report.gds_area_fname),"r") as f:
         for line in f:
             if "Area" in line:
@@ -1712,22 +1721,23 @@ def gen_reports(asic_dse: rg_ds.AsicDSE, design: rg_ds.DesignSweepInfo , top_lev
         for ext in ["csh","sh"]:
             permission_cmd = "chmod +x " +  os.path.join(asic_dse.stdcell_lib.pdk_rundir_path,f'{asic_dse.scripts.gds_to_area_fname}.{ext}')
             rg_utils.run_shell_cmd_no_logs(permission_cmd)
-        # run_shell_cmd_no_logs(os.path.join(stdcell_lib.pdk_rundir_path,f"{script_info.gds_to_area_fname}.sh"))
         if not os.path.exists(os.path.join(report_dir,asic_dse.common.report.gds_area_fname)):
             rg_utils.run_csh_cmd(os.path.join(asic_dse.stdcell_lib.pdk_rundir_path,f"{asic_dse.scripts.gds_to_area_fname}.csh"))
             report_dict["gds_area"] = parse_gds_to_area_output(asic_dse, report_dir)
         else:
+        # TODO handle case where the area file does not exist (maybe regen then)
             report_dict["gds_area"] = get_gds_area_from_rpt(asic_dse, report_dir)
     # RTL Parameter section
-    if design is not None and design.type == "rtl_params":
+    if design is not None and design.type == "rtl":
         # Using the output syn directory to find parameters in hdl search paths
         if(os.path.isfile(os.path.join(report_dir,"syn-rundir","syn-output-full.json"))):
             syn_out_config = json.load(open(os.path.join(report_dir,"syn-rundir","syn-output-full.json")))
             # looping through hdl search paths
             for path in syn_out_config["synthesis.inputs.hdl_search_paths"]:
+                # Looking for parameter header fpath
                 if "param_sweep_headers" in path:
-                    param_hdr_name = os.path.basename(design.type_info.base_header_fpath)
-                    params = read_in_rtl_proj_params(asic_dse, design.type_info.params, top_level_mod, design.rtl_dir_path, os.path.join(path, param_hdr_name))
+                    param_hdr_name = os.path.basename(design.rtl_params.base_header_fpath)
+                    params = read_in_rtl_proj_params(asic_dse, design.rtl_params.sweep, top_level_mod, design.hdl_dpath, os.path.join(path, param_hdr_name))
                     if params != None and params != []:
                         report_dict["rtl_params"] = params
                     else:
@@ -1738,7 +1748,13 @@ def gen_reports(asic_dse: rg_ds.AsicDSE, design: rg_ds.DesignSweepInfo , top_lev
     return report_dict
 
 
-def gen_parse_reports(asic_dse: rg_ds.AsicDSE, report_search_dir: str, top_level_mod: str, design: rg_ds.DesignSweepInfo = None, sram_num_bits: int = None):
+def gen_parse_reports(
+    asic_dse: rg_ds.AsicDSE, 
+    report_search_dir: str, 
+    top_level_mod: str, 
+    design: rg_ds.DesignSweepInfo = None, 
+    sram_num_bits: int = None
+):
     """
         Searches through the specified search directory and will compile a list of all reports from specified design
         TODO allow for users to more easily parse reports from multiple designs or design points ie specify filter for designs users would like to parse
