@@ -1,13 +1,13 @@
 {
     "common": {
         "just_config_init": true,
-        "override_outputs": true,
-        "manual_obj_dir": null,
+        "override_outputs": false,
+        "manual_obj_dir": "${RAD_GEN_HOME}/tests/data/alu_vlsi_sweep/outputs/alu_ver_sweep",
         "rad_gen_home_path": "${RAD_GEN_HOME}",
         "hammer_home_path": "${RAD_GEN_HOME}/third_party/hammer",
         "logger": null,
         "log_verbosity": 1,
-        "obj_dir": "${RAD_GEN_HOME}/projects/alu/outputs/alu_ver/obj_dirs/alu_ver-sweep-2024--07--10--00--46--41--069",
+        "obj_dir": "${RAD_GEN_HOME}/tests/data/alu_vlsi_sweep/outputs/alu_ver_sweep",
         "project_tree": null,
         "project_name": "alu",
         "res": {
@@ -104,8 +104,14 @@
                 "run": true,
                 "tool": "cadence"
             },
-            "pt": {
-                "tag": "pt",
+            "timing": {
+                "tag": "timing",
+                "exec_idx": null,
+                "run": true,
+                "tool": "synopsys"
+            },
+            "power": {
+                "tag": "power",
                 "exec_idx": null,
                 "run": true,
                 "tool": "synopsys"

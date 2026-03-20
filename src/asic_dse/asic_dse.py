@@ -27,51 +27,410 @@ import src.asic_dse.custom_flow as asic_custom
 import src.common.utils as rg_utils
 import src.common.data_structs as rg_ds
 
+from operator import itemgetter
+from itertools import groupby
 
 rad_gen_log_fd = "asic_dse.log"
 log_verbosity = 2
 cur_env = os.environ.copy()
 
 
-def compile_results(asic_dse: rg_ds.AsicDSE):
-    # read in the result config file
-    report_search_dir = asic_dse.env_settings.design_output_path
-    csv_lines = []
-    reports = []
-    for design in asic_dse.design_sweep_infos:
-        rg_utils.rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {asic_dse.sweep_conf_fpath}",rad_gen_log_fd)
-        if design.type != None:
-            if design.type == "sram":
-                for mem in design.type_info.mems:
-                    mem_top_lvl_name = f"sram_macro_map_{mem['rw_ports']}x{mem['w']}x{mem['d']}"
-                    num_bits = mem['w']*mem['d']
-                    reports += asic_hammer.gen_parse_reports(asic_dse, report_search_dir, mem_top_lvl_name, design, num_bits)
-                reports += asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module, design)
-            elif design.type == "rtl_params":
-                """ Currently focused on NoC rtl params"""
-                reports = asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module, design)
-            else:
-                rg_utils.rad_gen_log(f"Error: Unknown design type {design.type} in {asic_dse.sweep_conf_fpath}",rad_gen_log_fd)
-                sys.exit(1)
+# TODO remove duplicated function
+def decode_sram_name(sram_str: str, stitched_flag: bool = False):
+    """ Decode the SRAM name into its parameters (for top lvl module names)"""
+    ret_val = None
+    mod_name: str = "SRAM" if not stitched_flag else "sram_macro_map_"
+    # SRAM name format: SRAM<NUM_RW_PORTS><WIDTH>x<DEPTH>
+    if(mod_name in sram_str):
+        if not stitched_flag:
+            rw_ports_re = re.compile(f"(?<={mod_name})\d+(?=RW)")
+            depth_re = re.compile("(?<=RW)\d+(?=x)")
+            width_re = re.compile("(?<=x)\d+")
+            
+            rw_ports = int(rw_ports_re.search(sram_str).group())
+            width = int(width_re.search(sram_str).group())
+            depth = int(depth_re.search(sram_str).group())
+            ret_val = rw_ports, width, depth
         else:
-            # This parsing of reports just looks at top level and takes whatever is in the obj dir
-            reports = asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module)
+            pattern = r'sram_macro_map_(\d+)x(\d+)x(\d+)'
+            ret_val = map(int, re.match(pattern, sram_str).groups())
+            # rw_ports_re = re.compile(f"(?<={mod_name})\d+(?=x)")
+            # depth_re = re.compile("(?<=x)\d+($|\-)")
+            # width_re = re.compile("(?<=x)\d+(?=x)")
+
+
+    return ret_val
+
+def get_obj_dir_info(obj_dpath: str) -> dict:
+    """
+        Returns a dictionary containing information about an object directory.
+        Information includes:
+        - Distance gone in the flow
+            - what reports exist?
+        - VLSI parameters (from syn-rundir)
+    """
+    info: dict = {
+        "sram": False,
+        "syn": False,
+        "par": False,
+        "timing": False,
+        "power": False,
+        "final": False,
+    }
+    # We determine VLSI params from syn rundir
+    if os.path.isdir(os.path.join(obj_dpath, "syn-rundir")):
+        syn_out_fpath = os.path.join(obj_dpath, "syn-rundir", "syn-output-full.json")
+        if os.path.exists(syn_out_fpath):
+            vlsi_info = json.load(open(syn_out_fpath, "r"))
+            if vlsi_info.get("vlsi.inputs.sram_parameters"):
+                obj_name = os.path.basename(obj_dpath)
+                if "macro_map" in obj_name:
+                    stitched_flag = True
+                else:
+                    stitched_flag = False
+                _, width, depth = decode_sram_name(obj_name, stitched_flag)
+                macro_w = int(vlsi_info["vlsi.inputs.sram_parameters"][0]["width"])
+                macro_d = int(vlsi_info["vlsi.inputs.sram_parameters"][0]["depth"])
+                sram_info = {
+                    "macro": vlsi_info["vlsi.inputs.sram_parameters"][0]["name"],
+                    "macro_w": macro_w,
+                    "macro_d": macro_d,
+                    "ports": len(vlsi_info["vlsi.inputs.sram_parameters"][0]["ports"]),
+                    "mapped_w": width,
+                    "mapped_d": depth,
+                    "num_macro_w": int(math.ceil( width / macro_w)),
+                    "num_macro_d": int(math.ceil( depth / macro_d)),
+                }
+                info["sram"] = True
+                info = {
+                    **sram_info,
+                    **info,
+                }
+            # General VLSI settings
+            info = {
+                "top_lvl_module": vlsi_info["vlsi.inputs.placement_constraints"][0]["path"], # top level module
+                "technology": vlsi_info["vlsi.core.technology"], # process tech
+                "target_period": vlsi_info["vlsi.inputs.clocks"][0]["period"], # target period
+                **info,
+            }
+            # Place and Route Info
+            info = {
+                "effort": vlsi_info["par.innovus.design_flow_effort"], # par effort
+                "floorplan_mode": vlsi_info["par.innovus.floorplan_mode"], 
+                **info,
+            }
+        else:
+            # If the syn-output-full.json file does not exist, we can't determine the VLSI params, just return
+            return info
+    # Now we get the existing information from the reports
+    flow_order = ["syn", "par", "timing", "power", "final"]
+    flow_order.reverse()
+    for rep_tag in flow_order:
+        reports_dpath = os.path.join(obj_dpath, "reports")
+        if os.path.exists(os.path.join(reports_dpath, f"{rep_tag}_report.csv")):
+            rep_info: dict = rg_utils.read_csv_to_list(os.path.join(reports_dpath, f"{rep_tag}_report.csv"))
+            info[rep_tag] = True
+            for key in ["Total Area", "Delay", "Total Power", "GDS Area"]:
+                if not info.get(key):
+                    info[key] = rep_info[0].get(key)
+    return info
+
+def get_obj_dir_flow_score(obj_dir_info: dict) -> int:
+    """
+        Returns a score for the object directory based on how far it has gotten in the flow
+        - syn = 1
+        - par = 2
+        - timing = 3
+        - power = 4
+        - final = 5
+    """
+    flow_order = ["syn", "par", "timing", "power", "final"]
+    for key in flow_order:
+        if obj_dir_info.get(key):
+            return flow_order.index(key) + 1
+    return 0
+
+def get_obj_dir_qor_score(obj_dir_info: dict) -> float:
+    """
+        Returns a score for the object directory based on the quality of results
+        Score function is (1 / delay) * (1 / area) 
+    """
+    score: float = 1.0
+    delay: int | None = obj_dir_info.get("Delay")
+    total_area: int | None = obj_dir_info.get("Total Area")
+    total_power: int | None = obj_dir_info.get("Total Power")
+    gds_area: int | None = obj_dir_info.get("GDS Area")
+    
+    if delay:
+        delay = float(delay)
+    if total_area:
+        total_area = float(total_area)
+    if total_power:
+        total_power = float(total_power)
+    if gds_area:
+        gds_area = float(gds_area)
+    
+    if not delay or not total_area:
+        assert False, "Delay or Total Area not found in obj_dir_info, this should not happen"
+    
+    score *= (1 / delay)
+    # score *= (1 / obj_dir_info.get("Total Power")) # uncomment to include power in the cost function
+    if gds_area:
+        score *= (1 / gds_area)
+    else:
+        score *= (1 / total_area)
+
+    return score
+
+
+
+def group_dicts(
+    data: List[Tuple[str, Dict]],
+    group_fields: List[str]
+) -> List[List[Tuple[str, Dict]]]:
+    """
+        Groups a list of (obj_dir, dict) tuples by unique values of specified group fields.
+
+        Args:
+            data: A list of tuples where each tuple contains an obj_dir string and its corresponding dictionary.
+            group_fields: A list of dictionary keys to group by.
+
+        Returns:
+            A list of groups, where each group is a list of (str, dict) tuples sharing the same group field values.
+    """
+    # Define a key function that extracts the group_fields from the dict part of the tuple
+    def key_func(item: Tuple[str, Dict]) -> Tuple:
+        return tuple(item[1].get(field) for field in group_fields)
+
+    # Sort the data based on the group_fields extracted by key_func
+    sorted_data = sorted(data, key=key_func)
+    # Group the sorted data using groupby with the same key_func
+    grouped = groupby(sorted_data, key=key_func)
+    # Extract the groups into a list of lists
+    return [list(group) for _, group in grouped]
+
+# def group_dicts(data: list[dict], group_fields: list[str]) -> list[list[dict]]:
+#     # Sort data based on group_fields
+#     sorted_data = sorted(data, key=itemgetter(*group_fields))
+#     # Group using groupby
+#     grouped = groupby(sorted_data, key=itemgetter(*group_fields))
+#     # Extract groups
+#     return [list(group) for key, group in grouped]
+
+# def group_dicts(data: list[dict], group_fields: list[str]) -> list[list[dict]]:
+#     grouped = defaultdict(list)
+#     for item in data:
+#         # Create a tuple of the values for the grouping fields
+#         key = tuple(item[field] for field in group_fields)
+#         grouped[key].append(item)
+#     # Return the grouped data as a list of lists
+#     return list(grouped.values())
+
+def get_condensed_obj_dirs(obj_dirs_dpath: str) -> list[str]:
+    """
+        Returns a list of unique object directories that have been condensed (filtering out duplicates and keeping high QoR runs)
+    """
+    condensed_dirs: Set = set()
+    print(f"Top LVL Module: {os.listdir(obj_dirs_dpath)[0]}, num_dirs: {len(os.listdir(obj_dirs_dpath))}")
+    if len(os.listdir(obj_dirs_dpath)) > 1:
+        max_flow_score: int = max( 
+            [
+                get_obj_dir_flow_score(get_obj_dir_info(os.path.join(obj_dirs_dpath, obj_dir)))
+                    for obj_dir in os.listdir(obj_dirs_dpath)
+            ]
+        )
+        # Find the object directories that have gone the furthest in the CAD flow
+        valid_obj_dirs = [ 
+            obj_dir for obj_dir in os.listdir(obj_dirs_dpath) 
+                if get_obj_dir_flow_score(get_obj_dir_info(os.path.join(obj_dirs_dpath, obj_dir))) == max_flow_score
+        ]
+        # Return a list of object directories which have unique VLSI parameters
+        vlsi_fields = [
+            "technology",
+            "target_period",
+            "effort",
+            "floorplan_mode",
+        ]
+        grouped_obj_dirs: list[list[dict]] = []
+        # eliminate obj dirs without all vlsi fields
+        valid_obj_dirs = [ obj_dir for obj_dir in valid_obj_dirs if all(get_obj_dir_info(os.path.join(obj_dirs_dpath, obj_dir)).get(field) for field in vlsi_fields) ]
+        # Group the object directories by their VLSI parameters 
+        grouped_obj_dirs = group_dicts(
+            data=[
+                (obj_dir, get_obj_dir_info(os.path.join(obj_dirs_dpath, obj_dir)))
+                for obj_dir in valid_obj_dirs
+            ],
+            group_fields=vlsi_fields,
+        )
+        # Iterate through groups and find the highest QoR score for each group
+        for vlsi_group in grouped_obj_dirs:
+            obj_dir_score_tup: list[tuple] = [
+                (obj_dir, get_obj_dir_qor_score(obj_dir_info))
+                    for obj_dir, obj_dir_info in vlsi_group
+            ]
+            # Sort the object directories by their QoR score
+            obj_dir_score_tup.sort(key = lambda x: x[1], reverse = True)
+            # Add the object directory with the highest QoR score to the condensed_dirs set
+            condensed_dirs.add(obj_dir_score_tup[0][0])
+    else:
+        condensed_dirs.add(
+            os.path.join(obj_dirs_dpath,os.listdir(obj_dirs_dpath)[0])
+        )
+    return condensed_dirs
+
+        
+        
+        # for obj_dir in os.listdir(obj_dirs_dpath):
+        #     # Skip if object directory has already been invalidated
+        #     if any(obj_dir in con_dirs or obj_dir in skipped_dirs):
+        #         continue
+        
+        # for obj_dir_1 in os.listdir(obj_dirs_dpath):
+        #     for obj_dir_2 in os.listdir(obj_dirs_dpath):
+        #         if (obj_dir_1 == obj_dir_2) or \
+        #             any(dir in con_dirs or dir in skipped_dirs for dir in (obj_dir_1, obj_dir_2)):
+        #             continue
+        #         info1 = get_obj_dir_info(os.path.join(obj_dirs_dpath,obj_dir_1))
+        #         info2 = get_obj_dir_info(os.path.join(obj_dirs_dpath,obj_dir_2))
+        #         if info1 == info2:
+        #             con_dirs.add(obj_dir_1)
+        #             skipped_dirs.add(obj_dir_2)
+        #         else:
+        #             if cmp_obj_dir_infos(info1, info2):
+        #                 con_dirs.add(obj_dir_1)
+        #                 skipped_dirs.add(obj_dir_2)
+        #             else:
+        #                 con_dirs.add(obj_dir_2)
+        #                 skipped_dirs.add(obj_dir_1)
+        
+    # else:
+    #     con_dirs.add(os.path.join(obj_dirs_dpath,os.listdir(obj_dirs_dpath)[0]))
+        
+    # return con_dirs
+        
+        
+    
+
+def compile_results(
+    asic_dse: rg_ds.AsicDSE, 
+    top_lvl_modules: list[str] = None,
+) -> None:
+    """
+        Parses the results of all output directories matching the provided top_lvl_modules. 
+        Creates top level detailed and summary reports from this information.
+        Will index each object directory from the top_lvl_module based on its VLSI parameters, determined from the synthesis input json file.
+        Looks for duplicate runs (and filters them out) by seeing if they have the same VLSI parameters & QoR (for syn / par / timing / power).
+        Will additionally filter with RTL or SRAM macro information based on if the tag is either "sram" or "rtl".
+        
+        If `top_lvl_modules` is not provided, it will loop through all top level modules within the project output directory.
+
+        Args:
+            asic_dse: The ASIC DSE object containing all the information about the design sweep
+            top_lvl_modules: The top level modules to search for in the output directories
+            tag: The tag to filter the results by, either "sram" or "rtl"
+            
+        Todo:
+            * Allow for SRAMs and non SRAMs to be specified in the same `top_lvl_modules` list
+    """
+    out_search_dpath: str = asic_dse.common.project_tree.search_subtrees(f"projects.{asic_dse.common.project_name}.outputs", is_hier_tag = True)[0].path
+    if not top_lvl_modules:
+        top_lvl_modules = os.listdir(out_search_dpath)
+    for top_lvl_module in top_lvl_modules:
+        reports = []
+        csv_lines = []
+        top_lvl_mod_infos = []
+        top_lvl_mod_search_dpath = os.path.join(out_search_dpath, top_lvl_module)
+        if os.path.isdir(top_lvl_mod_search_dpath):
+            obj_dirs_dpath = os.path.join(top_lvl_mod_search_dpath, "obj_dirs")
+            # for obj_dir_dpath in os.listdir(obj_dirs_dpath):
+            uniq_obj_dirs = get_condensed_obj_dirs(obj_dirs_dpath)
+            for obj_dir in uniq_obj_dirs:
+                reports.append(asic_hammer.gen_reports(asic_dse, asic_dse.design_sweep_info, top_lvl_module, os.path.join(obj_dirs_dpath, obj_dir)))
+                obj_dir_info = get_obj_dir_info(os.path.join(obj_dirs_dpath, obj_dir))
+                top_lvl_mod_infos.append(obj_dir_info)
+        # Write out the top level module info to a csv
+        top_lvl_report_dpath = os.path.join(top_lvl_mod_search_dpath, "reports")
+        if top_lvl_mod_infos:
+            rg_utils.write_dict_to_csv(top_lvl_mod_infos, os.path.join(top_lvl_report_dpath,f"summary"))
+        #########################################################################################
+        rg_utils.rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {asic_dse.sweep_conf_fpath}",rad_gen_log_fd)
+        
+        # if asic_dse.design_sweep_info.type != None:
+        #     if asic_dse.design_sweep_info.type == "sram":
+        #         reports += asic_hammer.gen_parse_reports(asic_dse, top_lvl_mod_search_dpath, top_lvl_module, asic_dse.design_sweep_info)
+        #         # for mem in design.type_info.mems:
+        #         #     mem_top_lvl_name = f"sram_macro_map_{mem['rw_ports']}x{mem['w']}x{mem['d']}"
+        #         #     num_bits = mem['w']*mem['d']
+        #         #     reports += asic_hammer.gen_parse_reports(asic_dse, report_search_dir, mem_top_lvl_name, design, num_bits)
+        #         # reports += asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module, design)
+        #     elif asic_dse.design_sweep_info.type == "rtl":
+        #         """ Currently focused on NoC rtl params"""
+        #         reports = asic_hammer.gen_parse_reports(asic_dse, top_lvl_mod_search_dpath, top_lvl_module, asic_dse.design_sweep_info)
+        #     else:
+        #         rg_utils.rad_gen_log(f"Error: Unknown design type {asic_dse.design_sweep_info.type} in {asic_dse.sweep_conf_fpath}",rad_gen_log_fd)
+        #         sys.exit(1)
+        # else:
+        #     # This parsing of reports just looks at top level and takes whatever is in the obj dir
+        #     reports = asic_hammer.gen_parse_reports(asic_dse, top_lvl_mod_search_dpath, top_lvl_module)
         
         # General parsing of report to csv
         for report in reports:
             report_to_csv = {}
-            if design.type == "rtl_params":
+            if asic_dse.design_sweep_info.type == "rtl":
                 if "rtl_params" in report.keys():
                     report_to_csv = asic_hammer.noc_prse_area_brkdwn(report)
             else:
                 report_to_csv = asic_hammer.gen_report_to_csv(report)
             if len(report_to_csv) > 0:
                 csv_lines.append(report_to_csv)
-    result_summary_outdir = os.path.join(asic_dse.env_settings.design_output_path,"result_summaries")
-    if not os.path.isdir(result_summary_outdir):
-        os.makedirs(result_summary_outdir)
-    csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(asic_dse.sweep_conf_fpath))[0] )
-    rg_utils.write_dict_to_csv(csv_lines,csv_fname)
+        # result_summary_outdir = os.path.join(asic_dse.env_settings.design_output_path,"result_summaries") # TODO remove anything that uses deprecated `env_settings`
+        # if not os.path.isdir(result_summary_outdir):
+            # os.makedirs(result_summary_outdir)
+        # csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(asic_dse.sweep_conf_fpath))[0] )
+        rg_utils.write_dict_to_csv(csv_lines,os.path.join(top_lvl_report_dpath,f"detailed"))
+        #########################################################################################
+
+
+    
+# def compile_results(asic_dse: rg_ds.AsicDSE):
+#     # read in the result config file
+#     report_search_dir = asic_dse.env_settings.design_output_path
+#     csv_lines = []
+#     reports = []
+#     for design in asic_dse.design_sweep_infos:
+#         rg_utils.rad_gen_log(f"Parsing results of parameter sweep using parameters defined in {asic_dse.sweep_conf_fpath}",rad_gen_log_fd)
+#         if design.type != None:
+#             if design.type == "sram":
+#                 for mem in design.type_info.mems:
+#                     mem_top_lvl_name = f"sram_macro_map_{mem['rw_ports']}x{mem['w']}x{mem['d']}"
+#                     num_bits = mem['w']*mem['d']
+#                     reports += asic_hammer.gen_parse_reports(asic_dse, report_search_dir, mem_top_lvl_name, design, num_bits)
+#                 reports += asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module, design)
+#             elif design.type == "rtl_params":
+#                 """ Currently focused on NoC rtl params"""
+#                 reports = asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module, design)
+#             else:
+#                 rg_utils.rad_gen_log(f"Error: Unknown design type {design.type} in {asic_dse.sweep_conf_fpath}",rad_gen_log_fd)
+#                 sys.exit(1)
+#         else:
+#             # This parsing of reports just looks at top level and takes whatever is in the obj dir
+#             reports = asic_hammer.gen_parse_reports(asic_dse, report_search_dir, design.top_lvl_module)
+        
+#         # General parsing of report to csv
+#         for report in reports:
+#             report_to_csv = {}
+#             if design.type == "rtl_params":
+#                 if "rtl_params" in report.keys():
+#                     report_to_csv = asic_hammer.noc_prse_area_brkdwn(report)
+#             else:
+#                 report_to_csv = asic_hammer.gen_report_to_csv(report)
+#             if len(report_to_csv) > 0:
+#                 csv_lines.append(report_to_csv)
+#     result_summary_outdir = os.path.join(asic_dse.env_settings.design_output_path,"result_summaries") # TODO remove anything that uses deprecated `env_settings`
+#     if not os.path.isdir(result_summary_outdir):
+#         os.makedirs(result_summary_outdir)
+#     csv_fname = os.path.join(result_summary_outdir, os.path.splitext(os.path.basename(asic_dse.sweep_conf_fpath))[0] )
+#     rg_utils.write_dict_to_csv(csv_lines,csv_fname)
 
 def design_sweep(asic_dse: rg_ds.AsicDSE) -> List[rg_ds.MetaDataclass]:
     """
@@ -195,7 +554,7 @@ def design_sweep(asic_dse: rg_ds.AsicDSE) -> List[rg_ds.MetaDataclass]:
 
             add_args = {
                 "top_lvl_module": design_sweep.top_lvl_module,
-                "hdl_path" : rtl_dir_path
+                "hdl_dpath" : rtl_dir_path
             }
             cmd_lines, sweep_idx, rg_args = asic_hammer.get_hammer_flow_sweep_point_lines(asic_dse, sweep_idx, config_fpath, **add_args)
             if cmd_lines == None:
@@ -212,7 +571,7 @@ def design_sweep(asic_dse: rg_ds.AsicDSE) -> List[rg_ds.MetaDataclass]:
             script_path = rg_utils.find_newest_file(scripts_out_dpath, f"{design_sweep.top_lvl_module}_rtl_sweep_{rg_ds.create_timestamp(fmt_only_flag=True)}.sh", is_dir = False)
 
         if script_path == None:
-            script_path = os.path.join(scripts_out_dpath, f"{design_sweep.top_lvl_module}_rtl_sweep.sh_{rg_ds.create_timestamp()}.sh")
+            script_path = os.path.join(scripts_out_dpath, f"{design_sweep.top_lvl_module}_rtl_sweep_{rg_ds.create_timestamp()}.sh")
         
         rg_utils.write_out_script(sweep_script_lines, script_path)
 
@@ -242,7 +601,7 @@ def run_asic_flow(asic_dse: rg_ds.AsicDSE) -> Dict[str, Any]:
     rg_utils.rad_gen_log("Done!", rad_gen_log_fd)
     return flow_results
 
-
+# TODO deletion candidate
 def run_asic_dse(asic_dse_cli: rg_ds.AsicDseCLI) -> Tuple[float]:
     global cur_env
     global rad_gen_log_fd

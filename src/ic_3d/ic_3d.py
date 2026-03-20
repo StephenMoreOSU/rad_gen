@@ -145,7 +145,7 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
     ic_3d_info.design_info.sink_die_nstages = 1
 
     # Tx sizing params
-    ic_3d_info.tx_sizing.opt_goal = "diff"
+    ic_3d_info.tx_sizing.opt_goal = "tpd"
     ic_3d_info.tx_sizing.nmos_sz = 1
     ic_3d_info.tx_sizing.pmos_sz = 2
     ic_3d_info.tx_sizing.p_opt_params = {
@@ -158,7 +158,7 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
         "range": [1, 16],
         "step": 1,
     }
-    ic_3d_info.tx_sizing.iters = 25
+    ic_3d_info.tx_sizing.iters = 100
 
 
     # Either way the P & N params will be stored as opt params which lets them be represented
@@ -240,28 +240,40 @@ def run_buffer_dse_updated(ic_3d_info: rg_ds.Ic3d):
                                 sweep_params["target_freq"] = cur_tfreq
                                 print(f"Delay measure statements not captured, trying again with reduced target frequency {cur_tfreq}")
                             else:
-                                # Lets capture the optimized pn sizes and other information from measurements
-                                for opt_param in opt_params:
-                                    inv_size = {}
-                                    name = opt_param["name"]
-                                    # convert to int as we are using finfets
-                                    val = int(float(opt_param["val"]))
-                                    # Make sure the result is actually an int in the first place
-                                    assert int(float(opt_param["val"])) == float(opt_param["val"]), f"Finfet Width {name} is not an integer, got {opt_param['val']}, check your HSpice optimization settings"
-                                    # we assume that wn & wp are somewhere in the optimization params
-                                    if "wn" in name:
-                                        inv_size["wn"] = val
-                                    elif "wp" in name:
-                                        inv_size["wp"] = val
-                                    else:
-                                        raise ValueError(f"Optimization parameter {name} not recognized")
-                                    # if the user defined a particular inv to be static we will use that value 
-                                    if "wn" not in inv_size.keys() and "N" not in ic_3d_info.tx_sizing.opt_mode:
-                                        inv_size["wn"] = ic_3d_info.tx_sizing.nmos_sz
-                                    if "wp" not in inv_size.keys() and "P" not in ic_3d_info.tx_sizing.opt_mode:
-                                        inv_size["wn"] = ic_3d_info.tx_sizing.pmos_sz
-                                    assert ("wn" in inv_size.keys() and "wp" in inv_size.keys() and len(inv_size.keys()) == 2), f"inv_size dict keys are malformed, got {inv_size.keys()}"
-                                    inv_sizes.append(inv_size)
+                                if all( tx in ic_3d_info.tx_sizing.opt_mode for tx in ["N", "P"]):
+                                    # filter out opt_params to condense the
+                                    wn_opt_params = [ opt_param for opt_param in opt_params if "wn" in opt_param["name"] ]
+                                    wp_opt_params = [ opt_param for opt_param in opt_params if "wp" in opt_param["name"] ]
+                                    # This may assume that the order of the opt_params is the same for wn and wp, but it should be TODO fix
+                                    for wn_opt_param, wp_opt_param in zip(wn_opt_params, wp_opt_params):
+                                        inv_size = {
+                                            "wn": int(float(wn_opt_param["val"])),
+                                            "wp": int(float(wp_opt_param["val"])),
+                                        }
+                                        inv_sizes.append(inv_size)
+                                else:
+                                    # Lets capture the optimized pn sizes and other information from measurements
+                                    for opt_param in opt_params:
+                                        inv_size = {}
+                                        name = opt_param["name"]
+                                        # convert to int as we are using finfets
+                                        val = int(float(opt_param["val"]))
+                                        # Make sure the result is actually an int in the first place
+                                        assert int(float(opt_param["val"])) == float(opt_param["val"]), f"Finfet Width {name} is not an integer, got {opt_param['val']}, check your HSpice optimization settings"
+                                        # we assume that wn & wp are somewhere in the optimization params
+                                        if "wn" in name:
+                                            inv_size["wn"] = val
+                                        elif "wp" in name:
+                                            inv_size["wp"] = val
+                                        else:
+                                            raise ValueError(f"Optimization parameter {name} not recognized")
+                                        # if the user defined a particular inv to be static we will use that value 
+                                        if "wn" not in inv_size.keys() and "N" not in ic_3d_info.tx_sizing.opt_mode:
+                                            inv_size["wn"] = ic_3d_info.tx_sizing.nmos_sz
+                                        if "wp" not in inv_size.keys() and "P" not in ic_3d_info.tx_sizing.opt_mode:
+                                            inv_size["wn"] = ic_3d_info.tx_sizing.pmos_sz
+                                        # assert ("wn" in inv_size.keys() and "wp" in inv_size.keys() and len(inv_size.keys()) == 2), f"inv_size dict keys are malformed, got {inv_size.keys()}, {inv_size}"
+                                        inv_sizes.append(inv_size)
                                 # if all measurements are there we can break out of loop
                                 break 
 

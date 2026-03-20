@@ -7,7 +7,7 @@
         "hammer_home_path": "${RAD_GEN_HOME}/third_party/hammer",
         "logger": null,
         "log_verbosity": 1,
-        "obj_dir": "${RAD_GEN_HOME}/projects/NoC/outputs/router_wrap_bk/obj_dirs/router_wrap_bk-sweep-2024--07--10--20--07--03--833",
+        "obj_dir": "${RAD_GEN_HOME}/projects/NoC/outputs/router_wrap_bk/obj_dirs/router_wrap_bk-sweep-2025--03--05--01--05--56--761",
         "project_tree": null,
         "project_name": "NoC",
         "res": {
@@ -104,8 +104,14 @@
                 "run": true,
                 "tool": "cadence"
             },
-            "pt": {
-                "tag": "pt",
+            "timing": {
+                "tag": "timing",
+                "exec_idx": null,
+                "run": true,
+                "tool": "synopsys"
+            },
+            "power": {
+                "tag": "power",
                 "exec_idx": null,
                 "run": true,
                 "tool": "synopsys"

@@ -25,7 +25,7 @@ import tests.conftest as conftest
 from tests.conftest import skip_if_fixtures_only
 
 @pytest.fixture(scope='session')
-def ic_3d_flow_template() -> rg_ds.RadGenArgs:
+def ic_3d_flow_template() -> type[rg_ds.MetaDataclass]:
     tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = tests_common.get_test_info()
     in_conf_dpath: str = tests_tree.search_subtrees(
         f"tests.data.{test_grp_name}.inputs", is_hier_tag = True
@@ -42,7 +42,7 @@ def ic_3d_flow_template() -> rg_ds.RadGenArgs:
     return dummy_ic_3d_args
 
 @pytest.fixture(scope='session')
-def ic_3d_tb(ic_3d_flow_template: rg_ds.RadGenArgs):
+def ic_3d_tb(ic_3d_flow_template: type[rg_ds.MetaDataclass]) -> type[rg_ds.MetaDataclass]:
     rg_args = copy.deepcopy(ic_3d_flow_template)
     rg_args.project_name = "intel_foveros_ic_3d"
     rg_args.subtool_args.buffer_dse = True
@@ -64,7 +64,7 @@ def test_buffer_dse_conf_init(buffer_dse_conf_init_tb, request):
 
 @pytest.mark.buff_3d
 @skip_if_fixtures_only
-def test_buffer_dse(ic_3d_tb: rg_ds.RadGenArgs, request):
+def test_buffer_dse(ic_3d_tb: type[rg_ds.MetaDataclass], request):
     """
 
     """

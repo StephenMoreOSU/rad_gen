@@ -132,6 +132,8 @@ def main(args: argparse.Namespace | None = None) -> Tuple[ Any | None, rg_ds.Tre
     if "asic_dse" in rad_gen_info.keys():
         subtool = "asic_dse"
         if rad_gen_info["asic_dse"].mode.result_parse:
+            # top_lvl_mods = ["router_wrap_bk"] 
+            #os.listdir(rad_gen_info["asic_dse"].common.project_tree.search_subtrees)
             asic_dse.compile_results(rad_gen_info["asic_dse"])
         # If a design sweep config file is specified, modify the flow settings for each design in sweep
         elif rad_gen_info["asic_dse"].mode.sweep_gen:

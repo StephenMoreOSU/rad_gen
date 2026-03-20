@@ -6,7 +6,9 @@ pandas
 numpy
 pyYAML
 pandas
-pip
+# Required for installing editable python packages
+pip >= 21.3
+setuptools >= 64.0.0
 # IC 3D 
 plotly
 shapely

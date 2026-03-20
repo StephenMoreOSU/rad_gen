@@ -79,6 +79,208 @@ def log_format_list(*args : Tuple[str]) -> str:
         formatted_args = ":"
     return formatted_args
 
+
+def pr_red(skk) -> str: 
+    return "\033[91m{}\033[00m" .format(skk)
+
+def pr_green(skk) -> str: 
+    return "\033[92m{}\033[00m" .format(skk)
+
+def pr_yellow(skk) -> str: 
+    return "\033[93m{}\033[00m" .format(skk)
+
+def pr_light_purple(skk) -> str: 
+    return "\033[94m{}\033[00m" .format(skk)
+
+def pr_purple(skk) -> str: 
+    return "\033[95m{}\033[00m" .format(skk)
+
+def pr_cyan(skk) -> str: 
+    return "\033[96m{}\033[00m" .format(skk)
+
+def pr_light_gray(skk) -> str: 
+    return "\033[97m{}\033[00m" .format(skk)
+
+def pr_black(skk) -> str: 
+    return "\033[98m{}\033[00m" .format(skk)
+
+
+# Define the ASCII art for each character
+ascii_art = {
+    'A': [
+        '   _   ',
+        '  /_\  ',
+        ' / _ \\ ',
+        '/_/ \_\\',
+    ],
+    'B': [
+        ' ___ ',
+        '| _ )',
+        '| _ \\',
+        '|___/',
+    ],
+    'C': [
+        '  ___ ',
+        ' / __|',
+        '| (__ ',
+        ' \___|',
+    ],
+    'D': [
+        ' ___  ',
+        '|   \ ',
+        '| |) |',
+        '|___/ ',
+    ],
+    'E': [
+        ' ___ ',
+        '| __|',
+        '| _| ',
+        '|___|',
+    ],
+    'F': [
+        ' ___ ',
+        '| __|',
+        '| _| ',
+        '|_|  ',
+    ],
+    'G': [
+        '  ___ ',
+        ' / __|',
+        '| (_ |',
+        ' \___|',
+    ],
+    'H': [
+        ' _  _ ',
+        '| || |',
+        '| __ |',
+        '|_||_|',
+    ],
+    'I': [
+        ' ___ ',
+        '|_ _|',
+        ' | | ',
+        '|___|',
+    ],
+    'J': [
+        '    _ ',
+        ' _ | |',
+        '| || |',
+        ' \__/ ',
+    ],
+    'K': [
+        ' _  __',
+        '| |/ /',
+        '|   < ',
+        '|_|\_\\',
+    ],
+    'L': [
+        ' _    ',
+        '| |   ',
+        '| |__ ',
+        '|____|',
+    ],
+    'M': [
+        ' __  __ ',
+        '|  \/  |',
+        '| |\/| |',
+        '|_|  |_|',
+    ],
+    'N': [
+        ' _  _ ',
+        '| \| |',
+        '| .` |',
+        '|_|\_|',
+    ],
+    'O': [
+        '  ___  ',
+        ' / _ \ ',
+        '| (_) |',
+        ' \___/ ',
+    ],
+    'P': [
+        ' ___  ',
+        '| _ \\ ',
+        '|  _/ ',
+        '|_|   ',
+    ],
+    'Q': [
+        '  ___  ',
+        ' / _ \ ',
+        '| (_) |',
+        ' \__\_\\',
+    ],
+    'R': [
+        ' ___ ',
+        '| _ \\',
+        '|   /',
+        '|_|_\\',
+    ],
+    'S': [
+        ' ___ ',
+        '/ __|',
+        '\__ \\',
+        '|___/',
+    ],
+    'T': [
+        ' _____ ',
+        '|_   _|',
+        '  | |  ',
+        '  |_|  ',
+    ],
+    'U': [
+        ' _   _ ',
+        '| | | |',
+        '| |_| |',
+        ' \___/ ',
+    ],
+    'V': [
+        '__   __',
+        '\ \ / /',
+        ' \ V / ',
+        '  \_/  ',
+    ],
+    'W': [
+        '__      __',
+        '\ \    / /',
+        ' \ \/\/ / ',
+        '  \_/\_/  ',
+    ],
+    'X': [
+        '__  __',
+        '\ \/ /',
+        ' >  < ',
+        '/_/\_\\',
+    ],
+    'Y': [
+        '__   __',
+        '\ \ / /',
+        ' \ V / ',
+        '  |_|  ',
+    ],
+    'Z': [
+        '  ____',
+        ' |_  /',
+        '  / / ',
+        ' /___|',
+    ],
+    # ... (Define all letters and numbers in similar fashion)
+}
+
+def text2ascii(text):
+    lines = ['' for _ in range(4)]  # Assuming each character art is 4 lines tall
+    for char in text.upper():
+        if char in ascii_art:
+            char_art = ascii_art[char]
+            for i in range(4):
+                lines[i] += char_art[i] + ''  # Add some space between characters
+        else:
+            for i in range(4):
+                lines[i] += ' ' * 8  # Placeholder for undefined characters
+    return '\n'.join(lines)
+
+
+
+
 #  ██████╗ ███████╗███╗   ██╗███████╗██████╗  █████╗ ██╗         ██╗   ██╗████████╗██╗██╗     ███████╗
 # ██╔════╝ ██╔════╝████╗  ██║██╔════╝██╔══██╗██╔══██╗██║         ██║   ██║╚══██╔══╝██║██║     ██╔════╝
 # ██║  ███╗█████╗  ██╔██╗ ██║█████╗  ██████╔╝███████║██║         ██║   ██║   ██║   ██║██║     ███████╗
@@ -1707,6 +1909,10 @@ def init_structs_top(args: argparse.Namespace, default_arg_vals: Dict[str, Any])
             rad_gen_info[subtool] = fn_to_call( {k.replace(f"{subtool}.","") : v for k,v in subtool_confs[subtool].items()}, common ) 
 
             # Common assertions required for all subtools
+            if not rad_gen_info[subtool].common.obj_dir:
+                rad_gen_info[subtool].common.obj_dir = os.path.join(rad_gen_info[subtool].common.rad_gen_home_path, "tmp", subtool)
+                os.makedirs(rad_gen_info[subtool].common.obj_dir, exist_ok = True)
+                
             assert os.path.exists(rad_gen_info[subtool].common.obj_dir)
             
         else:
@@ -1898,6 +2104,7 @@ def init_asic_obj_dir(
     # Users can specify a specific obj directory
     if common.manual_obj_dir != None:
         obj_dir_path = os.path.abspath(os.path.expanduser(common.manual_obj_dir))
+        print(obj_dir_path)
         # if this does not exist create it now
         os.makedirs(obj_dir_path, exist_ok = True)
     # Or they can use the latest created obj dir
@@ -1922,7 +2129,7 @@ def init_asic_obj_dir(
             rad_gen_log(f"Symlink already exists @ {project_obj_dpath}", rad_gen_log_fd)
         else:
             # If symlink exists but points to wrong location, remove it (just unlinks doesn't delete the directory)
-            if os.readlink(project_obj_dpath) != obj_dir_path:
+            if os.path.islink(project_obj_dpath) and os.readlink(project_obj_dpath) != obj_dir_path:
                 os.unlink(project_obj_dpath)
             os.symlink(obj_dir_path, project_obj_dpath)
     # If we don't specify a manual obj directory we can directly append our new obj directory to the project tree to create it + add to data structure
@@ -2089,8 +2296,6 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
         common_asic_flow.hdl_dpath != None
     )
 
-
-
     asic_dse_mode: rg_ds.AsicDseMode = init_dataclass(
         rg_ds.AsicDseMode, 
         strip_hier(asic_dse_conf, strip_tag="mode"),
@@ -2109,7 +2314,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
 
     # Assert valid combinations
     # Cannot run both sweep and flow confs at the same time
-    assert not (asic_dse_conf.get("sweep_conf_fpath") == None and asic_dse_conf.get("flow_conf_fpaths") == None), "ERROR: No task can be run from given user parameters"
+    # assert not (asic_dse_conf.get("sweep_conf_fpath") == None and asic_dse_conf.get("flow_conf_fpaths") == None), "ERROR: No task can be run from given user parameters"
     # If not using sram compiler (doesn't need a project dir) make sure user provides a project directory
     assert not (common.project_name == None and not common_asic_flow.flow_stages.sram.run and flow_conf_valid), "ERROR: Project name must be specified if not running SRAM compiler" 
         
@@ -2123,7 +2328,8 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
     #  \__ \\ \/\/ /| _|| _||  _/ | (_ | _|| .` |
     #  |___/ \_/\_/ |___|___|_|    \___|___|_|\_|
 
-    if asic_dse_mode.sweep_gen:
+    # if asic_dse_mode.sweep_gen: # SM: 3/8/2025
+    if asic_dse_conf.get("sweep_conf_fpath"):
         sweep_conf: dict = parse_config(
             asic_dse_conf.get("sweep_conf_fpath"), 
             validate_paths = True, 
@@ -2146,42 +2352,43 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
             base_config,
             common.project_tree,
         )
-    if design_sweep_info.type == "rtl":
-        # If doing RTL sweep we have to unflatten the portion of the config describing RTL params
-        # TODO remove this + refactor and unify config file formats
-        procd_params = [] 
-        for rtl_param, sweep_vals in copy.deepcopy(design_sweep_info.rtl_params.sweep).items():
-            top_hier_key = str(rtl_param).split(".")[0]
-            if top_hier_key in procd_params:
-                del design_sweep_info.rtl_params.sweep[rtl_param]
-                continue
-            # if hierarchy is found (param is a dict originally)
-            if "." in rtl_param:
-                design_sweep_info.rtl_params.sweep[top_hier_key] = strip_hier(design_sweep_info.rtl_params.sweep, top_hier_key)
-                del design_sweep_info.rtl_params.sweep[rtl_param]
-                procd_params.append(top_hier_key)
-            
-    # Logic to initialize project tree and copy over RTL files
-    if design_sweep_info.type != "sram":
-        if design_sweep_info.hdl_dpath:
-            exts = ['.v','.sv','.vhd',".vhdl", ".vh", ".svh"]
-            _, hdl_search_paths = rec_get_flist_of_ext(design_sweep_info.hdl_dpath, exts)
-            if hdl_search_paths:
-                # Is assumed sanitized by the parse_config (ie path exists)
-                rtl_src_dpath = find_common_root_dir(hdl_search_paths)
-                rtl_dst_tree: rg_ds.Tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
-                rtl_dst_tree.scan_dir = True
-                rtl_dst_dpath = rtl_dst_tree.path
-                # Copy tree recursivley to project tree, just including all files assuming they will be part of the RTL we want, possibly could filter for specific files in the future
-                shutil.copytree(rtl_src_dpath, rtl_dst_dpath, dirs_exist_ok=True)
-                rtl_dst_tree.update_tree()
-            else:
-                # Our RTL is coming from the base config input_files
-                rtl_dst_tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
-                for fpath in base_config.get("synthesis.inputs.input_files"):
-                    # If we don't find a matching file in our rtl.src dir we will copy what exists in our conf over
-                    if not rec_find_fpath(rtl_dst_tree.path, os.path.basename(fpath)):
-                        shutil.copy(fpath, rtl_dst_tree.path)
+        # SM: 3/8/2025
+        if design_sweep_info.type == "rtl":
+            # If doing RTL sweep we have to unflatten the portion of the config describing RTL params
+            # TODO remove this + refactor and unify config file formats
+            procd_params = [] 
+            for rtl_param, sweep_vals in copy.deepcopy(design_sweep_info.rtl_params.sweep).items():
+                top_hier_key = str(rtl_param).split(".")[0]
+                if top_hier_key in procd_params:
+                    del design_sweep_info.rtl_params.sweep[rtl_param]
+                    continue
+                # if hierarchy is found (param is a dict originally)
+                if "." in rtl_param:
+                    design_sweep_info.rtl_params.sweep[top_hier_key] = strip_hier(design_sweep_info.rtl_params.sweep, top_hier_key)
+                    del design_sweep_info.rtl_params.sweep[rtl_param]
+                    procd_params.append(top_hier_key)
+                
+        # Logic to initialize project tree and copy over RTL files
+        if design_sweep_info.type != "sram":
+            if design_sweep_info.hdl_dpath:
+                exts = ['.v','.sv','.vhd',".vhdl", ".vh", ".svh"]
+                _, hdl_search_paths = rec_get_flist_of_ext(design_sweep_info.hdl_dpath, exts)
+                if hdl_search_paths:
+                    # Is assumed sanitized by the parse_config (ie path exists)
+                    rtl_src_dpath = find_common_root_dir(hdl_search_paths)
+                    rtl_dst_tree: rg_ds.Tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
+                    rtl_dst_tree.scan_dir = True
+                    rtl_dst_dpath = rtl_dst_tree.path
+                    # Copy tree recursivley to project tree, just including all files assuming they will be part of the RTL we want, possibly could filter for specific files in the future
+                    shutil.copytree(rtl_src_dpath, rtl_dst_dpath, dirs_exist_ok=True)
+                    rtl_dst_tree.update_tree()
+                else:
+                    # Our RTL is coming from the base config input_files
+                    rtl_dst_tree = common.project_tree.search_subtrees(f"{common.project_name}.rtl.src", is_hier_tag = True)[0]
+                    for fpath in base_config.get("synthesis.inputs.input_files"):
+                        # If we don't find a matching file in our rtl.src dir we will copy what exists in our conf over
+                        if not rec_find_fpath(rtl_dst_tree.path, os.path.basename(fpath)):
+                            shutil.copy(fpath, rtl_dst_tree.path)
 
     # For each design sweep info
 

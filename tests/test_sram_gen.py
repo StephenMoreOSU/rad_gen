@@ -14,19 +14,19 @@ import tests.conftest as conftest
 from tests.conftest import skip_if_fixtures_only
 
 import pytest
-
+import shutil
 import pandas as pd
 import copy
 
 
 @pytest.fixture(scope='session')
-def sram_gen() -> rg_ds.RadGenArgs:
+def sram_gen() -> type[rg_ds.MetaDataclass]:
     """
         Returns:
             The driver for generating SRAM configs + RTL
     """
     tests_tree: rg_ds.Tree
-    tests_tree, _, test_name, _, _ = tests_common.get_test_info()    
+    tests_tree, test_grp_name, test_name, _, _ = tests_common.get_test_info()    
     
     cur_test_input_dpath: str = tests_tree.search_subtrees(
         f"tests.data.{test_name}.inputs",
@@ -39,7 +39,11 @@ def sram_gen() -> rg_ds.RadGenArgs:
         sweep_conf_fpath = sram_sweep_path,
     )
     sram_gen_args = rg_ds.RadGenArgs(
-        override_outputs = True,
+        manual_obj_dir = os.path.join(
+            tests_tree.search_subtrees(f"tests.data.{test_grp_name}.outputs", is_hier_tag = True)[0].path,
+            "sram_gen_sweep"
+        ),
+        # override_outputs = True,
         subtools = ["asic_dse"],
         subtool_args = asic_dse_args,
     )
@@ -47,10 +51,10 @@ def sram_gen() -> rg_ds.RadGenArgs:
     return sram_gen_args
 
 @pytest.fixture(scope='session')
-def sram_gen_output(sram_gen: rg_ds.RadGenArgs) -> Tuple[
-    List[rg_ds.RadGenArgs],
+def sram_gen_output(sram_gen: type[rg_ds.MetaDataclass]) -> Tuple[
+    List[type[rg_ds.MetaDataclass]],
     rg_ds.Tree,
-    rg_ds.RadGenArgs
+    type[rg_ds.MetaDataclass]
 ]:
     """
         Fixture to ingest the SRAM sweep generation driver, run the sweep command, and return its output
@@ -281,6 +285,7 @@ def test_sram_gen(sram_gen_output, get_stitched_srams, request):
             sram_gen_output: The output of the SRAM sweep generation driver
             get_stitched_srams: The list of stitched SRAM macros to be generated / verified
             request: pytest request, for @skip_if_fixtures_only decorator, to skip if only fixtures are being run
+
     """
     proj_tree: rg_ds.Tree
     _, proj_tree, _ = sram_gen_output
@@ -315,9 +320,16 @@ def test_sram_gen(sram_gen_output, get_stitched_srams, request):
 def single_macro_asic_flow_tb(
     hammer_flow_template, 
     get_dut_single_macro
-) -> rg_ds.RadGenArgs:
+) -> type[rg_ds.MetaDataclass]:
     """
+        This fixture generates the RAD-Gen driver for the ASIC flow of a single SRAM Macro
         
+        Args:
+            hammer_flow_template: The path to the hammer flow template
+            get_dut_single_macro: The fixture returning the Macro information for which we are running the ASIC flow on
+
+        Todos:
+            - Add determine the top_lvl_module based on the input from `get_dut_single_macro`
     """
     proj_tree: rg_ds.Tree
     subtool_fields: dict = {
@@ -325,7 +337,7 @@ def single_macro_asic_flow_tb(
     }
     # We want to test the asic flow for a single sram macro
     proj_tree, test_macro_conf_fpath, test_sram_macro_params = get_dut_single_macro
-    rg_args: rg_ds.RadGenArgs = tests_common.gen_hammer_flow_rg_args(
+    rg_args: type[rg_ds.MetaDataclass] = tests_common.gen_hammer_flow_rg_args(
         hammer_flow_template = hammer_flow_template,
         proj_name = "sram",
         top_lvl_module = "SRAM2RW128x32_wrapper",
@@ -340,6 +352,31 @@ single_macro_asic_flow_conf_init_tb = conftest.create_rg_fixture(
     fixture_type = 'conf_init',
 )
 
+@pytest.fixture(scope='session')
+def single_macro_virtuoso_gds_tb(
+    single_macro_asic_flow_tb,
+    request: pytest.FixtureRequest,
+) -> type[rg_ds.MetaDataclass]:
+    rg_args = copy.deepcopy(single_macro_asic_flow_tb)
+    rg_args.subtool_args.common_asic_flow__flow_stages__sram__run = False
+    rg_args.subtool_args.common_asic_flow__flow_stages__syn__run = False
+    rg_args.subtool_args.common_asic_flow__flow_stages__par__run = False
+    rg_args.subtool_args.common_asic_flow__flow_stages__pt__run = True
+    rg_args.subtool_args.scripts__virtuoso_setup_path = os.path.join(
+        tests_common.get_rg_home(),"scripts","setup_virtuoso_env.sh"
+    )
+    # TODO figure out a good place to tell people to make this rundir
+    rg_args.subtool_args.stdcell_lib__pdk_rundir_path = os.path.expanduser(
+        os.path.join("~","ASAP_7_IC","asap7_rundir")
+    )
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+single_macro_virtuoso_gds_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'single_macro_virtuoso_gds_tb',
+    fixture_type = 'conf_init',
+)
+
 @pytest.mark.sram
 @pytest.mark.asic_flow
 @pytest.mark.init
@@ -351,11 +388,14 @@ def test_single_macro_asic_flow_conf_init(single_macro_asic_flow_conf_init_tb, r
 @pytest.mark.asic_flow
 @skip_if_fixtures_only
 def test_single_macro_asic_flow(single_macro_asic_flow_tb, request):
-    tests_common.run_verif_hammer_asic_flow(rg_args = single_macro_asic_flow_tb)
+    tests_common.run_verif_hammer_asic_flow(
+        rg_args = single_macro_asic_flow_tb,
+        backup_flag = False,
+    )
 
 
 @pytest.fixture(scope='session')
-def single_macro_parse_tb(single_macro_asic_flow_tb) -> rg_ds.RadGenArgs:
+def single_macro_parse_tb(single_macro_asic_flow_tb) -> type[rg_ds.MetaDataclass]:
     rg_args = copy.deepcopy(single_macro_asic_flow_tb)
     rg_args.subtool_args.compile_results = True
     tests_common.write_fixture_json(rg_args)
@@ -382,6 +422,35 @@ def test_single_macro_parse(single_macro_parse_tb, request):
         backup_flag = False, # Don't backup as this is for parsing existing results
     )
 
+@pytest.mark.sram
+@pytest.mark.gds
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_single_macro_virtuoso_gds_conf_init(single_macro_virtuoso_gds_conf_init_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
+    tests_common.run_and_verif_conf_init(single_macro_virtuoso_gds_conf_init_tb)
+
+@pytest.mark.sram
+@pytest.mark.asic_flow
+@pytest.mark.gds
+@skip_if_fixtures_only
+def test_single_macro_virtuoso_gds(single_macro_virtuoso_gds_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
+    """
+        Todos:
+            * Add the asic sw pt as a dependancy for this test
+    """
+    if not os.path.exists(single_macro_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path):
+        pytest.skip(f"Path {single_macro_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path} does not exist")
+    top_lvl_module: str = os.path.basename(single_macro_virtuoso_gds_tb.manual_obj_dir)
+    updated_obj_dir: str = tests_common.get_obj_dir_tb(top_lvl_module = top_lvl_module)
+    if os.path.isdir(updated_obj_dir):
+        backup_obj_dpath = f"{updated_obj_dir}_backup_{rg_ds.create_timestamp()}"
+        shutil.move(updated_obj_dir, backup_obj_dpath)
+    shutil.copytree(single_macro_virtuoso_gds_tb.manual_obj_dir, updated_obj_dir)
+    single_macro_virtuoso_gds_tb.manual_obj_dir = updated_obj_dir
+    tests_common.run_verif_hammer_asic_flow(
+        rg_args = single_macro_virtuoso_gds_tb,
+        backup_flag = False,
+    )
 #   ___ ___    _   __  __   ___ _____ ___ _____ ___ _  _ ___ ___    __  __   _   ___ ___  ___  
 #  / __| _ \  /_\ |  \/  | / __|_   _|_ _|_   _/ __| || | __|   \  |  \/  | /_\ / __| _ \/ _ \ 
 #  \__ \   / / _ \| |\/| | \__ \ | |  | |  | || (__| __ | _|| |) | | |\/| |/ _ \ (__|   / (_) |
@@ -391,13 +460,13 @@ def test_single_macro_parse(single_macro_parse_tb, request):
 def stitched_sram_asic_flow_tb(
     hammer_flow_template,
     get_dut_stitched_sram
-) -> rg_ds.RadGenArgs:
+) -> type[rg_ds.MetaDataclass]:
     proj_tree: rg_ds.Tree
     proj_tree, test_stitched_conf_fpath, test_stitched_sram_params = get_dut_stitched_sram
     subtool_fields: dict = {
         "common_asic_flow__flow_stages__sram__run": True,
     }
-    rg_args: rg_ds.RadGenArgs = tests_common.gen_hammer_flow_rg_args(
+    rg_args: type[rg_ds.MetaDataclass] = tests_common.gen_hammer_flow_rg_args(
         hammer_flow_template = hammer_flow_template,
         proj_name = "sram",
         top_lvl_module = "sram_macro_map_2x256x512",
@@ -411,6 +480,31 @@ def stitched_sram_asic_flow_tb(
 
 stitched_sram_asic_flow_conf_init_tb = conftest.create_rg_fixture(
     input_fixture = 'stitched_sram_asic_flow_tb',
+    fixture_type = 'conf_init',
+)
+
+@pytest.fixture(scope='session')
+def stitched_sram_virtuoso_gds_tb(
+    stitched_sram_asic_flow_tb,
+    request: pytest.FixtureRequest,
+) -> type[rg_ds.MetaDataclass]:
+    rg_args = copy.deepcopy(stitched_sram_asic_flow_tb)
+    rg_args.subtool_args.common_asic_flow__flow_stages__sram__run = False
+    rg_args.subtool_args.common_asic_flow__flow_stages__syn__run = False
+    rg_args.subtool_args.common_asic_flow__flow_stages__par__run = False
+    rg_args.subtool_args.common_asic_flow__flow_stages__pt__run = True
+    rg_args.subtool_args.scripts__virtuoso_setup_path = os.path.join(
+        tests_common.get_rg_home(),"scripts","setup_virtuoso_env.sh"
+    )
+    # TODO figure out a good place to tell people to make this rundir
+    rg_args.subtool_args.stdcell_lib__pdk_rundir_path = os.path.expanduser(
+        os.path.join("~","ASAP_7_IC","asap7_rundir")
+    )
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+stitched_sram_virtuoso_gds_conf_init_tb = conftest.create_rg_fixture(
+    input_fixture = 'stitched_sram_virtuoso_gds_tb',
     fixture_type = 'conf_init',
 )
 
@@ -428,7 +522,7 @@ def test_stitched_sram_asic_flow(stitched_sram_asic_flow_tb, request):
     tests_common.run_verif_hammer_asic_flow(rg_args = stitched_sram_asic_flow_tb)
 
 @pytest.fixture(scope='session')
-def stitched_sram_parse(stitched_sram_asic_flow_tb) -> rg_ds.RadGenArgs:
+def stitched_sram_parse(stitched_sram_asic_flow_tb) -> type[rg_ds.MetaDataclass]:
     rg_args = copy.deepcopy(stitched_sram_asic_flow_tb)
     rg_args.subtool_args.compile_results = True
     tests_common.write_fixture_json(rg_args)
@@ -450,8 +544,42 @@ def test_stitched_sram_parse_conf_init(stitched_sram_parse_conf_init_tb, request
 @pytest.mark.parse
 @skip_if_fixtures_only
 def test_stitched_sram_parse(stitched_sram_parse, request):
+    """
+        Todos:
+            * Add the asic sw pt as a dependancy for this test
+    """
     tests_common.run_verif_hammer_asic_flow(
         rg_args = stitched_sram_parse,
         backup_flag = False, # Don't backup as this is for parsing existing results
     )
 
+
+@pytest.mark.sram
+@pytest.mark.gds
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_stitched_sram_virtuoso_gds_conf_init(stitched_sram_virtuoso_gds_conf_init_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
+    tests_common.run_and_verif_conf_init(stitched_sram_virtuoso_gds_conf_init_tb)
+
+@pytest.mark.sram
+@pytest.mark.asic_flow
+@pytest.mark.gds
+@skip_if_fixtures_only
+def test_stitched_sram_virtuoso_gds(stitched_sram_virtuoso_gds_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
+    """
+        Todos:
+            * Add the asic sw pt as a dependancy for this test
+    """
+    if not os.path.exists(stitched_sram_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path):
+        pytest.skip(f"Path {stitched_sram_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path} does not exist")
+    top_lvl_module: str = os.path.basename(stitched_sram_virtuoso_gds_tb.manual_obj_dir)
+    updated_obj_dir: str = tests_common.get_obj_dir_tb(top_lvl_module = top_lvl_module)
+    if os.path.isdir(updated_obj_dir):
+        backup_obj_dpath = f"{updated_obj_dir}_backup_{rg_ds.create_timestamp()}"
+        shutil.move(updated_obj_dir, backup_obj_dpath)
+    shutil.copytree(stitched_sram_virtuoso_gds_tb.manual_obj_dir, updated_obj_dir, dirs_exist_ok=True)
+    stitched_sram_virtuoso_gds_tb.manual_obj_dir = updated_obj_dir
+    tests_common.run_verif_hammer_asic_flow(
+        rg_args = stitched_sram_virtuoso_gds_tb,
+        backup_flag = False,
+    )
