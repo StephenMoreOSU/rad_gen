@@ -162,70 +162,6 @@ def compile(hammer_tech_pdk_path: str, rw_ports: int, width: int, depth: int):
         i += 1
     return mapping_options[0]
 
-
-
-    # for macro in macros:
-    #     macro["depth_util"] = macro["depth"] / max_depth
-    #     macro["width_util"] = macro["width"] / max_width
-    #     macro["cost"] = (macro["depth_util"] * depth_weight) + (macro["width_util"] * width_weight)
-
-    for sram in srams.split("\n"):
-        macro_mapping = {}
-        if "SRAM" in sram:
-            macro_rw_ps, macro_w, macro_d = decode_sram_name(sram)
-        else:
-            continue
-        # we need to match the width exactly
-        # We only need to get the width / depth to be at least as big as the requested width / depth
-        if width == macro_w or (macro_w < width and width % macro_w == 0) and macro_rw_ps == rw_ports:
-            # mult num of macros until we get a matching width
-            if(macro_w < width):
-                num_w_macros = int(math.ceil(width / macro_w)) # Take ceil to make sure our width is at least greater than requested width
-            else:
-                num_w_macros = 1
-            # num_d_macros = 1
-            # cur_compiled_depth = macro_d
-            if (macro_d < depth):
-                num_d_macros = int(math.ceil(depth / macro_d)) # Take ceil to make sure our depth is at least greater than requested depth
-            else:
-                num_d_macros
-            while macro_d < depth:
-                cur_compiled_depth += macro_d
-                num_d_macros += 1
-            # (n_w_macros * width_weight) * (num_d_macros * depth_weight) *
-            util_perc = (width*depth) / (cur_compiled_depth * n_w_macros * macro_w)
-            """ number of macros in X direction * width weight * number of macros in Y direction * depth weight * read/write ports * depth """
-            # cur_cost = (1/(macro_rw_ps * (cur_compiled_depth * macro_w * n_w_macros) - (width*depth*rw_ports)))*(num_d_macros * depth_weight) + (n_w_macros * width_weight)
-            cur_cost = util_perc 
-            (1/(util_perc + 1e-3))*(num_d_macros * depth_weight)*(n_w_macros * width_weight)
-            macro_mapping = {
-                "macro": sram,
-                "num_rw_ports": macro_rw_ps,
-                "num_w_macros" : n_w_macros,
-                "num_d_macros": num_d_macros,
-                "macro_w": macro_w,
-                "macro_d": macro_d,
-                "depth": cur_compiled_depth,
-                "width": n_w_macros*macro_w,
-                "macro_mapped_size": cur_compiled_depth * n_w_macros * width,
-                "util_perc": (width*depth) / (cur_compiled_depth * n_w_macros * macro_w),
-                "cost": truncate(cur_cost,3)
-            }
-            if cur_cost <= best_cost:
-                best_cost = cur_cost
-                mapping_options.insert(0,macro_mapping)
-            # print(macro_mapping)
-            #print(f"SRAM: {sram} Cost: {truncate(cur_cost,3)} Macros: [{n_w_macros}, {num_d_macros}] Macro_dims: [{macro_w}, {macro_d}]")
-            #print(f"mapped_size {cur_compiled_depth * n_w_macros * width} : req_size {width*depth}")
-            #print(f"SRAM: {sram} Area Increase Factor {truncate((cur_compiled_depth * n_w_macros * width) / (width*depth),3)}")
-    #print(f"Best SRAM: {macro_mapping} : req_size {width, depth} req_base_cost : {truncate(width * depth,3)}")
-    # print(f'Best SRAM Mapping: {mapping_options[0]}')
-    # for i in range(len(mapping_options)):
-    #     print(f'Best SRAM Mapping: {mapping_options[i]}')
-    
-    return mapping_options[0]
-
-
 def translate_sram_grid(w: int, d: int, mapping_grid: list, cut_bool: bool) -> list:
     # if cut bool is 1 then we are cutting the grid in half in the x direction (vertical cut)
     # if cut bool is 0 then we are cutting the grid in half in the y direction (horizontal cut)
@@ -403,17 +339,6 @@ def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
         f"end",
         f"endmodule"
     ]
-    # two_to_N_mux_mod_lines = [
-    #     "module mux #(",
-    #     f"    parameter N = {mapped_addr_w-macro_addr_w} ",
-    #     f") (",
-    #     f"    input logic [N-1:0] select,",
-    #     f"    input logic [{mapping_dict['macro_w'] * mapping_dict['num_w_macros']}-1:0] in [2**N-1:0],",
-    #     f"    output logic [{mapping_dict['macro_w'] * mapping_dict['num_w_macros']}-1:0] out",
-    #     f");",
-    #     f"    assign out = in[select];",
-    #     f"endmodule",
-    # ]
 
     two_to_N_mux_mod_lines = [
         "module mux #(",
@@ -538,13 +463,6 @@ def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
         ]
 
         # We need a N to 1 mux of size width
-        # mux_isnt_lines += [
-        #     f"mux #(.N({mapped_addr_w-macro_addr_w})) u_mux_{i}_{mapping_dict['num_d_macros']}_to_1 (",
-        #     f"   .select(reg_addr_{i}[{mapped_addr_w}-1:{mapped_addr_w-(mapped_addr_w-macro_addr_w)}]),",
-        #     f"   .in (mux_in_{i}),",
-        #     f"   .out(reg_rdata_{i})",
-        #     f");",
-        # ]
         mux_isnt_lines += [
             f"mux #(.M({mapping_dict['num_d_macros']})) u_mux_{i}_{mapping_dict['num_d_macros']}_to_1 (",
             f"   .select(reg_addr_{i}[{mapped_addr_w}-1:{mapped_addr_w-(mapped_addr_w-macro_addr_w)}]),",
@@ -592,21 +510,3 @@ def write_rtl_from_mapping(mapping_dict: dict, outpath: str) -> tuple:
     # TODO its assumed that the coordinates are inside of inst names
     mapping_dict["macro_inst_names"] = macro_inst_names
     return mapping_dict, compiled_sram_outpath
-
-    # We need to define the wires used
-
-    # print(sram_inst_rtl)
-
-
-
-# def full_compile(mem_dict: dict, tech: str):
-#     """Compile the memory dictionary into config and RTL files"""
-#     mapping = compile(mem_dict["rw_ports"],mem_dict["w"],mem_dict["d"],tech)
-#     sram_map_info, rtl_outpath = write_rtl_from_mapping()
-
-# def main():
-#     sram_compiler(2,512,512,"asap7")
-
-
-# if __name__ == "__main__":
-#     main()
