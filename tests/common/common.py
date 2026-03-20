@@ -24,6 +24,24 @@ import pandas as pd
 def get_rg_home() -> str:
     return os.environ.get("RAD_GEN_HOME")
 
+def get_obj_dir_tb(top_lvl_module: str, stack_lvl: int = 3) -> str:
+    """
+        Run this to get an updated obj dir for a downstream test using a shared fixture
+    """
+    _, _, fixture_name, test_out_dpath, _ = get_test_info(stack_lvl)
+    test_name: str = fixture_name.replace("_tb", "")
+    obj_dir: str = os.path.join(test_out_dpath, test_name, top_lvl_module)
+    return obj_dir
+
+def get_obj_dir_test(top_lvl_module: str, stack_lvl: int = 3) -> str:
+    """
+        Run this to get an obj dir post test for results to be copied over
+    """
+    _, _, fixture_name, test_out_dpath, _ = get_test_info(stack_lvl)
+    test_name: str = fixture_name.replace("test_", "")
+    obj_dir: str = os.path.join(test_out_dpath, test_name, top_lvl_module)
+    return obj_dir
+
 def init_tests_tree() -> rg_ds.Tree:
     rad_gen_home: str = os.environ.get("RAD_GEN_HOME")
     tests_tree: rg_ds.Tree = rg_ds.Tree(
@@ -131,12 +149,14 @@ def verify_flow_stage(obj_dpath: str, golden_results_dpath: str, stage_name: str
         verif_keys = par_verif_keys
     # The row index will always be 0 since the comparison is for a single run
     row_idx: int = 0
+    # % tolerance allowed
+    tolerance: float = 2.0 # Just set to 2% for now
     for col in stage_cmp_df.columns:
         if col in verif_keys:
             cmp_val: float | str = stage_cmp_df[col].values[row_idx]
             try:
                 if isinstance(cmp_val, float):
-                    assert (cmp_val < 0.1 and cmp_val > 0) or (cmp_val > -0.1 and cmp_val < 0 ) or cmp_val == 0.0 # % difference tolerance we allow
+                    assert (cmp_val < tolerance and cmp_val > 0) or (cmp_val > -tolerance and cmp_val < 0 ) or cmp_val == 0.0 # % difference tolerance we allow
                 elif isinstance(cmp_val, str):
                     assert cmp_val == "Matching"
                 else:
@@ -221,17 +241,13 @@ def gen_hammer_flow_rg_args(
     rg_fields: dict = {},
     proj_tree: rg_ds.Tree | None = None,
 ):
-    _, _, fixture_name, test_out_dpath, _ = get_test_info(stack_lvl = 3)
     # Unique case for parse tests, we want to make sure we still parse the golden results correctly and compare with asic flow
     dummy_hammer_flow_args, template_proj_tree = hammer_flow_template
     if proj_tree is None:
         proj_tree = template_proj_tree
-    test_name: str = fixture_name.replace("_tb", "")
     # Inputs
     if manual_obj_dpath is None and top_lvl_module is not None:
-        manual_obj_dpath = os.path.join(
-            test_out_dpath, test_name, top_lvl_module
-        )
+        manual_obj_dpath = get_obj_dir_tb(top_lvl_module, stack_lvl = 4)
     else:
         assert manual_obj_dpath is not None, "manual_obj_dpath must be provided if top_lvl_module is None"
     
@@ -307,10 +323,10 @@ def write_out_test_cmp(
     result_dpath: str,
     diff_tag: str,
 ) -> str:
-    hier_key_re = re.compile(r"(?<=')\w+(?=')")
+    hier_key_re = re.compile(r"(?<=')\w+(?=')|(?<=\[)\d+(?=\])")
     # Write out to a csv for debugging
     # Format of csv cols
-    if diff_tag in ["added" , "removed"]:
+    if diff_tag in ["added" , "removed", "iterable_added", "iterable_removed"]:
         csv_data: list[list[str]] = [['KEY', 'VALUE']]
     elif diff_tag in ["vals_changed"]:
         csv_data: list[list[str]] = [['KEY', 'TEST VALUE', 'GOLDEN VALUE']]
@@ -321,7 +337,7 @@ def write_out_test_cmp(
     
     for k, v in cmp_dict.items():
         hier_key = '.'.join( hier_key_re.findall(k) )
-        if diff_tag in ["added" , "removed"]:
+        if diff_tag in ["added" , "removed", "iterable_added", "iterable_removed"]:
             csv_data.append([hier_key, v])
         elif diff_tag in "vals_changed":
             csv_data.append([hier_key, v['old_value'], v['new_value']])
@@ -371,7 +387,7 @@ def run_and_verif_conf_init(rg_args: type[rg_ds.MetaDataclass]):
     tests_name_substr: str = tests_name.replace("_conf_init","")
     golden_init_struct_fpath: str = None
     for dname in os.listdir(golden_results_dpath):
-        if tests_name_substr in dname:
+        if tests_name_substr == dname:
             # Look for files with "init_struct" in them
             init_struct_fpaths = [
                 os.path.join(golden_results_dpath, dname, fname)
@@ -399,6 +415,16 @@ def run_and_verif_conf_init(rg_args: type[rg_ds.MetaDataclass]):
     if ddiff:
         result_dpath = os.path.join(test_data_dpath, "results")
         os.makedirs(result_dpath, exist_ok = True)
+        iterable_items_added_dict: dict = ddiff.get('iterable_item_added')
+        if iterable_items_added_dict:
+            iterable_add_csv_fpath: str = write_out_test_cmp(iterable_items_added_dict, tests_name, result_dpath, "iterable_added")
+            print(f"{iterable_add_csv_fpath}:")
+            print(rec_get_human_readable_csv(iterable_add_csv_fpath, tests_tree))
+        iterable_items_removed_dict: dict = ddiff.get('iterable_item_removed')
+        if iterable_items_removed_dict:
+            iterable_rm_csv_fpath: str = write_out_test_cmp(iterable_items_removed_dict, tests_name, result_dpath, "iterable_removed")
+            print(f"{iterable_rm_csv_fpath}:")
+            print(rec_get_human_readable_csv(iterable_rm_csv_fpath, tests_tree))
         # Any values exist in golden but not in test?
         items_added_dict: dict = ddiff.get("dictionary_item_added")
         if items_added_dict:

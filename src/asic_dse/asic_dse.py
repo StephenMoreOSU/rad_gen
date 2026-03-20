@@ -571,7 +571,7 @@ def design_sweep(asic_dse: rg_ds.AsicDSE) -> List[rg_ds.MetaDataclass]:
             script_path = rg_utils.find_newest_file(scripts_out_dpath, f"{design_sweep.top_lvl_module}_rtl_sweep_{rg_ds.create_timestamp(fmt_only_flag=True)}.sh", is_dir = False)
 
         if script_path == None:
-            script_path = os.path.join(scripts_out_dpath, f"{design_sweep.top_lvl_module}_rtl_sweep.sh_{rg_ds.create_timestamp()}.sh")
+            script_path = os.path.join(scripts_out_dpath, f"{design_sweep.top_lvl_module}_rtl_sweep_{rg_ds.create_timestamp()}.sh")
         
         rg_utils.write_out_script(sweep_script_lines, script_path)
 
@@ -601,7 +601,7 @@ def run_asic_flow(asic_dse: rg_ds.AsicDSE) -> Dict[str, Any]:
     rg_utils.rad_gen_log("Done!", rad_gen_log_fd)
     return flow_results
 
-
+# TODO deletion candidate
 def run_asic_dse(asic_dse_cli: rg_ds.AsicDseCLI) -> Tuple[float]:
     global cur_env
     global rad_gen_log_fd

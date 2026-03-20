@@ -105,8 +105,14 @@
                 "run": false,
                 "tool": "cadence"
             },
-            "pt": {
-                "tag": "pt",
+            "timing": {
+                "tag": "timing",
+                "exec_idx": null,
+                "run": false,
+                "tool": "synopsys"
+            },
+            "power": {
+                "tag": "power",
                 "exec_idx": null,
                 "run": false,
                 "tool": "synopsys"

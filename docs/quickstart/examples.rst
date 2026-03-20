@@ -54,10 +54,12 @@ To run the ALU design with a target period of 0ns (as fast as the tools can make
       --subtools asic_dse \
       --compile_results \
       --flow_conf_fpaths tests/data/asic_dse/cad_tools/cadence_tools.yml tests/data/asic_dse/pdks/asap7.yml projects/alu/configs/gen/alu_base__period_0ns__core_util_0.7__effort_standard.json \
-      --tool_env_conf_fpaths tests/data/asic_dse/env.yml \ 
+      --tool_env_conf_fpaths tests/data/asic_dse/env.yml \
+      --common_asic_flow.flow_stages.syn.run \
       --common_asic_flow.flow_stages.par.run \
-      --common_asic_flow.flow_stages.pt.run \
-      --common_asic_flow.flow_stages.syn.run
+      --common_asic_flow.flow_stages.timing.run \
+      --common_asic_flow.flow_stages.power.run
+
 .. 
    Notice how some of the command line arguments are specified hierarchically. RAD-Gen supports many different ways for users to provide configuration parameters.
 
@@ -102,7 +104,7 @@ To run the SRAM generator for a range of SRAM widths, depths, and read write por
 .. code-block:: bash
 
    $ # from <RAD_GEN_HOME>
-   $ 
+   $ python3 rad_gen.py --manual_obj_dir tests/data/sram_gen/outputs/sram_gen_sweep --subtools asic_dse --sweep_conf_fpath tests/data/sram_gen/inputs/sram_sweep.yml
 
 **Corresponding pytest**
 
@@ -133,10 +135,11 @@ To run a single macro SRAM through an ASIC flow we will use the below command:
       --compile_results \
       --flow_conf_fpaths tests/data/asic_dse/cad_tools/cadence_tools.yml tests/data/asic_dse/pdks/asap7.yml shared_resources/sram_lib/configs/gen/sram_SRAM2RW128x32.json \
       --tool_env_conf_fpaths tests/data/asic_dse/env.yml \
-      --common_asic_flow.flow_stages.par.run \
-      --common_asic_flow.flow_stages.pt.run \
       --common_asic_flow.flow_stages.sram.run \
-      --common_asic_flow.flow_stages.syn.run                                                                                                                                    
+      --common_asic_flow.flow_stages.syn.run  \          
+      --common_asic_flow.flow_stages.par.run \
+      --common_asic_flow.flow_stages.timing.run \
+      --common_asic_flow.flow_stages.power.run
 
 
 **Corresponding pytest**
@@ -164,10 +167,11 @@ To run a stitched SRAM through an asic flow we will use the below command:
       --compile_results \
       --flow_conf_fpaths tests/data/asic_dse/cad_tools/cadence_tools.yml tests/data/asic_dse/pdks/asap7.yml shared_resources/sram_lib/configs/gen/sram_config_sram_macro_map_2x256x512.json \
       --tool_env_conf_fpathstests/data/asic_dse/env.yml \
-      --common_asic_flow.flow_stages.par.run \
-      --common_asic_flow.flow_stages.pt.run \
       --common_asic_flow.flow_stages.sram.run \
-      --common_asic_flow.flow_stages.syn.run
+      --common_asic_flow.flow_stages.syn.run  \          
+      --common_asic_flow.flow_stages.par.run \
+      --common_asic_flow.flow_stages.timing.run \
+      --common_asic_flow.flow_stages.power.run
 
 **Corresponding pytest**
 
@@ -303,9 +307,10 @@ To run a NoC RTL sweep point through an ASIC flow we will use the below command:
       --flow_conf_fpathstests/data/asic_dse/cad_tools/cadence_tools.yml tests/data/asic_dse/pdks/asap7.yml \  
       projects/NoC/configs/gen/dummy_base_num_message_classes_5_buffer_size_20_num_nodes_per_router_1_num_dimensions_2_flit_data_width_124_num_vcs_5.json \
       --tool_env_conf_fpathstests/data/asic_dse/env.yml \
-      --common_asic_flow.flow_stages.par.run \
-      --common_asic_flow.flow_stages.pt.run \
       --common_asic_flow.flow_stages.syn.run \
+      --common_asic_flow.flow_stages.par.run \
+      --common_asic_flow.flow_stages.timing.run \
+      --common_asic_flow.flow_stages.power.run \
       --common_asic_flow.hdl_pathprojects/NoC/rtl/src \
       --common_asic_flow.top_lvl_module router_wrap_bk
 

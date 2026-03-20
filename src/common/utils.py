@@ -2329,7 +2329,7 @@ def init_asic_dse_structs(asic_dse_conf: Dict[str, Any], common: rg_ds.Common) -
     #  |___/ \_/\_/ |___|___|_|    \___|___|_|\_|
 
     # if asic_dse_mode.sweep_gen: # SM: 3/8/2025
-    if asic_dse_conf.get("sweep_conf_fpath") and os.path.isfile(asic_dse_conf.get("sweep_conf_fpath")):
+    if asic_dse_conf.get("sweep_conf_fpath"):
         sweep_conf: dict = parse_config(
             asic_dse_conf.get("sweep_conf_fpath"), 
             validate_paths = True, 

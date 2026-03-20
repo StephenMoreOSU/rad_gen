@@ -14,7 +14,7 @@ import tests.conftest as conftest
 from tests.conftest import skip_if_fixtures_only
 
 import pytest
-
+import shutil
 import pandas as pd
 import copy
 
@@ -285,6 +285,7 @@ def test_sram_gen(sram_gen_output, get_stitched_srams, request):
             sram_gen_output: The output of the SRAM sweep generation driver
             get_stitched_srams: The list of stitched SRAM macros to be generated / verified
             request: pytest request, for @skip_if_fixtures_only decorator, to skip if only fixtures are being run
+
     """
     proj_tree: rg_ds.Tree
     _, proj_tree, _ = sram_gen_output
@@ -377,30 +378,6 @@ single_macro_virtuoso_gds_conf_init_tb = conftest.create_rg_fixture(
 )
 
 @pytest.mark.sram
-@pytest.mark.gds
-@pytest.mark.init
-@skip_if_fixtures_only
-def test_single_macro_virtuoso_gds_conf_init(single_macro_virtuoso_gds_conf_init_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
-    tests_common.run_and_verif_conf_init(single_macro_virtuoso_gds_conf_init_tb)
-
-@pytest.mark.sram
-@pytest.mark.asic_flow
-@pytest.mark.gds
-@skip_if_fixtures_only
-def test_single_macro_virtuoso_gds(single_macro_virtuoso_gds_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
-    """
-        Todos:
-            * Add the asic sw pt as a dependancy for this test
-    """
-    if not os.path.exists(single_macro_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path):
-        pytest.skip(f"Path {single_macro_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path} does not exist")
-    tests_common.run_verif_hammer_asic_flow(
-        rg_args = single_macro_virtuoso_gds_tb,
-        backup_flag = False,
-    )
-
-
-@pytest.mark.sram
 @pytest.mark.asic_flow
 @pytest.mark.init
 @skip_if_fixtures_only
@@ -445,6 +422,35 @@ def test_single_macro_parse(single_macro_parse_tb, request):
         backup_flag = False, # Don't backup as this is for parsing existing results
     )
 
+@pytest.mark.sram
+@pytest.mark.gds
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_single_macro_virtuoso_gds_conf_init(single_macro_virtuoso_gds_conf_init_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
+    tests_common.run_and_verif_conf_init(single_macro_virtuoso_gds_conf_init_tb)
+
+@pytest.mark.sram
+@pytest.mark.asic_flow
+@pytest.mark.gds
+@skip_if_fixtures_only
+def test_single_macro_virtuoso_gds(single_macro_virtuoso_gds_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
+    """
+        Todos:
+            * Add the asic sw pt as a dependancy for this test
+    """
+    if not os.path.exists(single_macro_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path):
+        pytest.skip(f"Path {single_macro_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path} does not exist")
+    top_lvl_module: str = os.path.basename(single_macro_virtuoso_gds_tb.manual_obj_dir)
+    updated_obj_dir: str = tests_common.get_obj_dir_tb(top_lvl_module = top_lvl_module)
+    if os.path.isdir(updated_obj_dir):
+        backup_obj_dpath = f"{updated_obj_dir}_backup_{rg_ds.create_timestamp()}"
+        shutil.move(updated_obj_dir, backup_obj_dpath)
+    shutil.copytree(single_macro_virtuoso_gds_tb.manual_obj_dir, updated_obj_dir)
+    single_macro_virtuoso_gds_tb.manual_obj_dir = updated_obj_dir
+    tests_common.run_verif_hammer_asic_flow(
+        rg_args = single_macro_virtuoso_gds_tb,
+        backup_flag = False,
+    )
 #   ___ ___    _   __  __   ___ _____ ___ _____ ___ _  _ ___ ___    __  __   _   ___ ___  ___  
 #  / __| _ \  /_\ |  \/  | / __|_   _|_ _|_   _/ __| || | __|   \  |  \/  | /_\ / __| _ \/ _ \ 
 #  \__ \   / / _ \| |\/| | \__ \ | |  | |  | || (__| __ | _|| |) | | |\/| |/ _ \ (__|   / (_) |
@@ -503,30 +509,6 @@ stitched_sram_virtuoso_gds_conf_init_tb = conftest.create_rg_fixture(
 )
 
 @pytest.mark.sram
-@pytest.mark.gds
-@pytest.mark.init
-@skip_if_fixtures_only
-def test_stitched_sram_virtuoso_gds_conf_init(stitched_sram_virtuoso_gds_conf_init_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
-    tests_common.run_and_verif_conf_init(stitched_sram_virtuoso_gds_conf_init_tb)
-
-@pytest.mark.sram
-@pytest.mark.asic_flow
-@pytest.mark.gds
-@skip_if_fixtures_only
-def test_stitched_sram_virtuoso_gds(stitched_sram_virtuoso_gds_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
-    """
-        Todos:
-            * Add the asic sw pt as a dependancy for this test
-    """
-    if not os.path.exists(stitched_sram_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path):
-        pytest.skip(f"Path {stitched_sram_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path} does not exist")
-    tests_common.run_verif_hammer_asic_flow(
-        rg_args = stitched_sram_virtuoso_gds_tb,
-        backup_flag = False,
-    )
-
-
-@pytest.mark.sram
 @pytest.mark.asic_flow
 @pytest.mark.init
 @skip_if_fixtures_only
@@ -562,8 +544,42 @@ def test_stitched_sram_parse_conf_init(stitched_sram_parse_conf_init_tb, request
 @pytest.mark.parse
 @skip_if_fixtures_only
 def test_stitched_sram_parse(stitched_sram_parse, request):
+    """
+        Todos:
+            * Add the asic sw pt as a dependancy for this test
+    """
     tests_common.run_verif_hammer_asic_flow(
         rg_args = stitched_sram_parse,
         backup_flag = False, # Don't backup as this is for parsing existing results
     )
 
+
+@pytest.mark.sram
+@pytest.mark.gds
+@pytest.mark.init
+@skip_if_fixtures_only
+def test_stitched_sram_virtuoso_gds_conf_init(stitched_sram_virtuoso_gds_conf_init_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
+    tests_common.run_and_verif_conf_init(stitched_sram_virtuoso_gds_conf_init_tb)
+
+@pytest.mark.sram
+@pytest.mark.asic_flow
+@pytest.mark.gds
+@skip_if_fixtures_only
+def test_stitched_sram_virtuoso_gds(stitched_sram_virtuoso_gds_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
+    """
+        Todos:
+            * Add the asic sw pt as a dependancy for this test
+    """
+    if not os.path.exists(stitched_sram_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path):
+        pytest.skip(f"Path {stitched_sram_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path} does not exist")
+    top_lvl_module: str = os.path.basename(stitched_sram_virtuoso_gds_tb.manual_obj_dir)
+    updated_obj_dir: str = tests_common.get_obj_dir_tb(top_lvl_module = top_lvl_module)
+    if os.path.isdir(updated_obj_dir):
+        backup_obj_dpath = f"{updated_obj_dir}_backup_{rg_ds.create_timestamp()}"
+        shutil.move(updated_obj_dir, backup_obj_dpath)
+    shutil.copytree(stitched_sram_virtuoso_gds_tb.manual_obj_dir, updated_obj_dir, dirs_exist_ok=True)
+    stitched_sram_virtuoso_gds_tb.manual_obj_dir = updated_obj_dir
+    tests_common.run_verif_hammer_asic_flow(
+        rg_args = stitched_sram_virtuoso_gds_tb,
+        backup_flag = False,
+    )

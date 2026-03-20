@@ -533,7 +533,14 @@ class Tree:
         if not results:
             raise Exception(f"Tag {target_tag} not found in tree")
         # Sort result by length of each of thier hier_tags (shortest first)
-        results = sorted(results, key = lambda x: len(x.heir_tag.split(".")))
+        results = sorted(
+            results, 
+            key=lambda x: (
+                len(x.heir_tag.split(".")),             # primary: shortest depth first
+                abs(len(x.heir_tag) - len(target_tag))  # tiebreaker: closest length to target
+            )
+        )
+
         return results
 
     def _search_subtrees(
@@ -1083,7 +1090,8 @@ class AsicDseCLI(ParentCLI):
         GeneralCLI(key = "common_asic_flow.flow_stages.sram.run", shortcut = "-sram", datatype = bool, action = "store_true", help_msg = "Flag that must be provided if sram macros exist in design (ASIC-DSE)"),
         GeneralCLI(key = "common_asic_flow.flow_stages.syn.run", shortcut = "-syn", datatype = bool, action = "store_true", help_msg = "Flag to run synthesis"),
         GeneralCLI(key = "common_asic_flow.flow_stages.par.run", shortcut = "-par", datatype = bool, action = "store_true", help_msg = "Flag to run place & route"),
-        GeneralCLI(key = "common_asic_flow.flow_stages.pt.run", shortcut = "-pt", datatype = bool, action = "store_true", help_msg = "Flag to run primetime (timing & power)"),
+        GeneralCLI(key = "common_asic_flow.flow_stages.timing.run", shortcut = "-timing", datatype = bool, action = "store_true", help_msg = "Flag to run static timing analysis"),
+        GeneralCLI(key = "common_asic_flow.flow_stages.power.run", shortcut = "-power", datatype = bool, action = "store_true", help_msg = "Flag to run power analysis"),
         
         # HAMMER FLOW
         # TODO this should really be changed to HammerFlow as its hammer specific
@@ -1437,7 +1445,8 @@ class FlowStages:
             sram: Flow stage during VLSI ASIC flow required if using SRAM macros in design
             syn: Flow stage for synthesis
             par: Flow stage for place & route
-            pt: Flow stage for primetime (static timing analysis & power)
+            timing: Flow stage for static timing analysis
+            power: Flow stage for power analysis 
     """
     build: FlowStage = field(
         default_factory = lambda: FlowStage(
@@ -1455,9 +1464,13 @@ class FlowStages:
         default_factory = lambda: FlowStage(
             tag = "par", run = False, tool = "cadence")
     )
-    pt: FlowStage = field(
+    timing: FlowStage = field(
         default_factory = lambda: FlowStage(
-            tag = "pt", run = False, tool = "synopsys")
+            tag = "timing", run = False, tool = "synopsys")
+    )
+    power: FlowStage = field(
+        default_factory = lambda: FlowStage(
+            tag = "power", run = False, tool = "synopsys")
     )
 
     def init(self, only_parse_flag: bool) -> None:
@@ -1465,27 +1478,31 @@ class FlowStages:
             Initializes:
                 * `syn.run`
                 * `par.run`
-                * `pt.run`
+                * `timing.run`
+                * `power.run`
+
             From dependancies:
                 * `only_parse_flag`
                 * `syn.run`
                 * `par.run`
-                * `pt.run`
+                * `power.run`
 
             Args:
                 only_parse_flag: flag to only parse the design, not run any flow stages
         """
         run_all_flow: bool = not (
-            self.syn.run or self.par.run or self.pt.run
+            self.syn.run or self.par.run or self.timing.run or self.power.run
         ) and not only_parse_flag
         if run_all_flow:
             self.syn.run = True
             self.par.run = True
-            self.pt.run = True
+            self.timing.run = True
+            self.power.run = True
         elif only_parse_flag:
             self.syn.run = False
             self.par.run = False
-            self.pt.run = False
+            self.timing.run = False
+            self.power.run = False
         
 
 @dataclass 
@@ -1595,6 +1612,10 @@ class CommonAsicFlow:
             Args:
                 pdk_name: name of the PDK being used that determines the path to search for db libs
                     from `stdcell_lib.pdk_name`
+
+            Todos:
+                * Find someway to not include sram_db_libs if unnecessary, yet there are situations where you want to include them
+                    even if you do not run the sram generator so for now we include both always.
         """
         if not self.db_libs and pdk_name is not None:
             if self.flow_stages.sram.run:

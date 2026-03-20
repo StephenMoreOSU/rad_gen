@@ -17,6 +17,7 @@ import pytest
 import pandas as pd
 from collections import OrderedDict
 import copy
+import shutil
 
 import json
 import re
@@ -232,7 +233,7 @@ alu_sw_pt_virtuoso_gds_conf_init_tb = conftest.create_rg_fixture(
 def test_alu_sw_pt_virtuoso_gds_conf_init(alu_sw_pt_virtuoso_gds_conf_init_tb: type[rg_ds.MetaDataclass], request: pytest.FixtureRequest):
     tests_common.run_and_verif_conf_init(alu_sw_pt_virtuoso_gds_conf_init_tb)
 
-
+# TODO mark dependancy on the asic flow sw point as the results need to be copied over before running this
 @pytest.mark.alu
 @pytest.mark.asic_flow
 @pytest.mark.gds
@@ -244,10 +245,22 @@ def test_alu_sw_pt_virtuoso_gds(alu_sw_pt_virtuoso_gds_tb: type[rg_ds.MetaDatacl
     """
     if not os.path.exists(alu_sw_pt_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path):
         pytest.skip(f"Path {alu_sw_pt_virtuoso_gds_tb.subtool_args.stdcell_lib__pdk_rundir_path} does not exist")
+    # Copy over results from test_alu_sw_pt_asic_flow
+    # Because this comes from a common parent tb we need to set the manual obj_dir to the new location
+    top_lvl_module: str = os.path.basename(alu_sw_pt_virtuoso_gds_tb.manual_obj_dir)
+    updated_obj_dir: str = tests_common.get_obj_dir_tb(top_lvl_module = top_lvl_module)
+    # if updated obj dir already exists, then we want to do a manual backup before copying over new results, 
+    #   otherwise we may have old results from a previous test run that will mess with our parsing and assertions
+    if os.path.isdir(updated_obj_dir):
+        backup_obj_dpath = f"{updated_obj_dir}_backup_{rg_ds.create_timestamp()}"
+        shutil.move(updated_obj_dir, backup_obj_dpath)
+    shutil.copytree(alu_sw_pt_virtuoso_gds_tb.manual_obj_dir, updated_obj_dir)
+    alu_sw_pt_virtuoso_gds_tb.manual_obj_dir = updated_obj_dir
     tests_common.run_verif_hammer_asic_flow(
         rg_args = alu_sw_pt_virtuoso_gds_tb,
         backup_flag = False,
     )
+
 
 
 

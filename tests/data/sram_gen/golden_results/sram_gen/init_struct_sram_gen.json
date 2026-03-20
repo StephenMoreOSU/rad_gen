@@ -104,8 +104,14 @@
                 "run": true,
                 "tool": "cadence"
             },
-            "pt": {
-                "tag": "pt",
+            "timing": {
+                "tag": "timing",
+                "exec_idx": null,
+                "run": true,
+                "tool": "synopsys"
+            },
+            "power": {
+                "tag": "power",
                 "exec_idx": null,
                 "run": true,
                 "tool": "synopsys"
@@ -202,10 +208,28 @@
                 16,
                 32,
                 64,
-                128
+                128,
+                256,
+                512,
+                1024
             ],
             "depths": [
+                8,
+                12,
+                14,
                 16,
+                17,
+                22,
+                32,
+                34,
+                37,
+                38,
+                39,
+                40,
+                44,
+                46,
+                50,
+                64,
                 128,
                 256,
                 512,
