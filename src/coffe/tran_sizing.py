@@ -3181,10 +3181,15 @@ def print_final_transistor_size(fpga_inst, report_file):
     """
 
     report_file.write("#final sizes\n")
-    for trans in fpga_inst.transistor_sizes:
-        report_file.write(trans + "  =  " + str(fpga_inst.transistor_sizes[trans]) + "\n")
-
+    if fpga_inst.specs.transistor_type == "finfet":
+        for trans in fpga_inst.transistor_sizes:
+            if "ff" in trans:
+                continue
+            report_file.write(trans + "  =  " + str(int(fpga_inst.transistor_sizes[trans])) + "\n")
+    else:
+        for trans in fpga_inst.transistor_sizes:
+            if "ff" in trans:
+                continue
+            report_file.write(trans + "  =  " + str(fpga_inst.transistor_sizes[trans]) + "\n")
     return 
-
-
-        
+ 
