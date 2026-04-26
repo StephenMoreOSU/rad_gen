@@ -40,8 +40,9 @@ elif [ "${PKG_MGR}" == "venv" ]; then
     fi
     # venv creation
     if [ -d "${RAD_GEN_HOME}/rad-gen-venv" ]; then
+        echo "Found existing rad-gen-venv do you wish to override it? [Yy/Nn]:"
+        read yn
         while true; do
-            read -p "Found existing rad-gen-venv do you wish to override it? [Yy/Nn]:" yn
             case $yn in
                 [Yy]* ) break;;
                 [Nn]* ) return 1;;
