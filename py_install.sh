@@ -25,10 +25,12 @@ ENV_INIT=1 # error code
 if [ "${PKG_MGR}" == "conda" ]; then
     # conda env creation
     if [ "${CONDA_ENV_EXISTS}" != "0" ]; then
-        conda env create -f ${RAD_GEN_HOME}/env.yml && \
-            conda deactivate && \
+        conda env create -f "${RAD_GEN_HOME}/conda_env/env.yml" || return
+            if [ -n "$CONDA_DEFAULT_ENV" ]; then
+                conda deactivate || return
+            fi
             conda activate rad-gen-env
-        ENV_INIT=$?
+        ENV_INIT=1
     fi
 elif [ "${PKG_MGR}" == "venv" ]; then
     # exit if venv module not found
@@ -52,18 +54,18 @@ elif [ "${PKG_MGR}" == "venv" ]; then
         python3 -m venv ${RAD_GEN_HOME}/rad-gen-venv && \
             source ${RAD_GEN_HOME}/rad-gen-venv/bin/activate && \
             pip install -r ${RAD_GEN_HOME}/requirements.txt
-        ENV_INIT=$?
+        ENV_INIT=1
     elif [ -f "${RAD_GEN_HOME}/rad-gen-venv/bin/activate" ]; then
         source ${RAD_GEN_HOME}/rad-gen-venv/bin/activate
-        ENV_INIT=$?
+        ENV_INIT=1
     fi
 fi
 
 # Check if hammer already installed
 python3 -m pip show hammer-vlsi > /dev/null
-HAMMER_INSTALLED=$?
+HAMMER_NOT_INSTALLED=$?
 # Install additional dependancies in new env
-if [ "${HAMMER_INSTALLED}" != "0" ] && [ "${ENV_INIT}" == "0" ]; then
+if [ "${HAMMER_NOT_INSTALLED}" == "1" ] && [ "$ENV_INIT" == "1" ]; then
     # Check if dir is empty, means subrepos not initialized...
     if [ -z "$( ls -A $HAMMER_HOME )" ]; then
         git submodule init
