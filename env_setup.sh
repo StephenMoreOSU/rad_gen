@@ -2,15 +2,32 @@
 
 # Adds a path to the specified environment variable
 # If the path is already in the environment variable, it will not be added again
+#pathadd() {
+#    local env_var="$1"
+#    local new_path="$2"
+#
+#    if [ -d "$new_path" ] && [[ ":${!env_var}:" != *":$new_path:"* ]]; then
+#        export "$env_var=${!env_var:+"${!env_var}:"}$new_path"
+#    fi
+#}
 pathadd() {
-    local env_var="$1"
-    local new_path="$2"
+    local env_var=$1
+    local new_path=$2
 
-    if [ -d "$new_path" ] && [[ ":${!env_var}:" != *":$new_path:"* ]]; then
-        export "$env_var=${!env_var:+"${!env_var}:"}$new_path"
+    [ -d "$new_path" ] || return
+
+    if [ -n "$ZSH_VERSION" ]; then
+        current="${(P)env_var}"          # Zsh indirect
+    else
+        current="${!env_var}"            # Bash indirect
     fi
-}
 
+    case ":$current:" in
+        *":$new_path:"*) return ;;
+    esac
+
+    export "$env_var=${current:+$current:}$new_path"
+}
 echo "Activating python environment for RAD-Gen..."
 echo "Make sure this script is running from root of RAD-Gen repo!"
 
