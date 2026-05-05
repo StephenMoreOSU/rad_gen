@@ -22,7 +22,7 @@ CONDA_ENV_EXISTS=$?
 ENV_INIT=1 # error code
 
 
-if [ "${PKG_MGR}" == "conda" ]; then
+if [ "${PKG_MGR}" = "conda" ]; then
     # conda env creation
     if [ "${CONDA_ENV_EXISTS}" != "0" ]; then
         conda env create -f "${RAD_GEN_HOME}/conda_env/env.yml" || return
@@ -32,7 +32,7 @@ if [ "${PKG_MGR}" == "conda" ]; then
             conda activate rad-gen-env
         ENV_INIT=1
     fi
-elif [ "${PKG_MGR}" == "venv" ]; then
+elif [ "${PKG_MGR}" = "venv" ]; then
     # exit if venv module not found
     if [ "${VENV_EXISTS}" != "0" ]; then
         echo "venv module not found. Please install python3 venv"
@@ -50,7 +50,7 @@ elif [ "${PKG_MGR}" == "venv" ]; then
             esac
         done
     fi
-    if [ "${VENV_EXISTS}" == "0" ] && [ "${ENV_INIT}" == "1" ]; then
+    if [ "${VENV_EXISTS}" = "0" ] && [ "${ENV_INIT}" = "1" ]; then
         # Create venv
         python3 -m venv ${RAD_GEN_HOME}/rad-gen-venv && \
             source ${RAD_GEN_HOME}/rad-gen-venv/bin/activate && \
@@ -63,10 +63,11 @@ elif [ "${PKG_MGR}" == "venv" ]; then
 fi
 
 # Check if hammer already installed
-python3 -m pip show hammer-vlsi > /dev/null
+#python3 -m pip show hammer-vlsi > /dev/null
+pip show hammer-vlsi > /dev/null
 HAMMER_NOT_INSTALLED=$?
 # Install additional dependancies in new env
-if [ "${HAMMER_NOT_INSTALLED}" == "1" ] && [ "$ENV_INIT" == "1" ]; then
+if [ "${HAMMER_NOT_INSTALLED}" = "1" ] && [ "$ENV_INIT" = "1" ]; then
     # Check if dir is empty, means subrepos not initialized...
     if [ -z "$( ls -A $HAMMER_HOME )" ]; then
         git submodule init
@@ -74,7 +75,8 @@ if [ "${HAMMER_NOT_INSTALLED}" == "1" ] && [ "$ENV_INIT" == "1" ]; then
     fi
     # Install hammer as editable repo within conda env
     cd $HAMMER_HOME
-    python3 -m pip install -e .
+    #python3 -m pip install -e .
+    pip install -e .
     cd - > /dev/null
 else
     echo "Conda not found. OR system python3 version < 3.9 OR venv module not installed"
