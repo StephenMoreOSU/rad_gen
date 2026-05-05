@@ -27,7 +27,7 @@ echo "Make sure this script is running from root of RAD-Gen repo!"
 PKG_MGR=${1:-"conda"}
 
 if [ "${PKG_MGR}" != "conda" ] && [ "${PKG_MGR}" != "venv" ]; then
-    echo "usage './env_setup.sh conda' or './py_install.sh venv'"
+    echo "usage 'source env_setup.sh conda' or 'source py_install.sh venv'"
     return 1
 fi
 
@@ -96,7 +96,7 @@ while true; do
         # $(which deactivate) && deactivate
 
         echo "Python env not initialized"
-        echo "Do you wish to run the python env install script with ./py_install.sh ${PKG_MGR}? [Yy/Nn]:"
+        echo "Do you wish to run the python env install script with source py_install.sh ${PKG_MGR}? [Yy/Nn]:"
         read yn
         while true; do
             case $yn in

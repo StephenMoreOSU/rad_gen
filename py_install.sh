@@ -3,7 +3,7 @@
 PKG_MGR=${1:-"conda"}
 
 if [ "${PKG_MGR}" != "conda" ] && [ "${PKG_MGR}" != "venv" ]; then
-    echo "usage ./py_install.sh conda or ./py_install.sh venv"
+    echo "usage source py_install.sh conda or source py_install.sh venv"
     return 1
 fi
 
