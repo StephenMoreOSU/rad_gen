@@ -29,7 +29,7 @@ Install
 .. code-block:: bash
 
    $ # Creates conda env or venv environment
-   $ ./py_install.sh
+   $ source py_install.sh [conda|venv]  # Defaults to conda if environment is unspecified 
 
 Activation
 ^^^^^^^^^^^
@@ -37,7 +37,7 @@ Activation
 .. code-block:: bash
 
    $ # Adds modules to PYTHONPATH and activates conda / venv environment
-   $ source env_setup.sh
+   $ source env_setup.sh [conda|venv]  # Defaults to conda if environment is unspecified 
 
 ASAP7 PDK Setup
 ------------------

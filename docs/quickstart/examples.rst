@@ -356,8 +356,10 @@ To perform automatic transistor sizing on a Stratix IV like architecture using t
 .. code-block:: bash
 
    $ # from <RAD_GEN_HOME>
+   $ mkdir -p tests/data/stratix_iv/outputs tests/data/stratix_iv/inputs/checkpoints/part1 tests/data/stratix_iv/inputs/checkpoints/part2
    $ python3 rad_gen.py \
       --override_outputs \
+      --manual_obj_dir tests/data/stratix_iv/outputs \
       --project_name \
       stratix_iv \
       --subtools coffe \
