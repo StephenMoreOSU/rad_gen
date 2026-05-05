@@ -2,14 +2,6 @@
 
 # Adds a path to the specified environment variable
 # If the path is already in the environment variable, it will not be added again
-#pathadd() {
-#    local env_var="$1"
-#    local new_path="$2"
-#
-#    if [ -d "$new_path" ] && [[ ":${!env_var}:" != *":$new_path:"* ]]; then
-#        export "$env_var=${!env_var:+"${!env_var}:"}$new_path"
-#    fi
-#}
 pathadd() {
     local env_var=$1
     local new_path=$2

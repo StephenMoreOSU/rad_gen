@@ -63,7 +63,6 @@ elif [ "${PKG_MGR}" = "venv" ]; then
 fi
 
 # Check if hammer already installed
-#python3 -m pip show hammer-vlsi > /dev/null
 pip show hammer-vlsi > /dev/null
 HAMMER_NOT_INSTALLED=$?
 # Install additional dependancies in new env
@@ -75,7 +74,6 @@ if [ "${HAMMER_NOT_INSTALLED}" = "1" ] && [ "$ENV_INIT" = "1" ]; then
     fi
     # Install hammer as editable repo within conda env
     cd $HAMMER_HOME
-    #python3 -m pip install -e .
     pip install -e .
     cd - > /dev/null
 else
