@@ -356,14 +356,15 @@ To perform automatic transistor sizing on a Stratix IV like architecture using t
 .. code-block:: bash
 
    $ # from <RAD_GEN_HOME>
-   $ mkdir -p tests/data/stratix_iv/outputs tests/data/stratix_iv/inputs/checkpoints/part1 tests/data/stratix_iv/inputs/checkpoints/part2
+   $ mkdir -p tests/data/stratix_iv/outputs
+   $ # mkdir -p tests/data/stratix_iv/inputs/checkpoints/part1 tests/data/stratix_iv/inputs/checkpoints/part2 # This is required if checkpointing is used
    $ python3 rad_gen.py \
       --override_outputs \
       --manual_obj_dir tests/data/stratix_iv/outputs \
       --project_name \
       stratix_iv \
       --subtools coffe \
-      --checkpoint_dpaths tests/data/stratix_iv/inputs/checkpoints/part1 tests/data/stratix_iv/inputs/checkpoints/part2 \
+      # --checkpoint_dpaths tests/data/stratix_iv/inputs/checkpoints/part1 tests/data/stratix_iv/inputs/checkpoints/part2 \  # uncomment this to use checkpointing
       --delay_opt_weight 2 \
       --fpga_arch_conf_path tests/data/stratix_iv/inputs/stratix_iv_rrg.yml \
       --max_iterations 1 \

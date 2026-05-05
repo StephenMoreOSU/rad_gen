@@ -17,25 +17,17 @@ Clone Repository
 We don't do a recursive clone as there are some modules from within hammer that require an NDA.
 
 
-Python Setup
-------------------
+Python Setup and Activation
+----------------------------
 
 The following script will setup the python environment for RAD-Gen.
 Dependencies are (`conda`) OR (`python >= 3.9` AND `venv`). 
 
-Install
-^^^^^^^^
+Sourcing the following script will activate the specified RAD-Gen environment. If the environment is not found, it will install RAD-Gen's environment as specified.
 
 .. code-block:: bash
 
-   $ # Creates conda env or venv environment
-   $ source py_install.sh [conda|venv]  # Defaults to conda if environment is unspecified 
-
-Activation
-^^^^^^^^^^^
-
-.. code-block:: bash
-
+   $ # from <RAD_GEN_HOME>
    $ # Adds modules to PYTHONPATH and activates conda / venv environment
    $ source env_setup.sh [conda|venv]  # Defaults to conda if environment is unspecified 
 
