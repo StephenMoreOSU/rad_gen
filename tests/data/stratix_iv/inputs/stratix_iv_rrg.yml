@@ -60,6 +60,28 @@ fpga_arch_params:
       freq: 40
       metal: 2    # metal RC index
 
+  ###################   TODO UPDATE CODE TO ALLOW USE OF BELOW DEFINITIONS INSTEAD OF RRG ###################
+  sb_muxes:
+    - srcs: {
+        L4: 6,
+        L16: 0
+      }
+      dst: L4
+      size: 12
+      lb_inputs: 6
+    - srcs: {
+        L4: 31,
+        L16: 9
+      }
+      dst: L16
+      size: 40
+      lb_inputs: 0
+
+  cb_muxes:
+    - srcs: {
+        L4: 0.055,
+        L16: 0.055
+      }
 
 
   # Connectivity of each wire type to one another in switch boxes
@@ -85,6 +107,7 @@ fpga_arch_params:
       dst: 1
       Fs: 3
     
+  ###################   TODO UPDATE CODE TO ALLOW USE OF ABOVE DEFINITIONS INSTEAD OF RRG ###################
 
   # Multi Wire Segment related parameters
   # options

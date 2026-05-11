@@ -3082,6 +3082,7 @@ def load_arch_params(filename: str, param_dict: dict) -> dict: #,run_options):
         'rr_graph_fpath': "",
         'Fs_mtx' : {},
         'sb_muxes': {},
+        'cb_muxes': {},
         'Fs': -1,
         'N': -1,
         'K': -1,
