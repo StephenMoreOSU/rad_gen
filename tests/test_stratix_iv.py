@@ -64,9 +64,9 @@ def stratix_iv() -> rg_ds.RadGenArgs:
 
 
 @pytest.fixture
-def stratix_iv_no_rrg() -> rg_ds.RadGenArgs:
+def stratix_iv_sb_muxes() -> rg_ds.RadGenArgs:
     """
-        Returns test args for non-RRG initialization path (using sb_muxes or Fs_mtx)
+        Returns test args for non-RRG initialization using explicit sb_muxes config
     """
     tests_tree: rg_ds.Tree
     tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = tests_common.get_test_info()
@@ -75,22 +75,57 @@ def stratix_iv_no_rrg() -> rg_ds.RadGenArgs:
         f"tests.data.{test_grp_name}.inputs",
         is_hier_tag = True,
     )[0].path
-    # Inputs
+    # Inputs - uses stratix_iv_rrg.yml which has sb_muxes defined
     stratix_iv_fpath = os.path.join(cur_test_input_dpath, "stratix_iv_rrg.yml")
     assert os.path.exists(stratix_iv_fpath), f"Input path {stratix_iv_fpath} does not exist"
 
     coffe_args = rg_ds.CoffeArgs(
         fpga_arch_conf_path = stratix_iv_fpath,
-        rrg_data_dpath = None,  # No RRG data - triggers non-RRG path
+        rrg_data_dpath = None,  # No RRG data - triggers non-RRG path (sb_muxes method)
         max_iterations = 1,
         area_opt_weight = 1,
         delay_opt_weight = 2,
-        pass_through = True,  # Use pass_through to just test initialization
+        # pass_through = True,  # Use pass_through to just test initialization
     )
     rg_args = rg_ds.RadGenArgs(
         override_outputs = True,
-        manual_obj_dir = os.path.join(rg_home,"tests", "data", "stratix_iv", "outputs", "stratix_iv_no_rrg_debug"),
-        project_name = "stratix_iv_no_rrg",
+        manual_obj_dir = os.path.join(rg_home, "tests", "data", "stratix_iv", "outputs", "stratix_iv_sb_muxes_debug"),
+        project_name = "stratix_iv_sb_muxes",
+        subtools = ["coffe"],
+        subtool_args = coffe_args,
+    )
+    tests_common.write_fixture_json(rg_args)
+    return rg_args
+
+
+@pytest.fixture
+def stratix_iv_fs_mtx() -> rg_ds.RadGenArgs:
+    """
+        Returns test args for non-RRG initialization using Fs_mtx config
+    """
+    tests_tree: rg_ds.Tree
+    tests_tree, test_grp_name, test_name, test_out_dpath, rg_home = tests_common.get_test_info()
+
+    cur_test_input_dpath: str = tests_tree.search_subtrees(
+        f"tests.data.{test_grp_name}.inputs",
+        is_hier_tag = True,
+    )[0].path
+    # Inputs - uses stratix_iv_fs_mtx.yml which has only Fs_mtx (no sb_muxes)
+    stratix_iv_fpath = os.path.join(cur_test_input_dpath, "stratix_iv_fs_mtx.yml")
+    assert os.path.exists(stratix_iv_fpath), f"Input path {stratix_iv_fpath} does not exist"
+
+    coffe_args = rg_ds.CoffeArgs(
+        fpga_arch_conf_path = stratix_iv_fpath,
+        rrg_data_dpath = None,  # No RRG data - triggers non-RRG path (Fs_mtx method)
+        max_iterations = 1,
+        area_opt_weight = 1,
+        delay_opt_weight = 2,
+        # pass_through = True,  # Use pass_through to just test initialization
+    )
+    rg_args = rg_ds.RadGenArgs(
+        override_outputs = True,
+        manual_obj_dir = os.path.join(rg_home, "tests", "data", "stratix_iv", "outputs", "stratix_iv_fs_mtx_debug"),
+        project_name = "stratix_iv_fs_mtx",
         subtools = ["coffe"],
         subtool_args = coffe_args,
     )
@@ -99,12 +134,29 @@ def stratix_iv_no_rrg() -> rg_ds.RadGenArgs:
 
 
 @pytest.mark.non_rrg
+@pytest.mark.sb_muxes
 @skip_if_fixtures_only
-def test_stratix_iv_no_rrg(stratix_iv_no_rrg: rg_ds.RadGenArgs, request: pytest.FixtureRequest):
+def test_stratix_iv_sb_muxes(stratix_iv_sb_muxes: rg_ds.RadGenArgs, request: pytest.FixtureRequest):
     """
-        Tests non-RRG initialization path using sb_muxes config
+        Tests non-RRG initialization path using explicit sb_muxes config.
+        This tests Method 1: User specifies sb_muxes directly in YAML.
     """
-    rg_args = copy.deepcopy(stratix_iv_no_rrg)
+    rg_args = copy.deepcopy(stratix_iv_sb_muxes)
+    ret_val = tests_common.run_rad_gen(
+        rg_args,
+        tests_common.get_rg_home(),
+    )
+
+
+@pytest.mark.non_rrg
+@pytest.mark.fs_mtx
+@skip_if_fixtures_only
+def test_stratix_iv_fs_mtx(stratix_iv_fs_mtx: rg_ds.RadGenArgs, request: pytest.FixtureRequest):
+    """
+        Tests non-RRG initialization path using Fs_mtx config.
+        This tests Method 2: SB mux sizes derived from Fs connectivity matrix.
+    """
+    rg_args = copy.deepcopy(stratix_iv_fs_mtx)
     ret_val = tests_common.run_rad_gen(
         rg_args,
         tests_common.get_rg_home(),
