@@ -1,0 +1,98 @@
+# COFFE INPUT FILE - Fs_mtx method test
+# This config uses Fs_mtx for SB mux initialization (no explicit sb_muxes)
+
+#######################################
+##### Architecture Parameters
+#######################################
+fpga_arch_params:
+  # The following parameters are the classic VPR architecture parameters
+  N : 10
+  K : 6
+  W : 300
+  L : 4
+  I : 80
+  Fs : 3
+  Fcin : 0.055
+  Fcout : 0.075
+
+  # Wire types definition
+  wire_types:
+    - name: "L4"
+      len: 4
+      freq: 260
+      metal: 1
+    - name: "L16"
+      len: 16
+      freq: 40
+      metal: 2
+
+  # NO sb_muxes - use Fs_mtx method instead
+
+  # Connectivity of each wire type to one another in switch boxes
+  # This is the Fs_mtx method - derives SB mux sizes from connectivity matrix
+  Fs_mtx:
+    # L4 -> L4
+    - src: 0
+      dst: 0
+      Fs: 3
+    # L4 -> L16
+    - src: 0
+      dst: 1
+      Fs: 0
+    # L16 -> L4
+    - src: 1
+      dst: 0
+      Fs: 3
+    # L16 -> L16
+    - src: 1
+      dst: 1
+      Fs: 3
+
+  # Number of BLE outputs to general routing
+  Or : 2
+
+  # Number of BLE outputs to local routing
+  Ofb : 2
+
+  # Population of local routing MUXes
+  Fclocal : 0.5
+
+  Rsel : c
+  Rfb : c
+
+  use_fluts : True
+  independent_inputs : 0
+
+  enable_carry_chain : 1
+  carry_chain_type : skip
+  FAs_per_flut : 2
+
+  #######################################
+  ##### Process Technology Parameters
+  #######################################
+
+  transistor_type : bulk
+  switch_type : transmission_gate
+
+  vdd : 1.0
+  vsram : 1.1
+  vsram_n : 0.0
+
+  gate_length : 50
+  rest_length_factor : 5
+  min_tran_width : 90
+  trans_diffusion_length : 105
+  min_width_tran_area : 169175
+
+  sram_cell_area : 6
+
+  model_path : third_party/spice_models/45nm_HP.l
+  model_library : 45NM_FINFET_HP
+
+  metal :
+  - [0.00492, 0.00021]
+  - [0.00079, 0.00021]
+  - [0.00079, 0.00021]
+
+  gen_routing_metal_pitch : 280
+  gen_routing_metal_layers : 1

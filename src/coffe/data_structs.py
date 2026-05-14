@@ -1739,6 +1739,7 @@ class Specs:
         self.wire_types:            List[Dict[str, Any]]                = arch_params_dict['wire_types']
         self.Fs_mtx:                List[Dict[str, Any]]                = arch_params_dict['Fs_mtx']
         self.sb_muxes:              List[Dict[str, Any]]                = arch_params_dict['sb_muxes']
+        self.cb_muxes:              List[Dict[str, Any]]                = arch_params_dict['cb_muxes']
         self.I                       = arch_params_dict['I']
         self.Fs                      = arch_params_dict['Fs']
         self.Fcin                    = arch_params_dict['Fcin']

@@ -777,6 +777,42 @@ class FPGA:
                 )
                 self.gen_r_wires[wire_type["name"]] = gen_r_wire
 
+        ######################################
+        ### CREATE CONNECTION BLOCK OBJECT ###
+        ######################################
+        # CB mux size: per-wire-type Fcin from `cb_muxes` config if present, else legacy W * Fcin.
+        # Applies to RRG and non-RRG paths alike; both treat the CB as one mux per `cb_muxes` entry.
+        self.cb_muxes: List[cb_mux_lib.ConnectionBlockMux] = []
+        if self.specs.cb_muxes:
+            for i, cb_conf in enumerate(self.specs.cb_muxes):
+                cb_mux_size_required = int(sum(
+                    self.gen_r_wires[wire_name].freq * fcin
+                    for wire_name, fcin in cb_conf["srcs"].items()
+                ))
+                self.cb_muxes.append(cb_mux_lib.ConnectionBlockMux(
+                    id = i,
+                    required_size = cb_mux_size_required,
+                    num_per_tile = self.specs.I,
+                    use_tgate = self.specs.use_tgate,
+                ))
+        else:
+            # Backward-compat fallback: legacy single-Fcin sizing
+            self.cb_muxes.append(cb_mux_lib.ConnectionBlockMux(
+                id = 0,
+                required_size = int(self.specs.W * self.specs.Fcin),
+                num_per_tile = self.specs.I,
+                use_tgate = self.specs.use_tgate,
+            ))
+        self.cb_mux = c_ds.Block(
+            ckt_defs = self.cb_muxes,
+            total_num_per_tile = sum([cb_mux.num_per_tile for cb_mux in self.cb_muxes])
+        )
+
+        # Per-wire load freq dicts populated by whichever init path runs below.
+        # RRG path fills these from rr_graph mux_stats; non-RRG path fills them uniform.
+        sb_mux_load_freqs: Dict[c_ds.GenRoutingWire, Dict[sb_mux_lib.SwitchBlockMux, int]] = {}
+        cb_mux_load_freqs: Dict[c_ds.GenRoutingWire, Dict[cb_mux_lib.ConnectionBlockMux, int]] = {}
+
         # Parse the rrg_file if its passed in and put results into the specs
         if coffe_info.rrg_data_dpath:
             #   ___  _   ___  ___ ___   ___  ___  _   _ _____ ___ _  _  ___     _     ___ ___   __  __ _   ___  __  ___ _  _ ___ ___  
@@ -957,339 +993,27 @@ class FPGA:
                     use_tgate = self.specs.use_tgate,
                 )
                 self.sb_muxes.append(sb_mux)
-            self.sb_mux = c_ds.Block(
-                ckt_defs = self.sb_muxes,
-                total_num_per_tile = sum([sb_mux.num_per_tile for sb_mux in self.sb_muxes])
-            )
-            ######################################
-            ### CREATE CONNECTION BLOCK OBJECT ###
-            ######################################
-            self.cb_muxes: List[cb_mux_lib.ConnectionBlockMux] = []
-            # Calculate connection block mux size
-            cb_mux_size_required = int(self.specs.W * self.specs.Fcin)
-            num_cb_mux_per_tile = self.specs.I
-            # Initialize the connection block
-            
-            cb_mux = cb_mux_lib.ConnectionBlockMux(
-                id = 0,
-                required_size = cb_mux_size_required,
-                num_per_tile = num_cb_mux_per_tile,
-                use_tgate = self.specs.use_tgate,
-                # self.sb_muxes[0], self.gen_routing_wire_loads[0]
-            )
-            self.cb_muxes.append(cb_mux)
-            self.cb_mux = c_ds.Block(
-                ckt_defs = self.cb_muxes,
-                total_num_per_tile = sum([cb_mux.num_per_tile for cb_mux in self.cb_muxes])
-            )
-            ###########################
-            ### CREATE LOAD OBJECTS ###
-            ###########################
-            # Create Dict holding the % distributions of logic block outputs per mux type
-            #   For each BLE output, what is the chance that its going into each mux type? 
-            ble_sb_mux_load_dist: Dict[sb_mux_lib.SwitchBlockMux, float] = {}
-            ble_sb_mux_load_freq: Dict[sb_mux_lib.SwitchBlockMux, int] = {}
-            sb_mux: sb_mux_lib.SwitchBlockMux
-            for sb_mux in self.sb_muxes:
-                # Check to see if this takes the general_ble_output wire as an input, this means its loading BLEs
-                for src_wire, src_wire_freq in sb_mux.src_wires.items():
-                    # TODO ideally we wouldn't be using the name of a wire to determine if its a BLE output load but fine for now
-                    if src_wire.name == "wire_general_ble_output_load":
-                        ble_sb_mux_load_freq[sb_mux] = src_wire_freq
-                        # Break because we only care about ble output wires
-                        break
-            # Calculate the distribution of BLE outputs per SB Mux
-            for sb_mux, freq in ble_sb_mux_load_freq.items():
-                ble_sb_mux_load_dist[sb_mux] = freq / sum(ble_sb_mux_load_freq.values())
-            # Use the distribution to create the BLE Output Load Circuits
-            self.gen_ble_output_loads: List[gen_r_load_lib.GeneralBLEOutputLoad] = []
-            # TODO bring this to the user level
-            # For now we will pick whatever SB mux has the most BLE outputs as inputs to determine which SB mux should be ON in the load
-            #   And we assume fanout is 1, with a single SB Mux being ON
-            most_likely_on_sb: sb_mux_lib.SwitchBlockMux = max(ble_sb_mux_load_freq, key=ble_sb_mux_load_freq.get)
-            sb_mux_on_assumption_freqs: Dict[sb_mux_lib.SwitchBlockMux, int] = { most_likely_on_sb: 1 }
-            # Even with multiple SB types we will still create a single BLE output load, containing each type of SB Mux that could act as a load
-            ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = gen_r_load_lib.GeneralBLEOutputLoad(
-                id = 0,
-                channel_usage_assumption = constants.CHAN_USAGE_ASSUMPTION,
-                sb_mux_on_assumption_freqs = sb_mux_on_assumption_freqs,
-                sb_mux_load_dist = ble_sb_mux_load_dist
-            )
-            # We still keep to format of having list for every circuit and during simulation doing some user defined sweep (geometric, linear, etc.) over circuit list combos
-            self.gen_ble_output_loads.append(ble_output_load) 
-
-            # Convert fanout information from RRG into a Dict[c_ds.GenRoutingWire, Dict[sb_mux_lib.SwitchBlockMux, Dict[str, int] ] ]
-            # The inner most dict will have keys "freq" and "ISBD"
-
+            # Build per-wire load freq dicts from RRG mux_stats fanout info.
             # TODO implement "ISBD" type metrics from parsing RR_graph data
-            # Stores the frequency of sb_mux loads per type of GenRoutingWire
-            sb_mux_load_freqs: Dict[
-                c_ds.GenRoutingWire, 
-                Dict[sb_mux_lib.SwitchBlockMux, int]
-            ] = {}
-            # Stores the frequency of cb_mux loads per type of GenRoutingWire
-            cb_mux_load_freqs: Dict[
-                c_ds.GenRoutingWire,
-                Dict[cb_mux_lib.ConnectionBlockMux, int]
-            ] = {}
-            # Again assuming 1 gen_r_wire per 1 SB Mux drive type
-            # Iterate over the Muxes driving each general routing wire
             sb_mux: sb_mux_lib.SwitchBlockMux
             for sb_mux in self.sb_muxes:
                 gen_r_wire: c_ds.GenRoutingWire = sb_mux.sink_wire
-                # Using this wire type find the fanout information stored in mux_stats
                 mux_stat: c_ds.MuxWireStatRRG = [mux_stat for mux_stat in mux_stats if mux_stat.wire_type == gen_r_wire.type][0]
-                # This convient line initalizes the dictionary if its empty at sb_mux, and will 
                 sb_mux_load_freqs[gen_r_wire] = {}
                 cb_mux_load_freqs[gen_r_wire] = {}
-                # Iterate over SB Muxes which are driving the muxes loading this gen_r_wire
                 load_info: c_ds.MuxLoadRRG
-                # TODO Look for CB_IPIN loads here
                 for load_info in mux_stat.mux_loads:
-                    # Find in our existing SB muxes which has the same wire_type as the sb_mux_load
                     if load_info.mux_type == "ipin_cblock":
                         # TODO update for multiple CBs
                         cb_mux_load_freqs[gen_r_wire][self.cb_muxes[0]] = load_info.freq
                     else:
-                        # Define the condition which we want to match a unique object with
                         def condition(sb_mux: sb_mux_lib.SwitchBlockMux) -> bool:
                             return sb_mux.sink_wire.type == drv_2_seg_lookup[load_info.mux_type]
                         sb_mux_load: sb_mux_lib.SwitchBlockMux = rg_utils.get_unique_obj(
                             self.sb_muxes,
                             condition,
                         )
-                        # Now we can create the dict entry for this gen_r_wire and sb_mux_load
                         sb_mux_load_freqs[gen_r_wire][sb_mux_load] = load_info.freq
-
-            # Iterate over CB muxes and determine which is capable of having taking each gen_r_wire as an input
-            # Create the Routing Wire Load Objects
-            self.gen_routing_wire_loads: List[gen_r_load_lib.RoutingWireLoad] = []
-            # TODO init a similar input as sb_mux_load_freqs except for cb_mux_load_freqs as current version only requires the cb_mux_load_freqs to have all valid cb_muxes as keys
-            
-            # Connection block mux load freq, TODO make the freq portion accurate and not a stand in, just putting 1 in for now but its not correct OR used
-            # cb_mux_load_freqs: Dict[cb_mux_lib.ConnectionBlockMux, int] = { cb_mux: 1 for cb_mux in self.cb_muxes }
-            gen_r_wire: c_ds.GenRoutingWire
-            cur_id: int = 0
-            for i, gen_r_wire in enumerate(sb_mux_load_freqs.keys()):
-                # Pass all possible terminal SB muxes and create a RoutingWireLoad object for each
-                # Make sure that its a valid terminal SB mux by checking to see if the gen_r_wire is in the SB Mux's src_wires
-                terminal_sb_muxes: List[sb_mux_lib.SwitchBlockMux] = [sb_mux for sb_mux in self.sb_muxes if gen_r_wire in sb_mux.src_wires.keys()] 
-                term_sb_mux: sb_mux_lib.SwitchBlockMux
-                for term_sb_mux in terminal_sb_muxes:
-                    # Create the RoutingWireLoad object
-                    routing_wire_load: gen_r_load_lib.RoutingWireLoad = gen_r_load_lib.RoutingWireLoad(
-                        id = cur_id,
-                        channel_usage_assumption = constants.CHAN_USAGE_ASSUMPTION,
-                        cluster_input_usage_assumption = constants.CLUSTER_INPUT_USAGE_ASSUMPTION,
-                        gen_r_wire = gen_r_wire,
-                        sb_mux_load_freqs = sb_mux_load_freqs[gen_r_wire],
-                        cb_mux_load_freqs = cb_mux_load_freqs[gen_r_wire],
-                        terminal_sb_mux = term_sb_mux,  
-                        terminal_cb_mux = self.cb_muxes[0],         # TODO accomodate multiple types of CBs if they exist    
-                    )
-                    cur_id += 1
-
-                    # Append to the list of RoutingWireLoads
-                    self.gen_routing_wire_loads.append(routing_wire_load)
-
-            ###################################
-            ### CREATE LOGIC CLUSTER OBJECT ###
-            ###################################
-            
-            # Local mux size is (inputs + feedback) * population
-            local_mux_size_required: int = int((self.specs.I + self.specs.num_ble_local_outputs * self.specs.N) * self.specs.Fclocal)
-            num_local_mux_per_tile: int = self.specs.N * (self.specs.K + self.specs.independent_inputs)
-
-            # TODO write what this means, is a param for carry chain
-            inter_wire_length: float = 0.5
-            # TODO make these params
-            self.skip_size: int = 5
-            self.carry_skip_periphery_count: int = 0
-            if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip":
-                self.carry_skip_periphery_count = int(math.floor((self.specs.N * self.specs.FAs_per_flut)/self.skip_size))
-            ##################################
-            ### CREATE CARRY CHAIN OBJECTS ###
-            ##################################
-            self.carry_chains = []
-            self.carry_chain_periphs = []
-            self.carry_chain_muxes = []
-            self.carry_chain_inter_clusters = []
-            if self.specs.enable_carry_chain == 1:
-                carrychainperiph = cc_lib.CarryChainPer(
-                    id = 0,
-                    use_tgate = self.specs.use_tgate,
-                    use_finfet = self.specs.use_finfet, 
-                )
-                self.carry_chain_periphs.append(carrychainperiph)
-                carrychain = cc_lib.CarryChain(
-                    id = 0,
-                    cluster_size = self.specs.N, 
-                    FAs_per_flut = self.specs.FAs_per_flut,
-                    use_finfet = self.specs.use_finfet,
-                    carry_chain_periph = self.carry_chain_periphs[0], # TODO update for multi ckt support
-                )
-                self.carry_chains.append(carrychain)
-                carrychainmux = cc_lib.CarryChainMux(
-                    id = 0,
-                    use_fluts = self.specs.use_fluts,
-                    use_tgate = self.specs.use_tgate,
-                    use_finfet = self.specs.use_finfet, 
-                )
-                self.carry_chain_muxes.append(carrychainmux)
-                carrychaininter = cc_lib.CarryChainInterCluster(
-                    id = 0,
-                    use_finfet = self.specs.use_finfet, 
-                    carry_chain_type = self.specs.carry_chain_type,    
-                    inter_wire_length = inter_wire_length,
-                )
-                self.carry_chain_inter_clusters.append(carrychaininter)
-                if self.specs.carry_chain_type == "skip":
-                    self.carry_chain_skip_muxes = []
-                    self.carry_chain_skip_ands = []
-                    carrychainand = cc_lib.CarryChainSkipAnd(
-                        id = 0,
-                        use_tgate = self.specs.use_tgate,
-                        use_finfet = self.specs.use_finfet, 
-                        carry_chain_type = self.specs.carry_chain_type,    
-                        cluster_size = self.specs.N, 
-                        FAs_per_flut = self.specs.FAs_per_flut,
-                        skip_size = self.skip_size,
-                    )
-                    self.carry_chain_skip_ands.append(carrychainand)
-                    carrychainskipmux = cc_lib.CarryChainSkipMux(
-                        id = 0,
-                        use_tgate = self.specs.use_tgate,
-                        use_finfet = self.specs.use_finfet, 
-                        carry_chain_type = self.specs.carry_chain_type,    
-                    )
-                    self.carry_chain_skip_muxes.append(carrychainskipmux)
-            # Create a list for all Logic Clusters that could exist in device
-            self.logic_clusters: List[lb_lib.LogicCluster] = []
-            # Create a Logic Cluster Object
-            logic_cluster: lb_lib.LogicCluster = lb_lib.LogicCluster(
-                id = 0,
-                # Local Mux Params
-                local_mux_size_required = local_mux_size_required,
-                num_local_mux_per_tile = num_local_mux_per_tile,
-                # Cluster Params
-                cluster_size = self.specs.N,
-                num_lc_inputs = self.specs.I,
-                # BLE Params
-                num_inputs_per_ble = self.specs.K,
-                num_fb_outputs_per_ble = self.specs.num_ble_local_outputs, # Ofb
-                num_gen_outputs_per_ble = self.specs.num_ble_general_outputs, # Or
-                Rsel = self.specs.Rsel,
-                Rfb = self.specs.Rfb,
-
-                enable_carry_chain = self.specs.enable_carry_chain,
-                FAs_per_flut = self.specs.FAs_per_flut,
-                carry_skip_periphery_count = self.carry_skip_periphery_count,
-
-                use_tgate = self.specs.use_tgate,
-                use_finfet = self.specs.use_finfet,
-                use_fluts = self.specs.use_fluts,
-                # Circuit dependancies
-                cc = self.carry_chains[0] if self.specs.enable_carry_chain == 1 else None,
-                cc_mux = self.carry_chain_muxes[0] if self.specs.enable_carry_chain == 1 else None,
-                cc_skip_and = self.carry_chain_skip_ands[0] if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip" else None,
-                cc_skip_mux = self.carry_chain_skip_muxes[0] if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip" else None,
-            )
-            self.logic_clusters.append(logic_cluster)
-            # TODO make these individual instantiations rather than being derived from logic clusters
-            
-            # Local Interconnect
-            self.local_muxes = [
-                lc.local_mux for lc in self.logic_clusters
-            ]
-            self.local_mux = c_ds.Block(
-                ckt_defs = self.local_muxes,
-                total_num_per_tile = sum([lc.num_local_mux_per_tile for lc in self.logic_clusters])
-            )
-            self.local_routing_wire_loads = [
-                lc.local_routing_wire_load for lc in self.logic_clusters
-            ]
-            self.local_ble_output_loads = [ 
-                lc.local_ble_output_load for lc in self.logic_clusters
-            ]
-            # BLE
-            self.local_ble_outputs = [
-                lc.ble.local_output for lc in self.logic_clusters
-            ]
-            self.general_ble_outputs = [
-                lc.ble.general_output for lc in self.logic_clusters
-            ]
-            self.lut_output_loads = [
-                lc.ble.lut_output_load for lc in self.logic_clusters
-            ]
-            self.flut_muxes = [
-                lc.ble.fmux for lc in self.logic_clusters
-            ] 
-            self.flip_flops = [ 
-                lc.ble.ff for lc in self.logic_clusters 
-            ]
-            # LUT
-            self.luts = [
-                lc.ble.lut for lc in self.logic_clusters
-            ]
-            # LUT Inputs & LUT Input Driver & LUT Not input driver
-            self.lut_inputs = defaultdict(list)
-            self.lut_input_drivers = defaultdict(list)
-            self.lut_input_not_drivers = defaultdict(list)
-            for lc in self.logic_clusters:
-                lut_in: lut_lib.LUTInput
-                for lut_in in lc.ble.lut.input_drivers.values():
-                    self.lut_inputs[lut_in.lut_input_key].append(lut_in)
-                    self.lut_input_drivers[lut_in.lut_input_key].append(lut_in.driver)
-                    self.lut_input_not_drivers[lut_in.lut_input_key].append(lut_in.not_driver)
-                            
-            #########################
-            ### CREATE RAM OBJECT ###
-            #########################
-            # TODO update to dataclasses
-            RAM_local_mux_size_required = float(self.specs.ram_local_mux_size)
-            RAM_num_mux_per_tile = (3 + 2*(self.specs.row_decoder_bits + self.specs.col_decoder_bits + self.specs.conf_decoder_bits ) + 2** (self.specs.conf_decoder_bits))
-            # NEW INST
-            # self.RAM = ram_lib.RAM(
-            #     use_tgate = self.specs.use_tgate,
-            #     cspecs = self.specs,
-            #     # SRAM params
-            #     row_decoder_bits = self.specs.row_decoder_bits, 
-            #     col_decoder_bits = self.specs.col_decoder_bits,
-            #     conf_decoder_bits = self.specs.conf_decoder_bits,
-            #     sram_area = self.specs.sram_cell_area * self.specs.min_width_tran_area,
-            #     number_of_banks = self.specs.number_of_banks,
-            #     process_data_filename = self.process_data_filename,
-            #     memory_technology = self.specs.memory_technology,
-            #     read_to_write_ratio = self.specs.read_to_write_ratio,
-            #     # Local Mux Params
-            #     RAM_local_mux_size_required = RAM_local_mux_size_required,
-            #     RAM_num_local_mux_per_tile = RAM_num_mux_per_tile,
-            # )
-            # # Putting BRAM subcircuits into `FPGA` fields
-            # # TODO bring these data structures back into top level of FPGA class to allow for full functionality
-            # self.pgate_output_crossbars = [self.RAM.pgateoutputcrossbar]
-            # self.configurable_decoder_3iis = [self.RAM.configurabledecoder3ii]
-            # self.configurable_decoder_2iis = [self.RAM.configurabledecoder2ii]
-            # self.configurable_decoder_iiis = [self.RAM.configurabledecoderiii]
-
-            # OLD INST
-            self.RAM = ram_lib._RAM(self.specs.row_decoder_bits, self.specs.col_decoder_bits, self.specs.conf_decoder_bits, RAM_local_mux_size_required, 
-                RAM_num_mux_per_tile , self.specs.use_tgate, self.specs.sram_cell_area*self.specs.min_width_tran_area, self.specs.number_of_banks,
-                self.specs.memory_technology, self.specs, self.process_data_filename, self.specs.read_to_write_ratio)
-            self.number_of_banks = self.specs.number_of_banks
-
-            
-            ################################
-            ### CREATE HARD BLOCK OBJECT ###
-            ################################
-            # TODO update to dataclasses
-            self.hardblocklist = []
-            # create hardblocks if the hardblock list is not None
-            if coffe_info.hardblocks != None:
-                # Check to see which mode of asic flow was specified by the user
-                for hb_conf in coffe_info.hardblocks:
-                    hard_block = hb_lib._hard_block(hb_conf, self.specs.use_tgate)
-                    self.hardblocklist.append(hard_block)
 
         elif self.specs.wire_types:
             # NON-RRG INITIALIZATION: Create SB/CB muxes and loads from wire_types config
@@ -1391,265 +1115,227 @@ class FPGA:
             else:
                 raise ValueError("Non-RRG initialization requires either sb_muxes or valid Fs_mtx in config")
 
-            self.sb_mux = c_ds.Block(
-                ckt_defs=self.sb_muxes,
-                total_num_per_tile=sum([sb_mux.num_per_tile for sb_mux in self.sb_muxes])
-            )
-
-            ######################################
-            ### CREATE CONNECTION BLOCK OBJECT ###
-            ######################################
-            self.cb_muxes: List[cb_mux_lib.ConnectionBlockMux] = []
-            # CB mux size from W * Fcin
-            cb_mux_size_required = int(self.specs.W * self.specs.Fcin)
-            num_cb_mux_per_tile = self.specs.I
-
-            cb_mux = cb_mux_lib.ConnectionBlockMux(
-                id=0,
-                required_size=cb_mux_size_required,
-                num_per_tile=num_cb_mux_per_tile,
-                use_tgate=self.specs.use_tgate,
-            )
-            self.cb_muxes.append(cb_mux)
-            self.cb_mux = c_ds.Block(
-                ckt_defs=self.cb_muxes,
-                total_num_per_tile=sum([cb_mux.num_per_tile for cb_mux in self.cb_muxes])
-            )
-
-            ###########################
-            ### CREATE LOAD OBJECTS ###
-            ###########################
-            # For non-RRG methods, create simplified load objects with reasonable defaults
-
-            # BLE Output Load - use uniform distribution across SB mux types
-            ble_sb_mux_load_dist: Dict[sb_mux_lib.SwitchBlockMux, float] = {}
-            ble_sb_mux_load_freq: Dict[sb_mux_lib.SwitchBlockMux, int] = {}
+            # Build per-wire load freq dicts as uniform (no fanout info in non-RRG paths)
             for sb_mux in self.sb_muxes:
-                # Check if this mux takes LB outputs as input
-                for src_wire, src_wire_freq in sb_mux.src_wires.items():
-                    if src_wire.name == "wire_general_ble_output_load":
-                        ble_sb_mux_load_freq[sb_mux] = src_wire_freq
-                        break
+                gen_r_wire = sb_mux.sink_wire
+                sb_mux_load_freqs[gen_r_wire] = {sb: 1 for sb in self.sb_muxes if gen_r_wire in sb.src_wires}
+                cb_mux_load_freqs[gen_r_wire] = {self.cb_muxes[0]: 1}
 
-            # Calculate distribution of BLE outputs per SB Mux
-            if ble_sb_mux_load_freq:
-                total_lb_inputs = sum(ble_sb_mux_load_freq.values())
-                for sb_mux, freq in ble_sb_mux_load_freq.items():
-                    ble_sb_mux_load_dist[sb_mux] = freq / total_lb_inputs
-            else:
-                # Fallback: uniform distribution if no LB inputs defined
-                for sb_mux in self.sb_muxes:
-                    ble_sb_mux_load_dist[sb_mux] = 1.0 / len(self.sb_muxes)
-                    ble_sb_mux_load_freq[sb_mux] = 1
+        # ========================================================================
+        # Shared post-init: Block wrap, load objects, logic cluster, carry chain, RAM, hard blocks
+        # ========================================================================
 
-            # Pick the SB mux with the most BLE outputs as inputs to determine which should be ON
-            most_likely_on_sb: sb_mux_lib.SwitchBlockMux = max(ble_sb_mux_load_freq, key=ble_sb_mux_load_freq.get)
-            sb_mux_on_assumption_freqs: Dict[sb_mux_lib.SwitchBlockMux, int] = {most_likely_on_sb: 1}
+        self.sb_mux = c_ds.Block(
+            ckt_defs = self.sb_muxes,
+            total_num_per_tile = sum([sb_mux.num_per_tile for sb_mux in self.sb_muxes])
+        )
 
-            self.gen_ble_output_loads: List[gen_r_load_lib.GeneralBLEOutputLoad] = []
-            ble_output_load = gen_r_load_lib.GeneralBLEOutputLoad(
-                id=0,
-                channel_usage_assumption=constants.CHAN_USAGE_ASSUMPTION,
-                sb_mux_on_assumption_freqs=sb_mux_on_assumption_freqs,
-                sb_mux_load_dist=ble_sb_mux_load_dist
+        ###########################
+        ### CREATE LOAD OBJECTS ###
+        ###########################
+        # BLE output load: distribution of LB outputs across SB mux types
+        ble_sb_mux_load_dist: Dict[sb_mux_lib.SwitchBlockMux, float] = {}
+        ble_sb_mux_load_freq: Dict[sb_mux_lib.SwitchBlockMux, int] = {}
+        sb_mux: sb_mux_lib.SwitchBlockMux
+        for sb_mux in self.sb_muxes:
+            for src_wire, src_wire_freq in sb_mux.src_wires.items():
+                # TODO ideally we wouldn't be using the name of a wire to determine if its a BLE output load but fine for now
+                if src_wire.name == "wire_general_ble_output_load":
+                    ble_sb_mux_load_freq[sb_mux] = src_wire_freq
+                    break
+        if ble_sb_mux_load_freq:
+            total_lb_inputs = sum(ble_sb_mux_load_freq.values())
+            for sb_mux, freq in ble_sb_mux_load_freq.items():
+                ble_sb_mux_load_dist[sb_mux] = freq / total_lb_inputs
+        else:
+            # Fallback: uniform distribution when no SB mux takes LB outputs as input
+            for sb_mux in self.sb_muxes:
+                ble_sb_mux_load_dist[sb_mux] = 1.0 / len(self.sb_muxes)
+                ble_sb_mux_load_freq[sb_mux] = 1
+        # TODO bring this to the user level
+        # For now we will pick whatever SB mux has the most BLE outputs as inputs to determine which SB mux should be ON in the load
+        most_likely_on_sb: sb_mux_lib.SwitchBlockMux = max(ble_sb_mux_load_freq, key=ble_sb_mux_load_freq.get)
+        sb_mux_on_assumption_freqs: Dict[sb_mux_lib.SwitchBlockMux, int] = { most_likely_on_sb: 1 }
+        self.gen_ble_output_loads: List[gen_r_load_lib.GeneralBLEOutputLoad] = []
+        ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = gen_r_load_lib.GeneralBLEOutputLoad(
+            id = 0,
+            channel_usage_assumption = constants.CHAN_USAGE_ASSUMPTION,
+            sb_mux_on_assumption_freqs = sb_mux_on_assumption_freqs,
+            sb_mux_load_dist = ble_sb_mux_load_dist
+        )
+        self.gen_ble_output_loads.append(ble_output_load)
+
+        # Routing wire loads — one per (gen_r_wire, terminal_sb_mux) pair
+        self.gen_routing_wire_loads: List[gen_r_load_lib.RoutingWireLoad] = []
+        cur_id: int = 0
+        gen_r_wire: c_ds.GenRoutingWire
+        for gen_r_wire in sb_mux_load_freqs.keys():
+            terminal_sb_muxes: List[sb_mux_lib.SwitchBlockMux] = [
+                sb_mux for sb_mux in self.sb_muxes if gen_r_wire in sb_mux.src_wires.keys()
+            ]
+            term_sb_mux: sb_mux_lib.SwitchBlockMux
+            for term_sb_mux in terminal_sb_muxes:
+                routing_wire_load: gen_r_load_lib.RoutingWireLoad = gen_r_load_lib.RoutingWireLoad(
+                    id = cur_id,
+                    channel_usage_assumption = constants.CHAN_USAGE_ASSUMPTION,
+                    cluster_input_usage_assumption = constants.CLUSTER_INPUT_USAGE_ASSUMPTION,
+                    gen_r_wire = gen_r_wire,
+                    sb_mux_load_freqs = sb_mux_load_freqs[gen_r_wire],
+                    cb_mux_load_freqs = cb_mux_load_freqs[gen_r_wire],
+                    terminal_sb_mux = term_sb_mux,
+                    terminal_cb_mux = self.cb_muxes[0],         # TODO accomodate multiple types of CBs if they exist
+                )
+                cur_id += 1
+                self.gen_routing_wire_loads.append(routing_wire_load)
+
+        ###################################
+        ### CREATE LOGIC CLUSTER OBJECT ###
+        ###################################
+        # Local mux size is (inputs + feedback) * population
+        local_mux_size_required: int = int((self.specs.I + self.specs.num_ble_local_outputs * self.specs.N) * self.specs.Fclocal)
+        num_local_mux_per_tile: int = self.specs.N * (self.specs.K + self.specs.independent_inputs)
+
+        # TODO write what this means, is a param for carry chain
+        inter_wire_length: float = 0.5
+        # TODO make these params
+        self.skip_size: int = 5
+        self.carry_skip_periphery_count: int = 0
+        if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip":
+            self.carry_skip_periphery_count = int(math.floor((self.specs.N * self.specs.FAs_per_flut)/self.skip_size))
+
+        ##################################
+        ### CREATE CARRY CHAIN OBJECTS ###
+        ##################################
+        self.carry_chains = []
+        self.carry_chain_periphs = []
+        self.carry_chain_muxes = []
+        self.carry_chain_inter_clusters = []
+        if self.specs.enable_carry_chain == 1:
+            carrychainperiph = cc_lib.CarryChainPer(
+                id = 0,
+                use_tgate = self.specs.use_tgate,
+                use_finfet = self.specs.use_finfet,
             )
-            self.gen_ble_output_loads.append(ble_output_load)
-
-            # Routing Wire Loads - create one per (gen_r_wire, terminal_sb_mux) pair
-            self.gen_routing_wire_loads: List[gen_r_load_lib.RoutingWireLoad] = []
-            cur_id: int = 0
-
-            # Build load frequencies (uniform distribution for non-RRG)
-            sb_load_freqs: Dict[sb_mux_lib.SwitchBlockMux, int] = {sb: 1 for sb in self.sb_muxes}
-            cb_load_freqs: Dict[cb_mux_lib.ConnectionBlockMux, int] = {self.cb_muxes[0]: 1}
-
-            for gen_r_wire in self.gen_r_wires.values():
-                # Find SB muxes that take this wire as input
-                terminal_sb_muxes = [sb for sb in self.sb_muxes if gen_r_wire in sb.src_wires]
-
-                for term_sb in terminal_sb_muxes:
-                    routing_wire_load = gen_r_load_lib.RoutingWireLoad(
-                        id=cur_id,
-                        channel_usage_assumption=constants.CHAN_USAGE_ASSUMPTION,
-                        cluster_input_usage_assumption=constants.CLUSTER_INPUT_USAGE_ASSUMPTION,
-                        gen_r_wire=gen_r_wire,
-                        sb_mux_load_freqs=sb_load_freqs,
-                        cb_mux_load_freqs=cb_load_freqs,
-                        terminal_sb_mux=term_sb,
-                        terminal_cb_mux=self.cb_muxes[0],
-                    )
-                    self.gen_routing_wire_loads.append(routing_wire_load)
-                    cur_id += 1
-
-            ###################################
-            ### CREATE LOGIC CLUSTER OBJECT ###
-            ###################################
-
-            # Local mux size is (inputs + feedback) * population
-            local_mux_size_required: int = int((self.specs.I + self.specs.num_ble_local_outputs * self.specs.N) * self.specs.Fclocal)
-            num_local_mux_per_tile: int = self.specs.N * (self.specs.K + self.specs.independent_inputs)
-
-            # TODO write what this means, is a param for carry chain
-            inter_wire_length: float = 0.5
-            # TODO make these params
-            self.skip_size: int = 5
-            self.carry_skip_periphery_count: int = 0
-            if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip":
-                self.carry_skip_periphery_count = int(math.floor((self.specs.N * self.specs.FAs_per_flut)/self.skip_size))
-
-            ##################################
-            ### CREATE CARRY CHAIN OBJECTS ###
-            ##################################
-            self.carry_chains = []
-            self.carry_chain_periphs = []
-            self.carry_chain_muxes = []
-            self.carry_chain_inter_clusters = []
-            if self.specs.enable_carry_chain == 1:
-                carrychainperiph = cc_lib.CarryChainPer(
-                    id=0,
-                    use_tgate=self.specs.use_tgate,
-                    use_finfet=self.specs.use_finfet,
-                )
-                self.carry_chain_periphs.append(carrychainperiph)
-                carrychain = cc_lib.CarryChain(
-                    id=0,
-                    cluster_size=self.specs.N,
-                    FAs_per_flut=self.specs.FAs_per_flut,
-                    use_finfet=self.specs.use_finfet,
-                    carry_chain_periph=self.carry_chain_periphs[0],
-                )
-                self.carry_chains.append(carrychain)
-                carrychainmux = cc_lib.CarryChainMux(
-                    id=0,
-                    use_fluts=self.specs.use_fluts,
-                    use_tgate=self.specs.use_tgate,
-                    use_finfet=self.specs.use_finfet,
-                )
-                self.carry_chain_muxes.append(carrychainmux)
-                carrychaininter = cc_lib.CarryChainInterCluster(
-                    id=0,
-                    use_finfet=self.specs.use_finfet,
-                    carry_chain_type=self.specs.carry_chain_type,
-                    inter_wire_length=inter_wire_length,
-                )
-                self.carry_chain_inter_clusters.append(carrychaininter)
-                if self.specs.carry_chain_type == "skip":
-                    self.carry_chain_skip_muxes = []
-                    self.carry_chain_skip_ands = []
-                    carrychainand = cc_lib.CarryChainSkipAnd(
-                        id=0,
-                        use_tgate=self.specs.use_tgate,
-                        use_finfet=self.specs.use_finfet,
-                        carry_chain_type=self.specs.carry_chain_type,
-                        cluster_size=self.specs.N,
-                        FAs_per_flut=self.specs.FAs_per_flut,
-                        skip_size=self.skip_size,
-                    )
-                    self.carry_chain_skip_ands.append(carrychainand)
-                    carrychainskipmux = cc_lib.CarryChainSkipMux(
-                        id=0,
-                        use_tgate=self.specs.use_tgate,
-                        use_finfet=self.specs.use_finfet,
-                        carry_chain_type=self.specs.carry_chain_type,
-                    )
-                    self.carry_chain_skip_muxes.append(carrychainskipmux)
-
-            # Create a list for all Logic Clusters that could exist in device
-            self.logic_clusters: List[lb_lib.LogicCluster] = []
-            # Create a Logic Cluster Object
-            logic_cluster: lb_lib.LogicCluster = lb_lib.LogicCluster(
-                id=0,
-                # Local Mux Params
-                local_mux_size_required=local_mux_size_required,
-                num_local_mux_per_tile=num_local_mux_per_tile,
-                # Cluster Params
-                cluster_size=self.specs.N,
-                num_lc_inputs=self.specs.I,
-                # BLE Params
-                num_inputs_per_ble=self.specs.K,
-                num_fb_outputs_per_ble=self.specs.num_ble_local_outputs,  # Ofb
-                num_gen_outputs_per_ble=self.specs.num_ble_general_outputs,  # Or
-                Rsel=self.specs.Rsel,
-                Rfb=self.specs.Rfb,
-
-                enable_carry_chain=self.specs.enable_carry_chain,
-                FAs_per_flut=self.specs.FAs_per_flut,
-                carry_skip_periphery_count=self.carry_skip_periphery_count,
-
-                use_tgate=self.specs.use_tgate,
-                use_finfet=self.specs.use_finfet,
-                use_fluts=self.specs.use_fluts,
-                # Circuit dependencies
-                cc=self.carry_chains[0] if self.specs.enable_carry_chain == 1 else None,
-                cc_mux=self.carry_chain_muxes[0] if self.specs.enable_carry_chain == 1 else None,
-                cc_skip_and=self.carry_chain_skip_ands[0] if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip" else None,
-                cc_skip_mux=self.carry_chain_skip_muxes[0] if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip" else None,
+            self.carry_chain_periphs.append(carrychainperiph)
+            carrychain = cc_lib.CarryChain(
+                id = 0,
+                cluster_size = self.specs.N,
+                FAs_per_flut = self.specs.FAs_per_flut,
+                use_finfet = self.specs.use_finfet,
+                carry_chain_periph = self.carry_chain_periphs[0], # TODO update for multi ckt support
             )
-            self.logic_clusters.append(logic_cluster)
-
-            # Local Interconnect
-            self.local_muxes = [
-                lc.local_mux for lc in self.logic_clusters
-            ]
-            self.local_mux = c_ds.Block(
-                ckt_defs=self.local_muxes,
-                total_num_per_tile=sum([lc.num_local_mux_per_tile for lc in self.logic_clusters])
+            self.carry_chains.append(carrychain)
+            carrychainmux = cc_lib.CarryChainMux(
+                id = 0,
+                use_fluts = self.specs.use_fluts,
+                use_tgate = self.specs.use_tgate,
+                use_finfet = self.specs.use_finfet,
             )
-            self.local_routing_wire_loads = [
-                lc.local_routing_wire_load for lc in self.logic_clusters
-            ]
-            self.local_ble_output_loads = [
-                lc.local_ble_output_load for lc in self.logic_clusters
-            ]
-            # BLE
-            self.local_ble_outputs = [
-                lc.ble.local_output for lc in self.logic_clusters
-            ]
-            self.general_ble_outputs = [
-                lc.ble.general_output for lc in self.logic_clusters
-            ]
-            self.lut_output_loads = [
-                lc.ble.lut_output_load for lc in self.logic_clusters
-            ]
-            self.flut_muxes = [
-                lc.ble.fmux for lc in self.logic_clusters
-            ]
-            self.flip_flops = [
-                lc.ble.ff for lc in self.logic_clusters
-            ]
-            # LUT
-            self.luts = [
-                lc.ble.lut for lc in self.logic_clusters
-            ]
-            # LUT Inputs & LUT Input Driver & LUT Not input driver
-            self.lut_inputs = defaultdict(list)
-            self.lut_input_drivers = defaultdict(list)
-            self.lut_input_not_drivers = defaultdict(list)
-            for lc in self.logic_clusters:
-                lut_in: lut_lib.LUTInput
-                for lut_in in lc.ble.lut.input_drivers.values():
-                    self.lut_inputs[lut_in.lut_input_key].append(lut_in)
-                    self.lut_input_drivers[lut_in.lut_input_key].append(lut_in.driver)
-                    self.lut_input_not_drivers[lut_in.lut_input_key].append(lut_in.not_driver)
+            self.carry_chain_muxes.append(carrychainmux)
+            carrychaininter = cc_lib.CarryChainInterCluster(
+                id = 0,
+                use_finfet = self.specs.use_finfet,
+                carry_chain_type = self.specs.carry_chain_type,
+                inter_wire_length = inter_wire_length,
+            )
+            self.carry_chain_inter_clusters.append(carrychaininter)
+            if self.specs.carry_chain_type == "skip":
+                self.carry_chain_skip_muxes = []
+                self.carry_chain_skip_ands = []
+                carrychainand = cc_lib.CarryChainSkipAnd(
+                    id = 0,
+                    use_tgate = self.specs.use_tgate,
+                    use_finfet = self.specs.use_finfet,
+                    carry_chain_type = self.specs.carry_chain_type,
+                    cluster_size = self.specs.N,
+                    FAs_per_flut = self.specs.FAs_per_flut,
+                    skip_size = self.skip_size,
+                )
+                self.carry_chain_skip_ands.append(carrychainand)
+                carrychainskipmux = cc_lib.CarryChainSkipMux(
+                    id = 0,
+                    use_tgate = self.specs.use_tgate,
+                    use_finfet = self.specs.use_finfet,
+                    carry_chain_type = self.specs.carry_chain_type,
+                )
+                self.carry_chain_skip_muxes.append(carrychainskipmux)
 
-            #########################
-            ### CREATE RAM OBJECT ###
-            #########################
-            RAM_local_mux_size_required = float(self.specs.ram_local_mux_size)
-            RAM_num_mux_per_tile = (3 + 2*(self.specs.row_decoder_bits + self.specs.col_decoder_bits + self.specs.conf_decoder_bits) + 2**(self.specs.conf_decoder_bits))
-            self.RAM = ram_lib._RAM(self.specs.row_decoder_bits, self.specs.col_decoder_bits, self.specs.conf_decoder_bits, RAM_local_mux_size_required,
-                RAM_num_mux_per_tile, self.specs.use_tgate, self.specs.sram_cell_area*self.specs.min_width_tran_area, self.specs.number_of_banks,
-                self.specs.memory_technology, self.specs, self.process_data_filename, self.specs.read_to_write_ratio)
-            self.number_of_banks = self.specs.number_of_banks
+        self.logic_clusters: List[lb_lib.LogicCluster] = []
+        logic_cluster: lb_lib.LogicCluster = lb_lib.LogicCluster(
+            id = 0,
+            # Local Mux Params
+            local_mux_size_required = local_mux_size_required,
+            num_local_mux_per_tile = num_local_mux_per_tile,
+            # Cluster Params
+            cluster_size = self.specs.N,
+            num_lc_inputs = self.specs.I,
+            # BLE Params
+            num_inputs_per_ble = self.specs.K,
+            num_fb_outputs_per_ble = self.specs.num_ble_local_outputs, # Ofb
+            num_gen_outputs_per_ble = self.specs.num_ble_general_outputs, # Or
+            Rsel = self.specs.Rsel,
+            Rfb = self.specs.Rfb,
 
-            ################################
-            ### CREATE HARD BLOCK OBJECT ###
-            ################################
-            self.hardblocklist = []
-            if coffe_info.hardblocks is not None:
-                for hb_conf in coffe_info.hardblocks:
-                    hard_block = hb_lib._hard_block(hb_conf, self.specs.use_tgate)
-                    self.hardblocklist.append(hard_block)
+            enable_carry_chain = self.specs.enable_carry_chain,
+            FAs_per_flut = self.specs.FAs_per_flut,
+            carry_skip_periphery_count = self.carry_skip_periphery_count,
+
+            use_tgate = self.specs.use_tgate,
+            use_finfet = self.specs.use_finfet,
+            use_fluts = self.specs.use_fluts,
+            # Circuit dependancies
+            cc = self.carry_chains[0] if self.specs.enable_carry_chain == 1 else None,
+            cc_mux = self.carry_chain_muxes[0] if self.specs.enable_carry_chain == 1 else None,
+            cc_skip_and = self.carry_chain_skip_ands[0] if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip" else None,
+            cc_skip_mux = self.carry_chain_skip_muxes[0] if self.specs.enable_carry_chain == 1 and self.specs.carry_chain_type == "skip" else None,
+        )
+        self.logic_clusters.append(logic_cluster)
+
+        # Local Interconnect
+        self.local_muxes = [lc.local_mux for lc in self.logic_clusters]
+        self.local_mux = c_ds.Block(
+            ckt_defs = self.local_muxes,
+            total_num_per_tile = sum([lc.num_local_mux_per_tile for lc in self.logic_clusters])
+        )
+        self.local_routing_wire_loads = [lc.local_routing_wire_load for lc in self.logic_clusters]
+        self.local_ble_output_loads = [lc.local_ble_output_load for lc in self.logic_clusters]
+        # BLE
+        self.local_ble_outputs = [lc.ble.local_output for lc in self.logic_clusters]
+        self.general_ble_outputs = [lc.ble.general_output for lc in self.logic_clusters]
+        self.lut_output_loads = [lc.ble.lut_output_load for lc in self.logic_clusters]
+        self.flut_muxes = [lc.ble.fmux for lc in self.logic_clusters]
+        self.flip_flops = [lc.ble.ff for lc in self.logic_clusters]
+        # LUT
+        self.luts = [lc.ble.lut for lc in self.logic_clusters]
+        # LUT Inputs & LUT Input Driver & LUT Not input driver
+        self.lut_inputs = defaultdict(list)
+        self.lut_input_drivers = defaultdict(list)
+        self.lut_input_not_drivers = defaultdict(list)
+        for lc in self.logic_clusters:
+            lut_in: lut_lib.LUTInput
+            for lut_in in lc.ble.lut.input_drivers.values():
+                self.lut_inputs[lut_in.lut_input_key].append(lut_in)
+                self.lut_input_drivers[lut_in.lut_input_key].append(lut_in.driver)
+                self.lut_input_not_drivers[lut_in.lut_input_key].append(lut_in.not_driver)
+
+        #########################
+        ### CREATE RAM OBJECT ###
+        #########################
+        RAM_local_mux_size_required = float(self.specs.ram_local_mux_size)
+        RAM_num_mux_per_tile = (3 + 2*(self.specs.row_decoder_bits + self.specs.col_decoder_bits + self.specs.conf_decoder_bits ) + 2** (self.specs.conf_decoder_bits))
+        self.RAM = ram_lib._RAM(self.specs.row_decoder_bits, self.specs.col_decoder_bits, self.specs.conf_decoder_bits, RAM_local_mux_size_required,
+            RAM_num_mux_per_tile , self.specs.use_tgate, self.specs.sram_cell_area*self.specs.min_width_tran_area, self.specs.number_of_banks,
+            self.specs.memory_technology, self.specs, self.process_data_filename, self.specs.read_to_write_ratio)
+        self.number_of_banks = self.specs.number_of_banks
+
+        ################################
+        ### CREATE HARD BLOCK OBJECT ###
+        ################################
+        self.hardblocklist = []
+        if coffe_info.hardblocks is not None:
+            for hb_conf in coffe_info.hardblocks:
+                hard_block = hb_lib._hard_block(hb_conf, self.specs.use_tgate)
+                self.hardblocklist.append(hard_block)
 
     def generate(self, size_hb_interfaces: bool):
         """ This function generates all SPICE netlists and library files. """

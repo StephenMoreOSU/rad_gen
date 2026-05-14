@@ -38,7 +38,7 @@ def stratix_iv() -> rg_ds.RadGenArgs:
         is_hier_tag = True,
     )[0].path
     # Inputs 
-    stratix_iv_fpath = os.path.join(cur_test_input_dpath, "stratix_iv_rrg.yml")
+    stratix_iv_fpath = os.path.join(cur_test_input_dpath, "stratix_iv.yml")
     assert os.path.exists(stratix_iv_fpath), f"Input path {stratix_iv_fpath} does not exist"
     
     coffe_args = rg_ds.CoffeArgs(
@@ -75,8 +75,8 @@ def stratix_iv_sb_muxes() -> rg_ds.RadGenArgs:
         f"tests.data.{test_grp_name}.inputs",
         is_hier_tag = True,
     )[0].path
-    # Inputs - uses stratix_iv_rrg.yml which has sb_muxes defined
-    stratix_iv_fpath = os.path.join(cur_test_input_dpath, "stratix_iv_rrg.yml")
+    # Inputs - uses stratix_iv.yml which has sb_muxes defined
+    stratix_iv_fpath = os.path.join(cur_test_input_dpath, "stratix_iv.yml")
     assert os.path.exists(stratix_iv_fpath), f"Input path {stratix_iv_fpath} does not exist"
 
     coffe_args = rg_ds.CoffeArgs(
