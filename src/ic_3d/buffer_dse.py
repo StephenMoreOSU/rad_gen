@@ -880,7 +880,7 @@ def parse_sp_output(ic_3d_info: rg_ds.Ic3d, parse_flags: dict, buff_fanout: int,
             header_0 = ic_3d_info.res.wspace_re.split(data_lines[0])  # Extract the column names
             header_1 = ic_3d_info.res.wspace_re.split(data_lines[1])
             header = [ key for key in [header_0[1]] + header_1 if key != ""]
-            df = pd.read_csv(io.StringIO('\n'.join(data_lines)), delim_whitespace=True, skiprows=[0,1], header=None)
+            df = pd.read_csv(io.StringIO('\n'.join(data_lines)), sep=r'\s+', skiprows=[0,1], header=None)
             df.columns = header
             # print(df.columns)
             df[["time"]] = df[["time"]].applymap(lambda x: convert_value(x[:-1], x[-1], ic_3d_info.sp_sim_settings.unit_lookups["time"]))
@@ -1716,7 +1716,7 @@ def parse_spice(res: rg_ds.Regexes, sp_process: rg_ds.SpProcess, parse_flags: Di
                 header_1 = res.wspace_re.split(data_lines[1])
                 # Maybe TODO make it so the field of individual plot columns are captured, the below line assumes they are all the same (maybe thats ok)
                 header = [ key for key in [header_0[1]] + header_1 if key != ""]
-                df = pd.read_csv(io.StringIO('\n'.join(data_lines)), delim_whitespace=True, skiprows=[0,1], header=None)
+                df = pd.read_csv(io.StringIO('\n'.join(data_lines)), sep=r'\s+', skiprows=[0,1], header=None)
                 df.columns = header
                 dfs.append(df)
             if len(dfs) > 0:

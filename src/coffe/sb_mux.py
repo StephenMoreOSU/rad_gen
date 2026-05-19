@@ -192,11 +192,14 @@ class SwitchBlockMuxTB(c_ds.SimTB):
         # Get list of insts which makes up the hier path from the TB to the terminal SB mux driver in the routing wire load
         # TODO make the naming convension for insts consistent or these will break 
         #   (the "_1" at the end of each is currently how we name the insts from top to bottom)
+        # `$` anchors the suffix so wire-load IDs that themselves contain `_1`/`_2`
+        # (e.g. `Xrouting_wire_load_id_2_1`) don't partially match the wrong-side
+        # regex and collapse trig/targ onto the same instance.
         meas_src_r_load_sb_mux_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
-            self.top_insts, 
-            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+            self.top_insts,
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE)
                 for re_str in [
-                    r"routing_wire_load(?:.*)_1",
+                    r"routing_wire_load(?:.*)_1$",
                     r"routing_wire_load_tile_1_(?:.*)", # Makes sure 1 has to be the last char in regex
                     r"sb_mux(?:.*)_on_term",
                     r"sb_mux(?:.*)driver"
@@ -205,10 +208,10 @@ class SwitchBlockMuxTB(c_ds.SimTB):
             []
         )
         meas_sink_r_load_sb_mux_path: List[rg_ds.SpSubCktInst] = sp_parser.rec_find_inst(
-            self.top_insts, 
-            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE) 
+            self.top_insts,
+            [ re.compile(re_str, re.MULTILINE | re.IGNORECASE)
                 for re_str in [
-                    r"routing_wire_load(?:.*)_2",
+                    r"routing_wire_load(?:.*)_2$",
                     r"routing_wire_load_tile_1_(?:.*)",
                     r"sb_mux(?:.*)_on_term"
                 ]

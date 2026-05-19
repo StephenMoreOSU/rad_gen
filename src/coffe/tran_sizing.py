@@ -1077,13 +1077,36 @@ def erf_inverter(
     # inv_tfall_str = ckt_meas["meas_" + inv_name + "_tfall"]
     # inv_trise_str = ckt_meas["meas_" + inv_name + "_trise"]
     
-    # Check if the HSPICE measurement failed. If it did, this might mean that the level
-    # restorers are too strong which messes up one of the transitions. Making the gate
-    # length for the level restorers larger could solve this problem.
-    # Note that it's also possible that something else is causing the failure...
+    # Check if the HSPICE measurement failed. There are two distinct failure modes:
+    #   (a) Every meas_* returned exactly 0 — almost always a malformed .MEAS in the
+    #       generated deck (e.g. TRIG and TARG resolved to the same node, or the
+    #       stimulus didn't transition). Sizing/level-restorer is not the right knob.
+    #   (b) Some measurements are present but the overall set is flagged invalid
+    #       (NaN/"failed"/missing crossings) — typically a level-restorer that is
+    #       too strong to let the affected transition reach supply_v/2, or a sizing
+    #       that doesn't drive the load. Bumping `rest_length_factor` may help.
     if not ckt_meas["valid"][sw_idx]:
-        print("ERROR: HSPICE measurement failed.")
-        print("Consider increasing level-restorers gate length by increasing the 'rest_length_factor' parameter in the input file.")
+        tb_name = (
+            getattr(tbs[sw_idx], "tb_fname", None) or getattr(tbs[sw_idx], "sp_fpath", None) or "?"
+        ) if tbs else "?"
+        meas_vals: List = []
+        for k, v in ckt_meas.items():
+            if not k.startswith("meas_"):
+                continue
+            try:
+                meas_vals.append(float(v[sw_idx]))
+            except (TypeError, ValueError):
+                # "failed" / None / non-numeric — treat as a non-zero (real) failure
+                meas_vals.append(float("nan"))
+        print(f"ERROR: HSPICE measurement failed for testbench '{tb_name}' (inverter '{inv_name}').")
+        print(
+            "Some measurements are present but the result set is invalid (NaN / "
+            "'failed' / missing supply_v/2 crossing). Consider increasing the "
+            "level-restorers' gate length via 'rest_length_factor', or verify the "
+            "current transistor sizing can drive the load to supply_v/2."
+            "Look at meas_* statements in the spice testbenches and make sure they are not showing 0."
+            "If TARG / TRIG statments are set to the same node there will be a transition of 0."
+        )
         exit(1)
 
     # TODO get rid of magic strings
