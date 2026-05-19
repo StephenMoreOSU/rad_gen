@@ -173,6 +173,34 @@ def init_atomic_libs() -> Dict[str, rg_ds.SpSubCkt]:
                 "PSEO" : f"{pfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
                 "PDEO" : f"{pfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
             }
+        ),
+        "nmos_lp_mtj" : rg_ds.SpSubCkt(
+            name = "nmos_lp_mtj",
+            element = "mnfet",
+            ports = mfet_ports,
+            params = {
+                "L" : "gate_length",
+                "M" : "1",
+                "nfin" : f"{nfet_width_param}",
+                "ASEO" : f"{nfet_width_param} * min_tran_width * trans_diffusion_length",
+                "ADEO" : f"{nfet_width_param} * min_tran_width * trans_diffusion_length",
+                "PSEO" : f"{nfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
+                "PDEO" : f"{nfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
+            }
+        ),
+        "pmos_lp_mtj" : rg_ds.SpSubCkt(
+            name = "pmos_lp_mtj",
+            element = "mpfet",
+            ports = mfet_ports,
+            params = {
+                "L" : "gate_length",
+                "M" : "1",
+                "nfin" : f"{pfet_width_param}",
+                "ASEO" : f"{pfet_width_param} * min_tran_width * trans_diffusion_length",
+                "ADEO" : f"{pfet_width_param} * min_tran_width * trans_diffusion_length",
+                "PSEO" : f"{pfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
+                "PDEO" : f"{pfet_width_param} * (min_tran_width + 2 * trans_diffusion_length)",
+            }
         )
     }
     return sp_subckt_atomic_lib

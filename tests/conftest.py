@@ -80,6 +80,7 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
                 data['originalname'] = item.originalname
             data['file'] = item.location[0]
             data['markers'] = [marker.name for marker in item.own_markers]
+            data['fixturenames'] = list(getattr(item, 'fixturenames', []) or [])
             data_list.append(data)
         print(json.dumps(data_list))
         # Remove all items (we don't want to execute the tests)
