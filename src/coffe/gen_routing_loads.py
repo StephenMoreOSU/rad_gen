@@ -585,11 +585,11 @@ class RoutingWireLoad(c_ds.LoadCircuit):
                         if i == 0 and mux_state == "num_on":
                             continue
                         mux_nodes: List[str] = [
-                            f"n_1_cb_{state_str}_{sb_state_idx + 1}",
+                            f"n_1_cb_{state_str}_{cb_state_idx + 1}",
                         ]
                         if "on" in mux_state:
                             mux_nodes.append(
-                                f"n_cb_mux_{state_str}_{sb_state_idx + 1}_hang"
+                                f"n_cb_mux_{state_str}_{cb_state_idx + 1}_hang"
                             )
                         mux_nodes += [
                             f"n_gate",
