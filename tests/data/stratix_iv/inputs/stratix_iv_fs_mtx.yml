@@ -42,7 +42,7 @@ fpga_arch_params:
     # L16 -> L4
     - src: 1
       dst: 0
-      Fs: 3
+      Fs: 1
     # L16 -> L16
     - src: 1
       dst: 1

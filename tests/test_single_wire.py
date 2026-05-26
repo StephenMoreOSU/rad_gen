@@ -43,7 +43,7 @@ def l4_only() -> rg_ds.RadGenArgs:
         rrg_data_dpath=None,  # No RRG data - uses Fs_mtx method
         max_iterations=1,
         area_opt_weight=1,
-        delay_opt_weight=1,
+        delay_opt_weight=2,
         pass_through=True,  # Use pass_through to just test initialization
     )
     rg_args = rg_ds.RadGenArgs(
@@ -79,7 +79,7 @@ def l4_only_full() -> rg_ds.RadGenArgs:
         rrg_data_dpath=None,  # No RRG data - uses Fs_mtx method
         max_iterations=1,
         area_opt_weight=1,
-        delay_opt_weight=1,
+        delay_opt_weight=2,
     )
     rg_args = rg_ds.RadGenArgs(
         override_outputs=True,
@@ -115,7 +115,7 @@ def test_l4_only_full(l4_only_full: rg_ds.RadGenArgs, request: pytest.FixtureReq
     """
         Tests L4-only FPGA full run using Fs_mtx method.
         Runs full COFFE transistor sizing optimization.
-        WARNING: This test takes a long time (30+ hours).
+        WARNING: This test takes a long time (5-10 hours).
     """
     rg_args = copy.deepcopy(l4_only_full)
     ret_val = tests_common.run_rad_gen(
@@ -150,7 +150,7 @@ def l16_only() -> rg_ds.RadGenArgs:
         rrg_data_dpath=None,  # No RRG data - uses Fs_mtx method
         max_iterations=1,
         area_opt_weight=1,
-        delay_opt_weight=1,
+        delay_opt_weight=2,
         pass_through=True,  # Use pass_through to just test initialization
     )
     rg_args = rg_ds.RadGenArgs(
@@ -186,7 +186,7 @@ def l16_only_full() -> rg_ds.RadGenArgs:
         rrg_data_dpath=None,  # No RRG data - uses Fs_mtx method
         max_iterations=1,
         area_opt_weight=1,
-        delay_opt_weight=1,
+        delay_opt_weight=2,
     )
     rg_args = rg_ds.RadGenArgs(
         override_outputs=True,
@@ -222,7 +222,7 @@ def test_l16_only_full(l16_only_full: rg_ds.RadGenArgs, request: pytest.FixtureR
     """
         Tests L16-only FPGA full run using Fs_mtx method.
         Runs full COFFE transistor sizing optimization.
-        WARNING: This test takes a long time (30+ hours).
+        WARNING: This test takes a long time 5-10hrs.
     """
     rg_args = copy.deepcopy(l16_only_full)
     ret_val = tests_common.run_rad_gen(
