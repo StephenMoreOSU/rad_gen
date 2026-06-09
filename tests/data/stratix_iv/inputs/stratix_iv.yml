@@ -229,16 +229,9 @@ fpga_arch_params:
 
   metal : 
   # All wires except the general routing wires are implemented in this layer.
-  # Free45 M1
-  - [0.00492, 0.00021]
-  
-  # General routing wires will be implemented in this layer 
-  # Free45 M4-M6
-  - [0.00079, 0.00021]
-
-  # General routing wires will be implemented in this layer 
-  # Free45 M4-M6
-  - [0.00079, 0.00021]
+  - [0.00543,   0.0002]   # sheet 0.38, w=0.07   (local)
+  - [0.00357,   0.0002]   # sheet 0.25, w=0.07   (intermediate)
+  - [0.00150,   0.0002]   # sheet 0.21, w=0.14   (semi-global)
 
   # If you wanted to, you could define more metal layers by adding more 'metal'
   # statements but, by default, COFFE would not use them because it only uses 2 layers.
