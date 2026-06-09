@@ -35,7 +35,7 @@ PASSTHROUGH_DEBUG_FLAG = False
 BRIEF = 0
 VERBOSE = 1
 DEBUG = 2
-VERBOSITY = DEBUG
+VERBOSITY = VERBOSE
 # Generate a number of hspice simulations of the same circuit with increasing number of parameters
 HSPICE_TESTGEN = False
 HSPICE_SWEEPS = [2**i for i in range(13)]

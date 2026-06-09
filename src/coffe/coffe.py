@@ -118,8 +118,14 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
     # Print out final COFFE report to file
     utils.print_summary(arch_folder, fpga_inst, total_start_time)
 
-    # Print vpr architecure file
-    coffe_vpr.print_vpr_file(fpga_inst, 
-        arch_folder, 
-        coffe_info.fpga_arch_conf["fpga_arch_params"]['enable_bram_module']
-    )
+    # Print vpr architecture file.
+    # Skip if in pass through mode
+    if not args.pass_through:
+        try:
+            coffe_vpr.print_vpr_file(fpga_inst,
+                arch_folder,
+                coffe_info.fpga_arch_conf["fpga_arch_params"]['enable_bram_module']
+            )
+        except Exception as e:
+            print(f"WARNING: skipping VPR architecture file generation ({type(e).__name__}: {e}). "
+                  f"This does not affect the transistor-sizing results.")

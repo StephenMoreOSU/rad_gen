@@ -787,12 +787,19 @@ def check_arch_params (arch_params, filename):
 
     # TODO: Make these error messages more descriptive of that the problem is.
 
-    if arch_params['W'] <= 0:
-        print_error (str(arch_params['W']), "W", filename)
-    if arch_params['L'] <= 0:
-        print_error (str(arch_params['L']), "L", filename)
-    if arch_params['Fs'] <= 0:
-        print_error (str(arch_params['Fs']), "Fs", filename)
+    # Made the classic single-channel params (W, L, Fs) and scalar Fc (Fcin, Fcout) are only required
+    # if wire types are not provided, eh TODO make sure this is actually ok.
+    if not arch_params['wire_types']:
+        if arch_params['W'] <= 0:
+            print_error (str(arch_params['W']), "W", filename)
+        if arch_params['L'] <= 0:
+            print_error (str(arch_params['L']), "L", filename)
+        if arch_params['Fs'] <= 0:
+            print_error (str(arch_params['Fs']), "Fs", filename)
+        if arch_params['Fcin'] <= 0.0 or arch_params['Fcin'] > 1.0:
+            print_error (str(arch_params['Fcin']), "Fcin", filename)
+        if arch_params['Fcout'] <= 0.0 or arch_params['Fcout'] > 1.0 :
+            print_error (str(arch_params['Fcout']), "Fcout", filename)
     if arch_params['N'] <= 0:
         print_error (str(arch_params['N']), "N", filename)
     # We only support 4-LUT, 5-LUT or 6-LUT
@@ -800,10 +807,6 @@ def check_arch_params (arch_params, filename):
         print_error (str(arch_params['K']), "K", filename)
     if arch_params['I'] <= 0:
         print_error (str(arch_params['I']), "I", filename)
-    if arch_params['Fcin'] <= 0.0 or arch_params['Fcin'] > 1.0:
-        print_error (str(arch_params['Fcin']), "Fcin", filename)
-    if arch_params['Fcout'] <= 0.0 or arch_params['Fcout'] > 1.0 :
-        print_error (str(arch_params['Fcout']), "Fcout", filename)
     if arch_params['Or'] <= 0:
         print_error (str(arch_params['Or']), "Or", filename)
     # We currently only support architectures that have local feedback routing. 

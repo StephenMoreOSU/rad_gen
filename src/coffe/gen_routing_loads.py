@@ -56,23 +56,36 @@ class GeneralBLEOutputLoad(c_ds.LoadCircuit):
             
         """
         
-        # Number of tracks in the channel connected to LB opins
-        num_tracks = specs.W
+        if specs.bles:
+            # Per-wire-type Fc_out (Stratix 10): the number of SB muxes of a given type loading a
+            # BLE output is the Fc_out for that mux's sink-wire type times that wire type's channel
+            # frequency.
+            # TODO add multi-BLE support (currently assumes a single BLE type, bles[0]).
+            per_wire_dsts: Dict[str, float] = specs.bles[0]["dsts"]
+            for sb_mux_load in self.sb_mux_load_dist.keys():
+                fc_out: float = per_wire_dsts.get(sb_mux_load.sink_wire.type, 0)
+                load: int = int(fc_out * sb_mux_load.sink_wire.freq)
+                self.sb_load_types[sb_mux_load]["num_on"] = self.sb_mux_on_assumption_freqs.get(sb_mux_load, 0)
+                self.sb_load_types[sb_mux_load]["num_partial"] = int(
+                    load * self.channel_usage_assumption * (1 / sb_mux_load.level1_size)
+                )
+                self.sb_load_types[sb_mux_load]["num_off"] = load - (self.sb_load_types[sb_mux_load]["num_on"] + self.sb_load_types[sb_mux_load]["num_partial"])
+        else:
+            # Legacy scalar path: number of tracks in the channel connected to LB opins is W,
+            # total SB muxes loading the output is Fcout * W, split across SB mux types by load_dist.
+            num_tracks = specs.W
 
-        # Total number of switch block multiplexers connected to cluster output
-        total_load = int(specs.Fcout * num_tracks)
+            # Total number of switch block multiplexers connected to cluster output
+            total_load = int(specs.Fcout * num_tracks)
 
-        # Total On SB muxes connected to cluster output
-        # total_on_sb_muxes = sum(self.sb_mux_on_assumption_freqs.values())
-        
-        # Calculate the number of on, partial, and off SB Mux paths for each SB mux type in sb_mux_load_dist keys
-        for sb_mux_load in self.sb_mux_load_dist.keys():
-            self.sb_load_types[sb_mux_load]["num_on"] = self.sb_mux_on_assumption_freqs.get(sb_mux_load, 0)
-            self.sb_load_types[sb_mux_load]["num_partial"] = int(
-                total_load * self.channel_usage_assumption \
-                    * self.sb_mux_load_dist[sb_mux_load] * (1 / sb_mux_load.level1_size)
-            )
-            self.sb_load_types[sb_mux_load]["num_off"] = total_load - (self.sb_load_types[sb_mux_load]["num_on"] + self.sb_load_types[sb_mux_load]["num_partial"])
+            # Calculate the number of on, partial, and off SB Mux paths for each SB mux type in sb_mux_load_dist keys
+            for sb_mux_load in self.sb_mux_load_dist.keys():
+                self.sb_load_types[sb_mux_load]["num_on"] = self.sb_mux_on_assumption_freqs.get(sb_mux_load, 0)
+                self.sb_load_types[sb_mux_load]["num_partial"] = int(
+                    total_load * self.channel_usage_assumption \
+                        * self.sb_mux_load_dist[sb_mux_load] * (1 / sb_mux_load.level1_size)
+                )
+                self.sb_load_types[sb_mux_load]["num_off"] = total_load - (self.sb_load_types[sb_mux_load]["num_on"] + self.sb_load_types[sb_mux_load]["num_partial"])
 
         # Add up all the SB muxes which were created, used for calculating wire lengths between SB mux loads
         self.total_sb_muxes = sum([sb_mux_info["num_off"] + sb_mux_info["num_partial"] + sb_mux_info["num_on"] for sb_mux_info in self.sb_load_types.values()])
@@ -259,10 +272,13 @@ class RoutingWireLoad(c_ds.LoadCircuit):
 
     def _compute_load(self, specs: c_ds.Specs):
         # Local variables
-        W: int = specs.W
+        # Channel width seen by this wire. A wire-type/RRG-driven architecture (e.g. Stratix 10)
+        # has no single scalar W, so use this wire type's channel frequency. Fall back to the
+        # classic scalar W when it is provided (e.g. Stratix IV) to preserve legacy behavior.
+        W: int = specs.W if (specs.W and specs.W > 0) else self.gen_r_wire.freq
         I: int = specs.I
         L: int = self.gen_r_wire.length
- 
+
         # Get the total number of partial, on, off muxes for each type across all tiles in load
         # SB Mux Budget Calc
         self.sb_load_budgets = defaultdict(lambda: {"num_on": 0, "num_partial": 0, "num_off": 0})
@@ -271,6 +287,10 @@ class RoutingWireLoad(c_ds.LoadCircuit):
             self.sb_load_budgets[sb_load]["num_on"] = self.sb_mux_on_assumption_freqs.get(sb_load, 0)
             self.sb_load_budgets[sb_load]["num_partial"] = int(freq * self.channel_usage_assumption * (1 / sb_load.level1_size))
             self.sb_load_budgets[sb_load]["num_off"] = freq - (self.sb_load_budgets[sb_load]["num_on"] + self.sb_load_budgets[sb_load]["num_partial"])
+            # Clamp to non-negative: small per-wire-type loads can drive num_off below zero.
+            for mux_state in ("num_on", "num_partial", "num_off"):
+                if self.sb_load_budgets[sb_load][mux_state] < 0:
+                    self.sb_load_budgets[sb_load][mux_state] = 0
 
         # Create dict for the target frequency we'd like to achieve for each type of SB mux
         sb_mux_load_targ_dist: Dict[sb_mux_lib.SwitchBlockMux, float] = {
@@ -313,6 +333,11 @@ class RoutingWireLoad(c_ds.LoadCircuit):
                 self.cb_load_budgets[cb_load]["num_on"] = cb_load_on
                 self.cb_load_budgets[cb_load]["num_partial"] = cb_load_partial
                 self.cb_load_budgets[cb_load]["num_off"] = freq - (self.cb_load_budgets[cb_load]["num_on"] + self.cb_load_budgets[cb_load]["num_partial"])
+
+            # Clamp to non-negative: TODO look into why these are sometimes negative
+            for cb_state in ("num_on", "num_partial", "num_off"):
+                if self.cb_load_budgets[cb_load][cb_state] < 0:
+                    self.cb_load_budgets[cb_load][cb_state] = 0
 
             # # Calculate connection block load per tile
             # # We assume that cluster inputs are divided evenly between horizontal and vertical routing channels
