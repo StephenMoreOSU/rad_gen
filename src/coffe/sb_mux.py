@@ -23,6 +23,7 @@ import src.coffe.constants as consts
 class SwitchBlockMux(mux.Mux2Lvl):
     name: str                                       = "sb_mux" # Basename of the Spice subckt, identifies the circuit type itself
     sp_name: str                                = None # Name of the SPICE subckt, Ex. sb_mux_uid_0
+    vpr_name: str | None                        = None # Original VPR switch name for this SB mux, if available
     # This info is not required to create the circuit definition
     src_wires: Dict[Type[c_ds.Wire], int]                         = None # Dict of source wires and the number of mux inputs they occupy
     sink_wire: c_ds.GenRoutingWire                  = None # The sink wire for this mux

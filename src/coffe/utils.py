@@ -536,6 +536,7 @@ def print_vpr_areas(report_file, fpga_inst):
     ipin_mux_size_keys = [key for key in list(fpga_inst.area_dict.keys()) if "ipin_mux_trans_size" in key]
     for ipin_mux_size_key in ipin_mux_size_keys:
         print_and_write(report_file, f"  {ipin_mux_size_key} (connection block mux)".ljust(50) + str(fpga_inst.area_dict[ipin_mux_size_key] / fpga_inst.specs.min_width_tran_area))
+    print_and_write(report_file, f"  cb_buf_size (connection block mux)".ljust(50) + str(fpga_inst.area_dict["cb_buf_size"] / fpga_inst.specs.min_width_tran_area))
     switch_mux_size_keys = [key for key in list(fpga_inst.area_dict.keys()) if "switch_mux" in key]
     for switch_mux_size_key in switch_mux_size_keys:
         print_and_write(report_file, f"  {switch_mux_size_key} (routing switch)".ljust(50) + str(fpga_inst.area_dict[switch_mux_size_key] / fpga_inst.specs.min_width_tran_area))

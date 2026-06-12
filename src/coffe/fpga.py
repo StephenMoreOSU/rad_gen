@@ -769,6 +769,7 @@ class FPGA:
 
         # All general routing wires in the FPGA
         self.gen_r_wires: Dict[str, c_ds.GenRoutingWire] = {}
+        vpr_switch_name_lookup: Dict[str, str] = {}
 
         # Create GenRoutingWire objects from wire_types config (shared by all methods)
         # This is done before RRG check so non-RRG methods can use them
@@ -784,12 +785,15 @@ class FPGA:
                 )
                 self.gen_r_wires[wire_type["name"]] = gen_r_wire
 
+
         ######################################
         ### CREATE CONNECTION BLOCK OBJECT ###
         ######################################
         # CB mux size: per-wire-type Fcin from `cb_muxes` config if present, else legacy W * Fcin.
         # Applies to RRG and non-RRG paths alike; both treat the CB as one mux per `cb_muxes` entry.
         self.cb_muxes: List[cb_mux_lib.ConnectionBlockMux] = []
+        cb_vpr_name: str | None = None
+
         if self.specs.cb_muxes:
             for i, cb_conf in enumerate(self.specs.cb_muxes):
                 cb_mux_size_required = int(sum(
@@ -801,6 +805,7 @@ class FPGA:
                     required_size = cb_mux_size_required,
                     num_per_tile = self.specs.I,
                     use_tgate = self.specs.use_tgate,
+                    vpr_name = cb_vpr_name,
                 ))
         else:
             # Backward-compat fallback: legacy single-Fcin sizing
@@ -855,6 +860,16 @@ class FPGA:
                 )
                 rr_switches.append(rr_sw)
             # drv_type: num_of_this_mux
+
+            for rr_sw in rr_switches:
+                if rr_sw.name is None:
+                    continue
+                key = rr_sw.name.lower()
+                if key not in vpr_switch_name_lookup:
+                    vpr_switch_name_lookup[key] = rr_sw.name
+            cb_vpr_name = vpr_switch_name_lookup.get("ipin_cblock")
+            for cb_mux in self.cb_muxes:
+                cb_mux.vpr_name = cb_vpr_name
 
             rr_wire_stats: List[dict] = rg_utils.read_csv_to_list(wire_stats_fpath)
             
@@ -993,6 +1008,12 @@ class FPGA:
                 # TODO find a better fix for this but RRG was giving like close but not quite enough of the expected SB per tile, so we will use below formula instead
                 num_sb_per_tile: int = int( 4 * sink_wire.freq // (2 * sink_wire.length) )
 
+                drv_type: str | None = seg_2_drv_lookup.get(wire_type)
+                vpr_name: str | None = None
+                if drv_type and drv_type != "lb_opin":
+                    vpr_name = vpr_switch_name_lookup.get(drv_type)
+
+
                 # Required size inferred from src_wires
                 # num_sb_per_tile inferred from sink_wire.num_starting_per_tile -> from RRG
                 sb_mux = sb_mux_lib.SwitchBlockMux(
@@ -1001,6 +1022,7 @@ class FPGA:
                     sink_wire = self.gen_r_wires[wire_type],
                     num_per_tile = num_sb_per_tile,
                     use_tgate = self.specs.use_tgate,
+                    vpr_name = vpr_name,
                 )
                 self.sb_muxes.append(sb_mux)
             # Build per-wire load freq dicts from RRG mux_stats fanout info.
@@ -4308,3 +4330,29 @@ class FPGA:
         print("Core read and write energy: " +str(read_energy) + " and " +str(write_energy))
         print("Core energy per bit: " + str(self.RAM.core_energy))
         print("Peripheral energy per bit: " + str((self.RAM.peripheral_energy_read * self.RAM.read_to_write_ratio + self.RAM.peripheral_energy_write)/ (1 + self.RAM.read_to_write_ratio)))
+
+    def print_vpr_mux_names(self, report_fpath: str):
+
+        report_file = open(report_fpath, 'a')
+
+        utils.print_and_write(report_file, "-------------------------------------------------")
+        utils.print_and_write(report_file, "  VPR SWITCH NAMES (RRG)")
+        utils.print_and_write(report_file, "-------------------------------------------------")
+
+        sb_muxes = self.sb_muxes or []
+        cb_muxes = self.cb_muxes or []
+
+        if not sb_muxes and not cb_muxes:
+            utils.print_and_write(report_file, "  (none)")
+        else:
+            for sb_mux in sb_muxes:
+                sb_label = sb_mux.sp_name or sb_mux.name or "sb_mux"
+                vpr_name = sb_mux.vpr_name or "None"
+                utils.print_and_write(report_file, f"  SB mux {sb_label}: {vpr_name}")
+            for cb_mux in cb_muxes:
+                cb_label = cb_mux.sp_name or cb_mux.name or "cb_mux"
+                vpr_name = cb_mux.vpr_name or "None"
+                utils.print_and_write(report_file, f"  CB mux {cb_label}: {vpr_name}")
+
+        utils.print_and_write(report_file, "")
+        report_file.close()

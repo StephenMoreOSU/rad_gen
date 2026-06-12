@@ -6,3 +6,6 @@
 [submodule "fpga21-scaled-tech"]
 	path = third_party/fpga21-scaled-tech
 	url = git@github.com:StephenMoreOSU/fpga21-scaled-tech.git
+[submodule "third_party/vtr"]
+	path = third_party/vtr
+	url = https://github.com/verilog-to-routing/vtr-verilog-to-routing.git

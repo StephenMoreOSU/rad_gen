@@ -51,6 +51,8 @@ def run_coffe_flow(coffe_info: rg_ds.Coffe):
         run_options = args,
         spice_interface = spice_interface,
     )   # telemetry_file_path
+
+    fpga_inst.print_vpr_mux_names(report_file_path)
     
     ###############################################################
     ## GENERATE FILES
