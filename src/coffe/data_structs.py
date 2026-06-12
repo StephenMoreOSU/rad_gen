@@ -1362,7 +1362,11 @@ class SimTB():
             # Circuit Inst Definitions
             *self.ckt_hdr_lines,
             *[ inst.get_sp_str() for inst in self.top_insts],
-            self.get_node_prints_line(),
+            ## NOTE Re enable for debugging: the .PRINT voltage table dumps every
+            ## transient timestep (1ps) for every sizing-sweep combo into the .lis (10+ GB per
+            ## circuit sweep, with large slow text I/O). Measurements are read from the .mt0,
+            ## not from this table, so it is unnecessary for the sizing flow.
+            # self.get_node_prints_line(),  
             ".END",
         ]
         # Write the SPICE file

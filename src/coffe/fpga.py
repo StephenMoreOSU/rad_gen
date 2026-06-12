@@ -229,12 +229,19 @@ def sim_tbs(
                             tb_meas[tb]['trise'] = trise_tfall_delays
                         # Set valids, if they already exist 
                     elif key == "meas_avg_power":
-                        tb_meas[tb]['power'] += [ float(val) for val in spice_meas[key] ]
+                        # A failed power measurement (e.g. its dependent meas_current failed) is
+                        # defaulted rather than crashing on float("failed"); the combo will be
+                        # rejected via its (also-failed) total trise/tfall validity check above.
+                        tb_meas[tb]['power'] += [ float(val) if val != "failed" else 1 for val in spice_meas[key] ]
                     else:
                         # if its an implicit key we will take all sweep measurement points and append them to the list for this key
-                        # TODO change to allow implicit meas statements to fail if they are not found 
-                        #   (valid delay may still be asserted if the measure statement is unneeded)
-                        tb_meas[tb][key] += [ float(sw_pt_val) for sw_pt_val in spice_meas[key] ]
+                        # An implicit (e.g. per-stage) measure can legitimately fail for marginal
+                        # transistor-sizing combinations in the area/wire sweep (HSPICE writes
+                        # "failed" when a trig/targ threshold is never crossed). Default it instead
+                        # of crashing on float("failed"); combo validity is governed by the total
+                        # trise/tfall above, and these implicit values are not consumed by the
+                        # sizing cost calculation (see tran_sizing.search_ranges).
+                        tb_meas[tb][key] += [ float(sw_pt_val) if sw_pt_val != "failed" else 1 for sw_pt_val in spice_meas[key] ]
         # After this point the trise / tfall delays will be set in tb_meas so we can calculate the max delay
         tb_meas[tb]["valid"] += valid_delays
         tb_meas[tb]["delay"] += [ 

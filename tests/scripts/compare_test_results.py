@@ -25,8 +25,8 @@ RUNS: List[Tuple[str, str, str]] = [
     ("single_wire", "l4_only_full",              "single_wire / L4 (Fs_mtx, N=1)"),
     ("single_wire", "l16_only_full",             "single_wire / L16 (Fs_mtx, N=1)"),
     ("stratix_iv",  "stratix_iv_rrg_debug",      "stratix_iv / RRG"),
-    ("stratix_iv",  "stratix_iv_sb_muxes_debug_2", "stratix_iv / Method 1 (Explicit SB mux definitions)"),
-    ("stratix_iv",  "stratix_iv_fs_mtx_2",   "stratix_iv / Method 2 (Fs Matrix)")
+    ("stratix_iv",  "stratix_iv_sb_muxes_debug", "stratix_iv / Method 1 (Explicit SB mux definitions)"),
+    ("stratix_iv",  "stratix_iv_fs_mtx",   "stratix_iv / Method 2 (Fs Matrix)")
 ]
 
 
