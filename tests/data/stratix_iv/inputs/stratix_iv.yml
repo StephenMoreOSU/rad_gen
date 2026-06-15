@@ -227,13 +227,22 @@ fpga_arch_params:
 
   # Mx and My for F7 node in https://dl.acm.org/doi/pdf/10.1145/3431920.3439300
 
+  #######################################
+  ##### Free45 Metal data — derivation:
+  ##### R = rho_eff(w) / (w*t), FreePDK45 drawn geometry (eda.ncsu.edu Metal Layers table)
+  ##### rho_eff(w) = 2.2 uOhm-cm * (1 + 58nm/w)  (ITRS-style Cu size effect + barrier)
+  ##### C = total (2x coupling + plate + fringe), w=s, AR=2, k=2.5 => ~0.21 fF/um, all layers
+  #######################################
+
   metal : 
   # Free45 M1
   - [0.00492, 0.00021]
   # General routing wires will be implemented in this layer 
   # Free45 M4-M6
   - [0.00079,   0.00021] # L4 metal layer
-  - [0.00079,   0.00021] # L16 metal layer
+  # Free45 hypothetical metal layer 
+  # w/ 2× width and 2× spacing (w = s = 280 nm, t = 280 nm): ρ_eff(280) = 2.66 μΩ·cm -> R = 0.34 Ohm/um)
+  - [0.00034,   0.00021] # L16 metal layer
 
   # If you wanted to, you could define more metal layers by adding more 'metal'
   # statements but, by default, COFFE would not use them because it only uses 2 layers.

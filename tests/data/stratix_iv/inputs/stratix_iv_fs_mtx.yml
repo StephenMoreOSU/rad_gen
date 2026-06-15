@@ -101,7 +101,7 @@ fpga_arch_params:
   # General routing wires will be implemented in this layer 
   # Free45 M4-M6
   - [0.00079,   0.00021] # L4 metal layer
-  - [0.00079,   0.00021] # L16 metal layer
+  - [0.00034,   0.00021] # L16 metal layer
 
   gen_routing_metal_pitch : 280
   gen_routing_metal_layers : 1

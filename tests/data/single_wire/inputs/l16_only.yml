@@ -72,8 +72,8 @@ fpga_arch_params:
   model_library : 45NM_FINFET_HP
 
   metal :
-  - [0.00492, 0.00021]
-  - [0.00079, 0.00021]
+  - [0.00492, 0.00021]   # local metal layer
+  - [0.00034, 0.00021]   # L16 metal layer
 
   gen_routing_metal_pitch : 280
   gen_routing_metal_layers : 1
