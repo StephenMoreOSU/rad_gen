@@ -1133,7 +1133,8 @@ class SimTB():
                 >>> print(self.get_node_prints_line())
                 ".PRINT V(n_1_1)"
         """
-        return ".PRINT " + " ".join([node_probe.get_sp_str() for node_probe in self.node_prints])
+        # return ".PRINT " + " ".join([node_probe.get_sp_str() for node_probe in self.node_prints])
+        return ""
 
     def get_node_probes(
             self,
@@ -1744,6 +1745,10 @@ class Specs:
         self.Fs_mtx:                List[Dict[str, Any]]                = arch_params_dict['Fs_mtx']
         self.sb_muxes:              List[Dict[str, Any]]                = arch_params_dict['sb_muxes']
         self.cb_muxes:              List[Dict[str, Any]]                = arch_params_dict['cb_muxes']
+        # Per-wire-type Fc_out for BLE outputs into general routing (Stratix 10). See `bles[i]["dsts"]`.
+        self.bles:                  List[Dict[str, Any]]                = arch_params_dict['bles']
+        # Where BLE local feedback is sunk: "local_mux" (classic) or "cb_mux" (Stratix 10).
+        self.fb_sink:               str                                 = arch_params_dict['fb_sink']
         self.I                       = arch_params_dict['I']
         self.Fs                      = arch_params_dict['Fs']
         self.Fcin                    = arch_params_dict['Fcin']

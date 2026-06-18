@@ -18,6 +18,7 @@ import src.coffe.utils as utils
 import src.coffe.mux as mux
 
 import src.coffe.sb_mux as sb_mux_lib
+import src.coffe.cb_mux as cb_mux_lib
 import src.coffe.gen_routing_loads as gen_r_load_lib
 import src.coffe.ble as ble_lib
 import src.coffe.lut as lut_lib
@@ -332,8 +333,13 @@ class LocalRoutingWireLoad(c_ds.LoadCircuit):
         assert self.lut_input_usage_assumption is not None, "lut_input_usage_assumption must be set before computing load"
 
         # The first thing we are going to compute is how many local mux inputs are connected to a local routing wire
-        # This is a function of local_mux size, N, K, I and Ofb
-        num_local_routing_wires = specs.I + specs.N * specs.num_ble_local_outputs
+        # This is a function of local_mux size, N, K, I and Ofb.
+        # When BLE feedback sinks to the CB mux (Stratix 10), feedback no longer rides the local
+        # routing wires, so only the cluster inputs (I) are carried by local routing.
+        if specs.fb_sink == "cb_mux":
+            num_local_routing_wires = specs.I
+        else:
+            num_local_routing_wires = specs.I + specs.N * specs.num_ble_local_outputs
         self.mux_inputs_per_wire = self.local_mux.implemented_size * specs.N * specs.K / num_local_routing_wires
         
         # Now we compute how many "on" inputs are connected to each routing wire
@@ -377,6 +383,10 @@ class LocalRoutingWireLoad(c_ds.LoadCircuit):
 class LocalBLEOutputLoad(c_ds.LoadCircuit):
     name: str = "local_ble_output_load"
 
+    # Where BLE local feedback is sunk: "local_mux" (classic) or "cb_mux" (Stratix 10).
+    fb_sink: str = None
+    # If fb_sink == "cb_mux", connect the feedback output through a CB mux on the path of the load.
+    cb_mux: cb_mux_lib.ConnectionBlockMux | None = None
     # Child Subckts
     local_routing_wire_load: LocalRoutingWireLoad = None
     lut_input_driver: lut_lib.LUTInputDriver = None
@@ -385,9 +395,11 @@ class LocalBLEOutputLoad(c_ds.LoadCircuit):
         super().__post_init__()
 
     def generate_local_ble_output_load(self, spice_filename: str) -> List[str]:
+        if self.fb_sink == "cb_mux":
+            assert self.cb_mux is not None, "cb_mux must be set if fb_sink is cb_mux"
         # Open SPICE file for appending
         spice_file = open(spice_filename, 'a')
-        
+
         wire_loc_ble_out_fb = f"wire_local_ble_output_feedback_{self.get_param_str()}"
 
         spice_file.write("******************************************************************************************\n")
@@ -395,7 +407,14 @@ class LocalBLEOutputLoad(c_ds.LoadCircuit):
         spice_file.write("******************************************************************************************\n")
         spice_file.write(f".SUBCKT {self.sp_name} n_in n_gate n_gate_n n_vdd n_gnd\n")
         spice_file.write(f"X{wire_loc_ble_out_fb} n_in n_1_1 wire Rw='{wire_loc_ble_out_fb}_res' Cw='{wire_loc_ble_out_fb}_cap'\n")
-        spice_file.write(f"X{self.local_routing_wire_load.sp_name}_1 n_1_1 n_1_2 n_gate n_gate_n n_vdd n_gnd n_vdd {self.local_routing_wire_load.sp_name}\n")
+        if self.fb_sink == "cb_mux":
+            # Stratix 10: the feedback output drives a CB mux (held ON) before reaching the local
+            # routing wire load. n_1_3 is reused as the CB output so the testbench stays unchanged.
+            local_routing_in_node: str = "n_1_3"
+            spice_file.write(f"X{self.cb_mux.sp_name}_1 n_1_1 n_1_3 n_gate n_gate_n n_vdd n_gnd {self.cb_mux.sp_name}_on\n")
+        else:
+            local_routing_in_node: str = "n_1_1"
+        spice_file.write(f"X{self.local_routing_wire_load.sp_name}_1 {local_routing_in_node} n_1_2 n_gate n_gate_n n_vdd n_gnd n_vdd {self.local_routing_wire_load.sp_name}\n")
         spice_file.write(f"X{self.lut_input_driver.sp_name}_1 n_1_2 n_hang1 vsram vsram_n n_hang2 n_hang3 n_vdd n_gnd {self.lut_input_driver.sp_name}\n\n")
         spice_file.write(".ENDS\n\n\n")
         
@@ -458,6 +477,8 @@ class LogicCluster(c_ds.CompoundCircuit):
     num_gen_outputs_per_ble: int = None # Number of general outputs sent to SBs per BLE (Or)
     Rsel: str = None # Rsel value for the BLEs in this logic cluster
     Rfb: str = None # Rfb value for the BLEs in this logic cluster
+    fb_sink: str = None # Where BLE local feedback is sunk: "local_mux" (classic) or "cb_mux" (Stratix 10)
+    cb_mux: cb_mux_lib.ConnectionBlockMux = None # CB mux if feedback sinks to the CB; passed when fb_sink == "cb_mux"
 
 
     # SizeableCircuits (created in __post_init__) in rough order of input -> outputs
@@ -513,6 +534,8 @@ class LogicCluster(c_ds.CompoundCircuit):
         )
         self.local_ble_output_load = LocalBLEOutputLoad(
             id = 0,
+            fb_sink = self.fb_sink,
+            cb_mux = self.cb_mux,
             local_routing_wire_load = self.local_routing_wire_load,
             lut_input_driver = self.ble.lut.input_drivers["a"].driver, # Pass in the LUT input driver for "a" input
         )
@@ -529,14 +552,14 @@ class LogicCluster(c_ds.CompoundCircuit):
         self.ble.update_area(area_dict, width_dict)
         self.local_mux.update_area(area_dict, width_dict) 
 
-    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], ic_ratio: float, lut_ratio: float, ble_ic_dis: float = None, local_routing_wire_load_length: float = None):
+    def update_wires(self, width_dict: Dict[str, float], wire_lengths: Dict[str, float], wire_layers: Dict[str, int], ic_ratio: float, lut_ratio: float, ble_to_fb_sink_dis: float = None, local_routing_wire_load_length: float = None):
         """ Update wires of things inside the logic cluster. """
-        
+
         # Call wire update functions of member objects.
         self.ble.update_wires(width_dict, wire_lengths, wire_layers, lut_ratio)
         self.local_mux.update_wires(width_dict, wire_lengths, wire_layers, ic_ratio)
         self.local_routing_wire_load.update_wires(width_dict, wire_lengths, wire_layers, local_routing_wire_load_length)
-        self.local_ble_output_load.update_wires(width_dict, wire_lengths, wire_layers, ble_ic_dis)
+        self.local_ble_output_load.update_wires(width_dict, wire_lengths, wire_layers, ble_to_fb_sink_dis)
 
     def generate(self, subcircuits_filename: str, min_tran_width, specs: c_ds.Specs) -> Dict[str, int | float]:
         print("Generating logic cluster")

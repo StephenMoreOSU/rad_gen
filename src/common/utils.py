@@ -3083,6 +3083,8 @@ def load_arch_params(filename: str, param_dict: dict) -> dict: #,run_options):
         'Fs_mtx' : {},
         'sb_muxes': {},
         'cb_muxes': {},
+        'bles': {},
+        'fb_sink': "local_mux",
         'Fs': -1,
         'N': -1,
         'K': -1,

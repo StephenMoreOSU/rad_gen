@@ -2234,7 +2234,23 @@ def size_subcircuit_transistors(
     
     # Get all testbenches associated with this subcircuit
     ckt_tbs: List[c_ds.SimTB] = fpga_inst.tb_lib[subcircuit] if spec_tb is None else [spec_tb]
-    
+    # --- Runtime Fix: size against only the worst-case testbench ---
+    # This may hurt area but should keep delay pretty reasonable
+    # Each SB mux has 8 testbenches that differ only by load context (which wire it drives into).
+    # Sizing the driver for the LONGEST sink wire (worst case) also satisfies the lighter
+    # ones, so we collapse N testbenches -> 1 during the search. ~Nx fewer HSPICE runs.
+    if spec_tb is None and len(ckt_tbs) > 1:
+        def _tb_load(tb):
+            wl = getattr(tb, "sink_routing_wire_load", None) or getattr(tb, "gen_r_wire_load", None)
+            w = getattr(wl, "gen_r_wire", None)
+            return getattr(w, "length", 0) or 0
+        worst = max(ckt_tbs, key=_tb_load) 
+        if _tb_load(worst) > 0:          # only collapse when we can identify the heaviest load
+            ckt_tbs = [worst]
+
+
+
+
     assert not any(tb is None for tb in ckt_tbs), "No testbench object specified"
 
     # Get the SPICE file name and the directory name

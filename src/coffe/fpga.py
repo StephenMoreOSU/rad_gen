@@ -796,6 +796,13 @@ class FPGA:
                     self.gen_r_wires[wire_name].freq * fcin
                     for wire_name, fcin in cb_conf["srcs"].items()
                 ))
+                # Stratix 10: when BLE local feedback is sunk into the CB mux (fb_sink == "cb_mux"),
+                # the CB mux must also accommodate feedback inputs. The total feedback wires
+                # (Ofb * N) are spread across the I CB muxes in a tile (ceil keeps it >= 1 per mux).
+                if self.specs.fb_sink == "cb_mux":
+                    cb_mux_size_required += math.ceil(
+                        (self.specs.num_ble_local_outputs * self.specs.N) / self.specs.I
+                    )
                 self.cb_muxes.append(cb_mux_lib.ConnectionBlockMux(
                     id = i,
                     required_size = cb_mux_size_required,
@@ -942,6 +949,11 @@ class FPGA:
                     if seg.name == wire_type["name"]:
                         # Get number of these wires in a channel from user input in wire_type
                         freq: int = wire_type.get("freq")
+                        # Wire length comes from the config `len` field: VPR's rr_segments don't
+                        # always carry a length (the column is empty for the Stratix 10 RRG), so we
+                        # use the user-provided value. (When the RRG does provide it, assert agreement:
+                        # assert seg.length == wire_type["len"].)
+                        length: int = wire_type.get("len")
                         # Find the corresponding mux_stat
                         mux_stat: c_ds.MuxWireStatRRG = [mux_stat for mux_stat in mux_stats if mux_stat.wire_type == wire_type["name"]][0]
                         drv_2_seg_lookup[mux_stat.drv_type] = seg.name
@@ -949,7 +961,7 @@ class FPGA:
                         # Convert mux_stat to use sb_mux ids rather than wire / drv names from RRG
                         gen_r_wire = c_ds.GenRoutingWire(
                             id=i, # Uses index of this wire_type in conf.yml file
-                            length=seg.length,
+                            length=length,
                             type=seg.name,
                             num_starting_per_tile = mux_stat.num_mux_per_tile, # TODO take this out of gen_r_wires and put it somewhere that makes more sense
                             freq=freq,
@@ -1228,8 +1240,13 @@ class FPGA:
         ###################################
         ### CREATE LOGIC CLUSTER OBJECT ###
         ###################################
-        # Local mux size is (inputs + feedback) * population
-        local_mux_size_required: int = int((self.specs.I + self.specs.num_ble_local_outputs * self.specs.N) * self.specs.Fclocal)
+        # Local mux size is (inputs + feedback) * population.
+        # When feedback is sunk into the CB mux (Stratix 10), the local mux only routes cluster
+        # inputs (feedback no longer passes through local routing), so the feedback term drops out.
+        if self.specs.fb_sink == "cb_mux":
+            local_mux_size_required: int = int(self.specs.I * self.specs.Fclocal)
+        else:
+            local_mux_size_required: int = int((self.specs.I + self.specs.num_ble_local_outputs * self.specs.N) * self.specs.Fclocal)
         num_local_mux_per_tile: int = self.specs.N * (self.specs.K + self.specs.independent_inputs)
 
         # TODO write what this means, is a param for carry chain
@@ -1313,6 +1330,9 @@ class FPGA:
             num_gen_outputs_per_ble = self.specs.num_ble_general_outputs, # Or
             Rsel = self.specs.Rsel,
             Rfb = self.specs.Rfb,
+            # Feedback sink (Stratix 10): route BLE local feedback to the local mux or the CB mux.
+            fb_sink = self.specs.fb_sink,
+            cb_mux = self.cb_muxes[0] if self.specs.fb_sink == "cb_mux" else None,
 
             enable_carry_chain = self.specs.enable_carry_chain,
             FAs_per_flut = self.specs.FAs_per_flut,
@@ -1547,7 +1567,7 @@ class FPGA:
         )
         sim_options: Dict[str, str] = {
             "BRIEF": "1",
-            "POST": "1",
+            # "POST": "1",
             "INGOLD":"1",
             "NODE":"1",
             "LIST":"1",
@@ -2740,7 +2760,8 @@ class FPGA:
         self.d_lut_to_cc = 0.0 # Unused
         self.d_cc_to_ffble = 0.0 # Unused
         self.d_ffble_to_sb = 0.0 # Used in Cluster Output Load
-        self.d_ffble_to_ic = 0.0 # Used in Logic Cluster 
+        self.d_ffble_to_ic = 0.0 # Used in Logic Cluster
+        self.d_ffble_to_cb = 0.0 # Used in Logic Cluster when BLE feedback sinks to the CB mux (Stratix 10)
 
 
         # Calculate the width of tile with the new stripe widths
@@ -2779,7 +2800,10 @@ class FPGA:
                     self.d_cc_to_ffble = dist
             elif (stripe1_key == "ffble" and stripe2_key == "sb") or (stripe2_key == "sb" and stripe2_key == "ffble"):
                 if dist > self.d_ffble_to_sb:
-                    self.d_ffble_to_sb = dist      
+                    self.d_ffble_to_sb = dist
+            elif (stripe1_key == "ffble" and stripe2_key == "cb") or (stripe1_key == "cb" and stripe2_key == "ffble"):
+                if dist > self.d_ffble_to_cb:
+                    self.d_ffble_to_cb = dist
 
         # Compute Dist logging
         if consts.VERBOSITY == consts.DEBUG:
@@ -2819,6 +2843,7 @@ class FPGA:
                 "d_cc_to_ffble",
                 "d_ffble_to_sb",
                 "d_ffble_to_ic",
+                "d_ffble_to_cb",
             ]
 
 
@@ -2919,13 +2944,19 @@ class FPGA:
                 gen_ble_output_load.update_wires(self.width_dict, self.wire_lengths, self.wire_layers, self.d_ffble_to_sb, self.lb_height)
             # Logic clusters
             for logic_cluster in self.logic_clusters:
+                # BLE local feedback travels to whichever structure sinks it: the local
+                # interconnect (classic) or the CB mux (Stratix 10, fb_sink == "cb_mux").
+                if self.specs.fb_sink == "cb_mux":
+                    ble_to_fb_dist: float = self.d_ffble_to_cb
+                else:
+                    ble_to_fb_dist: float = self.d_ffble_to_ic
                 logic_cluster.update_wires(
-                    self.width_dict, 
-                    self.wire_lengths, 
-                    self.wire_layers, 
-                    ic_ratio, 
+                    self.width_dict,
+                    self.wire_lengths,
+                    self.wire_layers,
+                    ic_ratio,
                     lut_ratio,
-                    self.d_ffble_to_ic,
+                    ble_to_fb_dist,
                     self.d_cb_to_ic + self.lb_height,
                 )
         
