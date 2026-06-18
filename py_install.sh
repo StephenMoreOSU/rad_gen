@@ -81,3 +81,14 @@ else
     echo "Please install above dependancies and try again"
     return 1
 fi
+
+if [ ! -d $VTR_HOME/build ] && ["$ENV_INIT" = "1"]; then
+	cd $VTR_HOME
+	git submodule update --init --recursive .
+	pip install -r requirements.txt
+	cd - > /dev/null
+else
+    echo "Conda not found. OR system python3 version < 3.9 OR venv module not installed"
+    echo "Please install above dependancies and try again"
+    return 1
+fi

@@ -854,6 +854,13 @@ class FPGA:
                     c_ds.SwitchRRG
                 )
                 rr_switches.append(rr_sw)
+            vpr_switch_name_lookup: Dict[str, str] = {}
+            for rr_sw in rr_switches:
+                if rr_sw.name is None:
+                    continue
+                key = rr_sw.name.lower()
+                if key not in vpr_switch_name_lookup:
+                    vpr_switch_name_lookup[key] = rr_sw.name
             # drv_type: num_of_this_mux
 
             rr_wire_stats: List[dict] = rg_utils.read_csv_to_list(wire_stats_fpath)
@@ -992,6 +999,10 @@ class FPGA:
                 sink_wire: c_ds.GenRoutingWire = self.gen_r_wires[wire_type]
                 # TODO find a better fix for this but RRG was giving like close but not quite enough of the expected SB per tile, so we will use below formula instead
                 num_sb_per_tile: int = int( 4 * sink_wire.freq // (2 * sink_wire.length) )
+                drv_type: str | None = seg_2_drv_lookup.get(wire_type)
+                vpr_name: str | None = None
+                if drv_type and drv_type != "lb_opin":
+                    vpr_name = vpr_switch_name_lookup.get(drv_type)
 
                 # Required size inferred from src_wires
                 # num_sb_per_tile inferred from sink_wire.num_starting_per_tile -> from RRG
@@ -1001,9 +1012,75 @@ class FPGA:
                     sink_wire = self.gen_r_wires[wire_type],
                     num_per_tile = num_sb_per_tile,
                     use_tgate = self.specs.use_tgate,
+                    vpr_name = vpr_name,
                 )
                 self.sb_muxes.append(sb_mux)
             # Build per-wire load freq dicts from RRG mux_stats fanout info.
+            self.sb_mux = c_ds.Block(
+                ckt_defs = self.sb_muxes,
+                total_num_per_tile = sum([sb_mux.num_per_tile for sb_mux in self.sb_muxes])
+            )
+            ######################################
+            ### CREATE CONNECTION BLOCK OBJECT ###
+            ######################################
+            self.cb_muxes: List[cb_mux_lib.ConnectionBlockMux] = []
+            # Calculate connection block mux size
+            cb_mux_size_required = int(self.specs.W * self.specs.Fcin)
+            num_cb_mux_per_tile = self.specs.I
+            # Initialize the connection block
+            cb_vpr_name: str | None = vpr_switch_name_lookup.get("ipin_cblock")
+            cb_mux = cb_mux_lib.ConnectionBlockMux(
+                id = 0,
+                required_size = cb_mux_size_required,
+                num_per_tile = num_cb_mux_per_tile,
+                use_tgate = self.specs.use_tgate,
+                vpr_name = cb_vpr_name,
+                # self.sb_muxes[0], self.gen_routing_wire_loads[0]
+            )
+            self.cb_muxes.append(cb_mux)
+            self.cb_mux = c_ds.Block(
+                ckt_defs = self.cb_muxes,
+                total_num_per_tile = sum([cb_mux.num_per_tile for cb_mux in self.cb_muxes])
+            )
+            ###########################
+            ### CREATE LOAD OBJECTS ###
+            ###########################
+            # Create Dict holding the % distributions of logic block outputs per mux type
+            #   For each BLE output, what is the chance that its going into each mux type? 
+            ble_sb_mux_load_dist: Dict[sb_mux_lib.SwitchBlockMux, float] = {}
+            ble_sb_mux_load_freq: Dict[sb_mux_lib.SwitchBlockMux, int] = {}
+            sb_mux: sb_mux_lib.SwitchBlockMux
+            for sb_mux in self.sb_muxes:
+                # Check to see if this takes the general_ble_output wire as an input, this means its loading BLEs
+                for src_wire, src_wire_freq in sb_mux.src_wires.items():
+                    # TODO ideally we wouldn't be using the name of a wire to determine if its a BLE output load but fine for now
+                    if src_wire.name == "wire_general_ble_output_load":
+                        ble_sb_mux_load_freq[sb_mux] = src_wire_freq
+                        # Break because we only care about ble output wires
+                        break
+            # Calculate the distribution of BLE outputs per SB Mux
+            for sb_mux, freq in ble_sb_mux_load_freq.items():
+                ble_sb_mux_load_dist[sb_mux] = freq / sum(ble_sb_mux_load_freq.values())
+            # Use the distribution to create the BLE Output Load Circuits
+            self.gen_ble_output_loads: List[gen_r_load_lib.GeneralBLEOutputLoad] = []
+            # TODO bring this to the user level
+            # For now we will pick whatever SB mux has the most BLE outputs as inputs to determine which SB mux should be ON in the load
+            #   And we assume fanout is 1, with a single SB Mux being ON
+            most_likely_on_sb: sb_mux_lib.SwitchBlockMux = max(ble_sb_mux_load_freq, key=ble_sb_mux_load_freq.get)
+            sb_mux_on_assumption_freqs: Dict[sb_mux_lib.SwitchBlockMux, int] = { most_likely_on_sb: 1 }
+            # Even with multiple SB types we will still create a single BLE output load, containing each type of SB Mux that could act as a load
+            ble_output_load: gen_r_load_lib.GeneralBLEOutputLoad = gen_r_load_lib.GeneralBLEOutputLoad(
+                id = 0,
+                channel_usage_assumption = constants.CHAN_USAGE_ASSUMPTION,
+                sb_mux_on_assumption_freqs = sb_mux_on_assumption_freqs,
+                sb_mux_load_dist = ble_sb_mux_load_dist
+            )
+            # We still keep to format of having list for every circuit and during simulation doing some user defined sweep (geometric, linear, etc.) over circuit list combos
+            self.gen_ble_output_loads.append(ble_output_load) 
+
+            # Convert fanout information from RRG into a Dict[c_ds.GenRoutingWire, Dict[sb_mux_lib.SwitchBlockMux, Dict[str, int] ] ]
+            # The inner most dict will have keys "freq" and "ISBD"
+
             # TODO implement "ISBD" type metrics from parsing RR_graph data
             sb_mux: sb_mux_lib.SwitchBlockMux
             for sb_mux in self.sb_muxes:
@@ -3295,6 +3372,33 @@ class FPGA:
         print("")
         print("|------------------------------------------------------------------------------|")
         print("")
+
+
+    def print_vpr_mux_names(self, report_fpath: str):
+
+        report_file = open(report_fpath, 'a')
+
+        utils.print_and_write(report_file, "-------------------------------------------------")
+        utils.print_and_write(report_file, "  VPR SWITCH NAMES (RRG)")
+        utils.print_and_write(report_file, "-------------------------------------------------")
+
+        sb_muxes = self.sb_muxes or []
+        cb_muxes = self.cb_muxes or []
+
+        if not sb_muxes and not cb_muxes:
+            utils.print_and_write(report_file, "  (none)")
+        else:
+            for sb_mux in sb_muxes:
+                sb_label = sb_mux.sp_name or sb_mux.name or "sb_mux"
+                vpr_name = sb_mux.vpr_name or "None"
+                utils.print_and_write(report_file, f"  SB mux {sb_label}: {vpr_name}")
+            for cb_mux in cb_muxes:
+                cb_label = cb_mux.sp_name or cb_mux.name or "cb_mux"
+                vpr_name = cb_mux.vpr_name or "None"
+                utils.print_and_write(report_file, f"  CB mux {cb_label}: {vpr_name}")
+
+        utils.print_and_write(report_file, "")
+        report_file.close()
         
         
     def print_details(self, report_fpath: str):

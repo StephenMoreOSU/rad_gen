@@ -28,6 +28,7 @@ import src.coffe.constants as consts
 @dataclass
 class ConnectionBlockMux(mux.Mux2Lvl):
     name: str                                       = "cb_mux"
+    vpr_name: str | None                        = None # Original VPR switch name for this CB mux, if available
     # src_wires: Dict[Type[c_ds.Wire], int]       = None
     # sink_wire: c_ds.Wire        = None
 
