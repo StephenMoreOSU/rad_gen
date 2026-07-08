@@ -2672,7 +2672,7 @@ def size_bram_ckt(
         
             past_cost = current_cost
             current_cost =  cost_lib.cost_function(
-                cost_lib.get_eval_area(fpga_inst, "global", fpga_inst.cb_mux, 1, 0),
+                cost_lib.get_eval_area(fpga_inst, "global", None, 1, 0),
                 get_current_delay(fpga_inst, 1),
                 area_opt_weight,
                 delay_opt_weight

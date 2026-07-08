@@ -989,13 +989,25 @@ def erf_inverter(sp_path,
 	inv_trise_str = spice_meas["meas_" + inv_name + "_trise"][0]
 	
 	# Check if the HSPICE measurement failed. If it did, this might mean that the level
-	# restorers are too strong which messes up one of the transitions. Making the gate
-	# length for the level restorers larger could solve this problem.
-	# Note that it's also possible that something else is causing the failure...
+	# restorers are too strong which messes up one of the transitions, or that the
+	# inverter is sized too small to drive its load within the simulation window.
+	# Instead of aborting the whole run, skip ERF for this inverter and leave it at the
+	# symmetric (un-balanced) size. The combo will be naturally penalized in cost
+	# evaluation because run_combo / erf_combo also handle "failed" gracefully below.
 	if inv_tfall_str == "failed" or inv_trise_str == "failed":
-		print("ERROR: HSPICE measurement failed.")
-		print("Consider increasing level-restorers gate length by increasing the 'rest_length_factor' parameter in the input file.")
-		exit(1)
+		print("WARNING: HSPICE measurement failed for " + inv_name + " at N=P=" + str(inv_size) + ".")
+		print("  This usually means the inverter is too weak to drive its load,")
+		print("  or that level-restorers are too strong (try increasing 'rest_length_factor').")
+		print("  Leaving " + inv_name + " un-ERFed; this combo will lose to others via cost ranking.")
+		# Keep fpga_inst.transistor_sizes consistent with parameter_dict (already at N=P=inv_size).
+		if not fpga_inst.specs.use_finfet:
+			fpga_inst.transistor_sizes[nmos_name] = inv_size / fpga_inst.specs.min_tran_width
+			fpga_inst.transistor_sizes[pmos_name] = inv_size / fpga_inst.specs.min_tran_width
+		else:
+			fpga_inst.transistor_sizes[nmos_name] = inv_size
+			fpga_inst.transistor_sizes[pmos_name] = inv_size
+		sys.stdout.flush()
+		return
 
 	inv_tfall = float(inv_tfall_str)
 	inv_trise = float(inv_trise_str)
@@ -1115,10 +1127,20 @@ def erf(sp_path,
 			if not circuit_element.startswith("inv_"):
 				continue
 
-			# Get the tfall and trise delays for the inverter from the spice measurements
-			tfall = float(spice_meas["meas_" + circuit_element + "_tfall"][0])
-			trise = float(spice_meas["meas_" + circuit_element + "_trise"][0])
-			erf_error = abs((tfall - trise)/tfall)
+			# Get the tfall and trise delays for the inverter from the spice measurements.
+			# A "failed" value means HSPICE could not measure the .MEAS condition (signal did
+			# not cross supply_v/2 in time). Treat as a large delay so the ERF loop bails out
+			# via ERF_MAX_ITERATIONS rather than crashing in float().
+			tfall_str = spice_meas["meas_" + circuit_element + "_tfall"][0]
+			trise_str = spice_meas["meas_" + circuit_element + "_trise"][0]
+			if tfall_str == "failed" or trise_str == "failed":
+				tfall = 1.0
+				trise = 1.0
+				erf_error = 1.0
+			else:
+				tfall = float(tfall_str)
+				trise = float(trise_str)
+				erf_error = abs((tfall - trise)/tfall)
 	
 			if not fpga_inst.specs.use_finfet :
 				nmos_nm_size = int(parameter_dict[circuit_element + "_nmos"][0]/1e-9)
@@ -1223,14 +1245,18 @@ def run_combo(fpga_inst, sp_path, element_names, combo, erf_ratios, spice_interf
 			parameter_dict[wire_name + "_cap"] = [rc_data[1]*1e-15]
 
 	# Run HSPICE with the current transistor size
-	spice_meas = spice_interface.run(sp_path, parameter_dict)                                           
+	spice_meas = spice_interface.run(sp_path, parameter_dict)
 
-	# run returns a dict of measurements. For each key, we have a list of meaasurements. 
-	# That;s why we add the [0] 
-	# Extract total delay from measurements
-	tfall = float(spice_meas["meas_total_tfall"][0])
-	trise = float(spice_meas["meas_total_trise"][0])
-	
+	# run returns a dict of measurements. For each key, we have a list of meaasurements.
+	# That;s why we add the [0]
+	# Extract total delay from measurements. A "failed" string means HSPICE could not
+	# measure the .MEAS condition; treat as 1.0 so the cost function deprioritizes this
+	# combo instead of crashing.
+	tfall_str = spice_meas["meas_total_tfall"][0]
+	trise_str = spice_meas["meas_total_trise"][0]
+	tfall = 1.0 if tfall_str == "failed" else float(tfall_str)
+	trise = 1.0 if trise_str == "failed" else float(trise_str)
+
 	return tfall, trise
 
 
